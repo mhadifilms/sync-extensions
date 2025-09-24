@@ -1,0 +1,23 @@
+{
+  "name": "ai-metadata-server",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.16.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exiftool-vendored": "^25.0.0",
+    "express": "^4.21.2",
+    "form-data": "^4.0.4",
+    "fs-extra": "^11.2.0",
+    "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
+    "tesseract.js": "^5.0.6",
+    "tmp": "^0.2.3"
+  }
+}

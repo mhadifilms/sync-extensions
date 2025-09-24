@@ -1,0 +1,769 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sync. extension</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { 
+        font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif; 
+        background: #000; 
+        color: #fff; 
+        margin: 0; 
+        padding: 0; 
+        font-size: 14px;
+        line-height: 1.4;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      .container { padding: 20px; }
+      .header { margin-bottom: 20px; }
+      .header h1 { 
+        font-size: 18px; 
+        font-weight: 500; 
+        margin: 0; 
+        text-transform: lowercase;
+      }
+      .tabs { 
+        display: flex; 
+        border-bottom: 1px solid #333; 
+        margin-bottom: 20px; 
+      }
+      .tab { 
+        padding: 12px 16px; 
+        cursor: pointer; 
+        border-bottom: 2px solid transparent;
+        text-transform: lowercase;
+        font-weight: 500;
+      }
+      .tab.active { 
+        border-bottom-color: #fff; 
+      }
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+      .upload-section { margin-bottom: 20px; }
+      .upload-row { 
+        display: flex; 
+        align-items: center; 
+        margin-bottom: 12px; 
+      }
+      .upload-label { 
+        width: 60px; 
+        text-transform: lowercase;
+        font-weight: 500;
+      }
+      .btn { 
+        appearance: none;
+        background: #1a1a1a; 
+        color: #fff; 
+        border: 1px solid #333; 
+        padding: 8px 12px; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        text-transform: lowercase;
+        font-weight: 500;
+      }
+      .btn:hover { background: #2a2a2a; }
+      .btn-primary { background: #fff; color: #000; border-color: #fff; }
+      .btn-primary:hover { background: #f0f0f0; }
+      .btn-danger { background: #2a1a1a; border-color: #553; }
+      .btn-ghost { background: transparent; border-color: #444; color:#aaa; }
+      .jid:hover { text-decoration: underline; }
+      .file-path { 
+        margin-left: 12px; 
+        color: #888; 
+        font-size: 12px;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lipsync-button { 
+        width: 100%;
+        margin-top: 20px;
+      }
+      .lipsync-button:disabled { 
+        background: #333; 
+        color: #666; 
+        cursor: not-allowed; 
+      }
+      .settings-group { margin-bottom: 20px; }
+      .settings-label { 
+        display: block; 
+        margin-bottom: 8px; 
+        text-transform: lowercase;
+        font-weight: 500;
+      }
+      .radio-group { margin-bottom: 12px; }
+      .radio-item { 
+        display: flex; 
+        align-items: center; 
+        margin-bottom: 8px; 
+      }
+      .radio-item input { margin-right: 8px; }
+      .slider-group { margin-bottom: 12px; }
+      .slider { 
+        width: 100%; 
+        margin: 8px 0; 
+      }
+      .checkbox-group { margin-bottom: 12px; }
+      .checkbox-item { 
+        display: flex; 
+        align-items: center; 
+        margin-bottom: 8px; 
+      }
+      .checkbox-item input { margin-right: 8px; }
+      .input-field { 
+        background: #1a1a1a; 
+        color: #fff; 
+        border: 1px solid #333; 
+        padding: 8px 12px; 
+        border-radius: 4px; 
+        width: 100%; 
+        margin-top: 8px;
+      }
+      .history-item { 
+        background: #1a1a1a; 
+        border: 1px solid #333; 
+        padding: 12px; 
+        margin-bottom: 8px; 
+        border-radius: 4px; 
+      }
+      .history-status { 
+        font-size: 12px; 
+        margin-bottom: 4px; 
+        text-transform: uppercase;
+      }
+      .history-status.completed { color: #4ade80; }
+      .history-status.processing { color: #fbbf24; }
+      .history-status.failed { color: #f87171; }
+      .history-actions { 
+        margin-top: 8px; 
+        display: flex; 
+        gap: 8px; 
+      }
+      .history-button { 
+        background: #333; 
+        color: #fff; 
+        border: 1px solid #444; 
+        padding: 6px 12px; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        font-size: 12px;
+        text-transform: lowercase;
+      }
+      .history-button:hover { background: #444; }
+    </style>
+    <script src="lib/CSInterface.js"></script>
+  </head>
+  <body>
+    <div id="debugBanner" style="background:#7c3aed;color:#fff;padding:6px 10px;font-size:12px;text-align:center;">DEBUG: repo build 0.2.8 — backend fixed + save/insert</div>
+    <div class="container">
+      <div class="header">
+          <h1>sync. extension</h1>
+        </div>
+      
+      <div class="tabs">
+        <div class="tab active" onclick="showTab('sources')">sources</div>
+        <div class="tab" onclick="showTab('history')">history</div>
+        <div class="tab" onclick="showTab('settings')">settings</div>
+      </div>
+      
+      <div id="sources" class="tab-content active">
+        <div class="upload-section">
+          <div class="upload-row">
+            <div class="upload-label">video</div>
+            <button class="btn" onclick="selectVideo()">upload</button>
+            <div class="file-path" id="videoPath">no file selected</div>
+          </div>
+          <div class="upload-row">
+            <div class="upload-label">audio</div>
+            <button class="btn" onclick="selectAudio()">upload</button>
+            <div class="file-path" id="audioPath">no file selected</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn btn-primary lipsync-button" id="lipsyncBtn" onclick="startLipsync()" disabled style="flex:1;">
+            lipsync
+          </button>
+          <button class="history-button btn-ghost" id="clearBtn" onclick="clearSelection()" style="height:40px; align-self:stretch; display:none;">clear</button>
+          <div id="postActions" style="display:none; gap:8px;">
+            <button class="history-button" id="saveBtn" onclick="saveOutput()">save</button>
+            <button class="history-button" id="insertBtn" onclick="insertOutput()">insert at playhead</button>
+          </div>
+        </div>
+        <div id="lipsyncStatus" style="margin-top:8px;font-size:12px;color:#888;"></div>
+        <div id="preview" style="margin-top:12px;"></div>
+        </div>
+
+      <div id="history" class="tab-content">
+        <div id="historyList">
+          <div style="color: #666; text-align: center; padding: 20px;">
+            no generations yet
+          </div>
+        </div>
+        </div>
+
+      <div id="settings" class="tab-content">
+        <div class="settings-group">
+          <label class="settings-label">model</label>
+          <div class="radio-group" id="modelGroup">
+            <div class="radio-item">
+              <input type="radio" name="model" value="lipsync-2-pro" id="lipsync2pro" checked>
+              <label for="lipsync2pro">lipsync-2-pro</label>
+            </div>
+            <div class="radio-item">
+              <input type="radio" name="model" value="lipsync-2" id="lipsync2">
+              <label for="lipsync2">lipsync-2</label>
+            </div>
+            <div class="radio-item">
+              <input type="radio" name="model" value="lipsync-1.9.0-beta" id="lipsync19">
+              <label for="lipsync19">lipsync-1.9.0-beta</label>
+            </div>
+          </div>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">temperature</label>
+          <input type="range" class="slider" id="temperature" min="0" max="1" step="0.1" value="0.7">
+          <div style="font-size: 12px; color: #666; text-align: center;" id="tempValue">0.7</div>
+            </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">save location</label>
+          <div class="radio-group">
+            <div class="radio-item">
+              <input type="radio" name="saveLocation" value="project" id="saveProject" checked>
+              <label for="saveProject">per project folder (sync. outputs)</label>
+            </div>
+            <div class="radio-item">
+              <input type="radio" name="saveLocation" value="documents" id="saveDocuments">
+              <label for="saveDocuments">universal folder in ~/Documents</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="checkbox-group">
+            <div class="checkbox-item">
+              <input type="checkbox" id="activeSpeakerOnly">
+              <label for="activeSpeakerOnly">lipsync only active speaker</label>
+            </div>
+            <div class="checkbox-item">
+              <input type="checkbox" id="detectObstructions">
+              <label for="detectObstructions">detect obstructions</label>
+            </div>
+          </div>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">api key</label>
+          <input type="password" class="input-field" id="apiKey" placeholder="enter your sync.so api key">
+        </div>
+          </div>
+        </div>
+    
+    <script>
+      let cs = null;
+      let selectedVideo = null;
+      let selectedAudio = null;
+      let jobs = [];
+      
+      // Helper to call JSX with JSON payload and parse JSON response
+      function evalExtendScript(fn, payload) {
+        if (!cs) cs = new CSInterface();
+        return new Promise((resolve) => {
+          const arg = JSON.stringify(payload || {});
+          cs.evalScript(`${fn}(${JSON.stringify(arg)})`, function(res){
+            let out = null;
+            try { out = (typeof res === 'string') ? JSON.parse(res) : res; } catch(_) {}
+            if (!out || typeof out !== 'object' || out.ok === undefined) {
+              // Fallback: treat raw string as a selected path
+              if (res && typeof res === 'string' && res.indexOf('/') !== -1) {
+                resolve({ ok: true, path: res });
+                return;
+              }
+              resolve({ ok:false, error: String(res || 'no response') });
+              return;
+            }
+            resolve(out);
+          });
+        });
+      }
+
+      // Single inline ExtendScript picker (no host dependency)
+      function openFileDialog(kind) {
+        if (!cs) cs = new CSInterface();
+        var es = "(function(){try{"+
+          "var kind='" + (typeof kind==='string'?kind:'video') + "';"+
+          "var allow = (kind==='audio') ? {wav:1,mp3:1,aac:1,aif:1,aiff:1,m4a:1} : {mov:1,mp4:1,mxf:1,mkv:1,avi:1,m4v:1,mpg:1,mpeg:1};"+
+          "var fn=function(f){try{if(f instanceof Folder) return true; var n=(f&&f.name)?String(f.name).toLowerCase():''; var i=n.lastIndexOf('.'); if(i<0) return true; var ext=n.substring(i+1); return allow[ext]===1;}catch(e){return true;}};"+
+          "var file = File.openDialog('Select ' + kind + ' file', fn);"+
+          "if (file && file.exists) { return file.fsName; } return '';"+
+        "}catch(e){return ''}})()";
+        return new Promise(function(resolve){ cs.evalScript(es, function(res){ resolve(res || ''); }); });
+      }
+      
+      function showTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+          tab.classList.remove('active');
+        });
+        document.querySelectorAll('.tab').forEach(tab => {
+          tab.classList.remove('active');
+        });
+        
+        // Show selected tab
+        document.getElementById(tabName).classList.add('active');
+        document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
+      }
+      
+      async function selectVideo() {
+        try {
+          var statusEl = document.getElementById('lipsyncStatus');
+          try { statusEl.textContent = 'opening video picker…'; } catch(_){ }
+          const raw = await openFileDialog('video');
+          if (raw && raw.indexOf('/') !== -1) {
+            selectedVideo = raw;
+            document.getElementById('videoPath').textContent = raw.split('/').pop();
+            updateLipsyncButton();
+            renderInputPreview();
+            try { statusEl.textContent = ''; } catch(_){ }
+          } else {
+            console.warn('No video selected');
+            try { statusEl.textContent = 'no video selected'; } catch(_){ }
+          }
+        } catch (_) { console.warn('Video select failed'); }
+      }
+      
+      async function selectAudio() {
+        try {
+          var statusEl = document.getElementById('lipsyncStatus');
+          try { statusEl.textContent = 'opening audio picker…'; } catch(_){ }
+          const raw = await openFileDialog('audio');
+          if (raw && raw.indexOf('/') !== -1) {
+            selectedAudio = raw;
+            document.getElementById('audioPath').textContent = raw.split('/').pop();
+            updateLipsyncButton();
+            renderInputPreview();
+            try { statusEl.textContent = ''; } catch(_){ }
+          } else {
+            console.warn('No audio selected');
+            try { statusEl.textContent = 'no audio selected'; } catch(_){ }
+          }
+        } catch (_) { console.warn('Audio select failed'); }
+      }
+      
+      function updateLipsyncButton() {
+        const btn = document.getElementById('lipsyncBtn');
+        if (selectedVideo && selectedAudio) {
+          btn.disabled = false;
+        } else {
+          btn.disabled = true;
+        }
+      }
+      
+      async function startLipsync() {
+        if (!selectedVideo || !selectedAudio) return;
+        
+        const btn = document.getElementById('lipsyncBtn');
+        btn.disabled = true;
+        btn.textContent = 'generating...';
+        document.getElementById('clearBtn').style.display = 'inline-block';
+        const statusEl = document.getElementById('lipsyncStatus');
+        statusEl.textContent = 'starting backend...';
+        
+        // Start backend server
+        if (!cs) cs = new CSInterface();
+        cs.evalScript('PPRO_startBackend()', async function(result) {
+          console.log('Backend start result:', result);
+          statusEl.textContent = 'waiting for backend health...';
+          
+          const healthy = await waitForHealth();
+          if (!healthy) {
+            statusEl.textContent = 'backend failed to start (health check failed)';
+            btn.disabled = false;
+            btn.textContent = 'lipsync';
+            document.getElementById('clearBtn').style.display = 'inline-block';
+            return;
+          }
+          statusEl.textContent = 'backend ready. creating job...';
+          
+          // Resolve output directory from Premiere project
+          let outputDir = null;
+          await new Promise((resolve) => {
+            cs.evalScript('PPRO_getProjectDir()', function(resp){
+              try {
+                const r = JSON.parse(resp || '{}');
+                if (r && r.ok && r.outputDir) outputDir = r.outputDir;
+              } catch(_) {}
+              resolve();
+            });
+          });
+
+          // Create job via backend
+          const jobData = {
+            videoPath: selectedVideo,
+            audioPath: selectedAudio,
+            model: document.querySelector('input[name="model"]:checked').value,
+            temperature: parseFloat(document.getElementById('temperature').value),
+            activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
+            detectObstructions: document.getElementById('detectObstructions').checked,
+            apiKey: document.getElementById('apiKey').value,
+            outputDir: outputDir
+          };
+          const placeholderId = 'local-' + Date.now();
+          const localJob = { id: placeholderId, videoPath: selectedVideo, audioPath: selectedAudio, model: jobData.model, status: 'processing', createdAt: new Date().toISOString(), syncJobId: null, error: null };
+          jobs.push(localJob);
+          saveJobsLocal();
+          updateHistory();
+          
+          console.log('POST /jobs', jobData);
+          try {
+            const resp = await fetch('http://localhost:3000/jobs', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(jobData)
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+              throw new Error(data && data.error ? data.error : 'job creation failed');
+            }
+            console.log('Job created:', data);
+            statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. polling status...';
+            jobs = jobs.map(j => j.id === placeholderId ? data : j);
+            saveJobsLocal();
+            updateHistory();
+            // show history immediately
+            try { showTab('history'); } catch(_) {}
+            pollJobStatus(data.id);
+          } catch (error) {
+            console.error('Error creating job:', error);
+            statusEl.textContent = 'job error: ' + error.message;
+            jobs = jobs.map(j => j.id === placeholderId ? { ...j, status: 'failed', error: error.message } : j);
+            saveJobsLocal();
+            updateHistory();
+            btn.disabled = false;
+            btn.textContent = 'lipsync';
+            document.getElementById('clearBtn').style.display = 'inline-block';
+          }
+        });
+      }
+
+      async function waitForHealth(maxAttempts = 20, delayMs = 250) {
+        for (let i = 0; i < maxAttempts; i++) {
+          try {
+            const resp = await fetch('http://localhost:3000/health', { cache: 'no-store' });
+            if (resp.ok) return true;
+          } catch (e) {
+            // ignore until attempts exhausted
+          }
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+        return false;
+      }
+      
+      function pollJobStatus(jobId) {
+        const interval = setInterval(() => {
+          fetch(`http://localhost:3000/jobs/${jobId}`)
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === 'completed') {
+              clearInterval(interval);
+              jobs = jobs.map(j => j.id === jobId ? data : j);
+              saveJobsLocal();
+              updateHistory();
+              // Replace main button with post-actions
+              const btn = document.getElementById('lipsyncBtn');
+              btn.disabled = true;
+              btn.textContent = 'completed';
+              // Show preview and actions
+              renderPreview(data);
+              document.getElementById('postActions').style.display = 'flex';
+            } else if (data.status === 'failed') {
+              clearInterval(interval);
+              jobs = jobs.map(j => j.id === jobId ? data : j);
+              saveJobsLocal();
+              updateHistory();
+              // Re-enable UI for next attempt
+              const btn = document.getElementById('lipsyncBtn');
+              btn.disabled = false;
+              btn.textContent = 'lipsync';
+              document.getElementById('postActions').style.display = 'none';
+            }
+          })
+          .catch(error => {
+            console.error('Error polling job:', error);
+            clearInterval(interval);
+          });
+        }, 2000);
+      }
+
+      function clearSelection() {
+        selectedVideo = null;
+        selectedAudio = null;
+        document.getElementById('videoPath').textContent = 'no file selected';
+        document.getElementById('audioPath').textContent = 'no file selected';
+        const btn = document.getElementById('lipsyncBtn');
+        btn.disabled = true;
+        btn.textContent = 'lipsync';
+        document.getElementById('clearBtn').style.display = 'none';
+        document.getElementById('postActions').style.display = 'none';
+        document.getElementById('preview').innerHTML = '';
+      }
+      
+      function updateHistory() {
+        const historyList = document.getElementById('historyList');
+        // Always show last known jobs (persisted)
+        const sorted = jobs.slice().sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
+        historyList.innerHTML = (sorted.length ? sorted : []).map(job => {
+          const started = job.createdAt ? new Date(job.createdAt).toLocaleString() : '';
+          const base = `
+            <div class="history-item">
+              <div class="history-status ${job.status}">${job.status}</div>
+              <div style=\"font-size:12px;color:#888;\">${(job.syncJobId || job.id) ? '<span class=\\"jid\\" data-id=\\"'+(job.syncJobId || job.id)+'\\" style=\\"cursor:pointer;\\">job id '+(job.syncJobId || job.id)+'</span>' : ''} • ${job.model || ''} • ${started}</div>
+              <div>${job.videoPath.split('/').pop()} + ${job.audioPath.split('/').pop()}</div>
+              ${job.error ? `<div style=\"font-size:12px;color:#f87171;margin-top:6px;\">${job.error}</div>` : ''}
+          `;
+          const done = job.status === 'completed' ? `
+              <div class=\"history-actions\">\n                <button class=\"history-button\" id=\"save-${job.id}\" onclick=\"saveJob('${job.id}')\">save</button>\n                <button class=\"history-button\" id=\"insert-${job.id}\" onclick=\"insertJob('${job.id}')\">insert</button>\n        </div>
+            </div>` : `
+              <div class=\"history-actions\">\n                \n        </div>
+            </div>`;
+          return base + done;
+        }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">no generations yet</div>';
+      }
+
+      // Delegate jid click-to-copy
+      document.addEventListener('click', function(e){
+        const el = e.target;
+        if (el && el.classList && el.classList.contains('jid')) {
+          const id = el.getAttribute('data-id');
+          if (id) {
+            try { navigator.clipboard.writeText(id); } catch(_) {}
+          }
+        }
+      });
+
+      // History action handlers
+      function revealFile(jobId) {
+        const job = jobs.find(j => String(j.id) === String(jobId));
+        if (!job || !job.outputPath) return;
+        if (!cs) cs = new CSInterface();
+        cs.evalScript(`PPRO_revealFile("${job.outputPath.replace(/"/g,'\\"')}")`, function(r){ console.log('reveal', r); });
+      }
+      function insertHistory(jobId) { insertJob(jobId); }
+      function addHistoryBin(jobId) { /* removed */ }
+
+      // remove button disabled per requirements
+
+      function markSaved(buttonId) {
+        const btn = document.getElementById(buttonId);
+        if (!btn) return;
+        const original = btn.textContent;
+        const originalBg = btn.style.background;
+        const originalBorder = btn.style.borderColor;
+        btn.textContent = '✓ saved';
+        btn.style.background = '#166534';
+        btn.style.borderColor = '#166534';
+        setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
+      }
+
+      async function saveJob(jobId) {
+        const job = jobs.find(j => String(j.id) === String(jobId));
+        if (!job) return;
+        const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
+        let location = saveLocation === 'documents' ? 'documents' : 'project';
+        let targetDir = '';
+        if (location === 'project') {
+          await new Promise((resolve) => {
+            cs.evalScript('PPRO_getProjectDir()', function(resp){
+              try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
+              resolve();
+            });
+          });
+        }
+        try { await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ location, targetDir }) }); } catch(_){ }
+        try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`); const j = await res.json(); if (j && j.outputPath) { job.outputPath = j.outputPath; } } catch(_){ }
+        if (job.outputPath) {
+          const fp = job.outputPath.replace(/"/g,'\\"');
+          cs.evalScript(`PPRO_importFileToBin("${fp}", "sync. outputs")`, function(){ markSaved('save-'+jobId); });
+        }
+      }
+
+      async function insertJob(jobId) {
+        const job = jobs.find(j => String(j.id) === String(jobId));
+        if (!job) return;
+        const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
+        let location = saveLocation === 'documents' ? 'documents' : 'project';
+        let targetDir = '';
+        if (location === 'project') {
+          await new Promise((resolve) => {
+            cs.evalScript('PPRO_getProjectDir()', function(resp){
+              try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
+              resolve();
+            });
+          });
+        }
+        try { await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ location, targetDir }) }); } catch(_){ }
+        try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`); const j = await res.json(); if (j && j.outputPath) { job.outputPath = j.outputPath; } } catch(_){ }
+        if (!job.outputPath) return;
+        const fp = job.outputPath.replace(/"/g,'\\"');
+        cs.evalScript(`PPRO_insertFileAtPlayhead("${fp}")`, function(r){ console.log('insert result', r); });
+      }
+
+      async function loadJobsFromServer() {
+        const historyList = document.getElementById('historyList');
+        if (historyList) {
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">loading…</div>';
+        }
+        try {
+          const resp = await fetch('http://localhost:3000/jobs', { cache: 'no-store' });
+          const data = await resp.json();
+          if (Array.isArray(data)) {
+            jobs = data;
+          } else if (data && Array.isArray(data.jobs)) {
+            jobs = data.jobs;
+          }
+          saveJobsLocal();
+          updateHistory();
+        } catch (e) {
+          console.warn('Failed to load jobs from server');
+        }
+      }
+
+      function renderPreview(job) {
+        const preview = document.getElementById('preview');
+        if (!job || !job.outputPath) {
+          preview.innerHTML = '';
+          return;
+        }
+        // Local file preview via file://
+        const src = 'file://' + job.outputPath.replace(/ /g, '%20');
+        preview.innerHTML = `<video src="${src}" controls style="width:100%;max-height:260px;background:#111;border:1px solid #333;border-radius:6px;"></video>`;
+      }
+
+      function renderInputPreview() {
+        const preview = document.getElementById('preview');
+        const parts = [];
+        if (selectedVideo) {
+          const v = 'file://' + selectedVideo.replace(/ /g, '%20');
+          parts.push(`<video src="${v}" controls style="width:100%;max-height:260px;background:#111;border:1px solid #333;border-radius:6px;"></video>`);
+        }
+        if (selectedAudio) {
+          const a = 'file://' + selectedAudio.replace(/ /g, '%20');
+          parts.push(`<audio src="${a}" controls style="width:100%;margin-top:8px;"></audio>`);
+        }
+        preview.innerHTML = parts.join('');
+      }
+
+      async function saveOutput() {
+        // Already saved to disk; import bin
+        const latest = jobs.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))[0];
+        if (!latest || latest.status !== 'completed' || !latest.outputPath) return;
+        if (!cs) cs = new CSInterface();
+        cs.evalScript(`PPRO_importFileToBin("${latest.outputPath.replace(/"/g,'\\"')}", "sync. outputs")`, function(r){ console.log('save/import result', r); });
+      }
+
+      function insertOutput() {
+        const latest = jobs.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))[0];
+        if (!latest || latest.status !== 'completed' || !latest.outputPath) return;
+        if (!cs) cs = new CSInterface();
+        cs.evalScript(`PPRO_insertFileAtPlayhead("${latest.outputPath.replace(/"/g,'\\"')}")`, function(r){ console.log('insert result', r); });
+      }
+      
+      // Temperature slider
+      document.getElementById('temperature').addEventListener('input', function(e) {
+        document.getElementById('tempValue').textContent = e.target.value;
+      });
+      
+      // Load settings
+      function loadSettings() {
+        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+        if (settings.model) {
+          document.querySelector(`input[value="${settings.model}"]`).checked = true;
+        }
+        if (settings.temperature) {
+          document.getElementById('temperature').value = settings.temperature;
+          document.getElementById('tempValue').textContent = settings.temperature;
+        }
+        if (settings.activeSpeakerOnly) {
+          document.getElementById('activeSpeakerOnly').checked = settings.activeSpeakerOnly;
+        }
+        if (settings.detectObstructions) {
+          document.getElementById('detectObstructions').checked = settings.detectObstructions;
+        }
+        if (settings.apiKey) {
+          document.getElementById('apiKey').value = settings.apiKey;
+        }
+        if (settings.saveLocation) {
+          const opt = document.querySelector(`input[name="saveLocation"][value="${settings.saveLocation}"]`);
+          if (opt) opt.checked = true;
+        }
+      }
+
+      // Persist jobs across reloads
+      function saveJobsLocal() {
+        try { localStorage.setItem('syncJobs', JSON.stringify(jobs)); } catch(_) {}
+      }
+      function loadJobsLocal() {
+        try {
+          const raw = localStorage.getItem('syncJobs');
+          if (raw) { jobs = JSON.parse(raw) || []; }
+        } catch(_) {}
+      }
+      
+      // Save settings
+      function saveSettings() {
+        const settings = {
+          model: document.querySelector('input[name="model"]:checked').value,
+          temperature: parseFloat(document.getElementById('temperature').value),
+          activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
+          detectObstructions: document.getElementById('detectObstructions').checked,
+          apiKey: document.getElementById('apiKey').value,
+          saveLocation: (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project'
+        };
+        localStorage.setItem('syncSettings', JSON.stringify(settings));
+      }
+      
+      // Save settings on change
+      document.addEventListener('change', saveSettings);
+      document.getElementById('apiKey').addEventListener('input', saveSettings);
+      
+      document.addEventListener('DOMContentLoaded', function() {
+        try {
+          cs = new CSInterface();
+          // Ensure host script is loaded on startup so dialogs work immediately
+          try {
+            var extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION);
+            cs.evalScript("$.evalFile('" + extPath + "/host/ppro.jsx')", function(){
+              // no-op
+            });
+          } catch (e) {
+            console.log('Host load error:', e);
+          }
+          loadJobsLocal();
+          loadSettings();
+          console.log('Panel loaded successfully');
+
+          // Start backend and load history immediately
+          cs.evalScript('PPRO_startBackend()', async function(res){
+            try { console.log('Backend start:', res); } catch(_) {}
+            const ok = await waitForHealth(40, 250);
+            if (!ok) {
+              console.warn('Backend health check failed');
+            }
+            await loadJobsFromServer();
+            // Periodic refresh
+            setInterval(loadJobsFromServer, 4000);
+          });
+        } catch(e) {
+          console.error('CSInterface error:', e);
+        }
+      });
+    </script>
+  </body>
+</html>
