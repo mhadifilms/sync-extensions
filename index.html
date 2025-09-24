@@ -17,6 +17,7 @@
         line-height: 1.4;
         -webkit-user-select: text;
         user-select: text;
+        position: relative;
       }
       .container { padding: 20px; }
       .header { margin-bottom: 20px; }
@@ -70,7 +71,9 @@
       .btn-primary:hover { background: #f0f0f0; }
       .btn-danger { background: #2a1a1a; border-color: #553; }
       .btn-ghost { background: transparent; border-color: #444; color:#aaa; }
+      .jid { cursor: pointer; outline: none; }
       .jid:hover { text-decoration: underline; }
+      .jid:focus { text-decoration: underline; }
       .file-path { 
         margin-left: 12px; 
         color: #888; 
@@ -155,11 +158,44 @@
         text-transform: lowercase;
       }
       .history-button:hover { background: #444; }
+      #preview { position: relative; }
+      .cost-badge {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        background: rgba(20,20,20,0.85);
+        border: 1px solid #333;
+        color: #9ca3af;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        pointer-events: none;
+        z-index: 10;
+      }
+      #costIndicator {
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        background: rgba(20,20,20,0.85);
+        border: 1px solid #333;
+        color: #9ca3af;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        pointer-events: none;
+        z-index: 2147483000;
+        display: block;
+      }
+      .cost-row {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #9ca3af;
+      }
     </style>
     <script src="lib/CSInterface.js"></script>
   </head>
   <body>
-    <div id="debugBanner" style="background:#7c3aed;color:#fff;padding:6px 10px;font-size:12px;text-align:center;">DEBUG: repo build 0.2.8 — backend fixed + save/insert</div>
+    <div id="debugBanner" style="background:#7c3aed;color:#fff;padding:6px 10px;font-size:12px;text-align:center;">DEBUG: repo build 0.4.33 — cost via 127.0.0.1</div>
     <div class="container">
       <div class="header">
           <h1>sync. extension</h1>
@@ -176,11 +212,13 @@
           <div class="upload-row">
             <div class="upload-label">video</div>
             <button class="btn" onclick="selectVideo()">upload</button>
+            <button class="btn" onclick="selectVideoInOut()">use in/out</button>
             <div class="file-path" id="videoPath">no file selected</div>
           </div>
           <div class="upload-row">
             <div class="upload-label">audio</div>
             <button class="btn" onclick="selectAudio()">upload</button>
+            <button class="btn" onclick="selectAudioInOut()">use in/out</button>
             <div class="file-path" id="audioPath">no file selected</div>
           </div>
         </div>
@@ -191,12 +229,13 @@
           </button>
           <button class="history-button btn-ghost" id="clearBtn" onclick="clearSelection()" style="height:40px; align-self:stretch; display:none;">clear</button>
           <div id="postActions" style="display:none; gap:8px;">
-            <button class="history-button" id="saveBtn" onclick="saveOutput()">save</button>
-            <button class="history-button" id="insertBtn" onclick="insertOutput()">insert at playhead</button>
+            <button class="history-button" id="saveBtn" onclick="saveLatest()">save</button>
+            <button class="history-button" id="insertBtn" onclick="insertLatest()">insert</button>
           </div>
         </div>
         <div id="lipsyncStatus" style="margin-top:8px;font-size:12px;color:#888;"></div>
         <div id="preview" style="margin-top:12px;"></div>
+        <div id="costBelow" class="cost-row">cost: —</div>
         </div>
 
       <div id="history" class="tab-content">
@@ -228,23 +267,9 @@
         
         <div class="settings-group">
           <label class="settings-label">temperature</label>
-          <input type="range" class="slider" id="temperature" min="0" max="1" step="0.1" value="0.7">
-          <div style="font-size: 12px; color: #666; text-align: center;" id="tempValue">0.7</div>
+          <input type="range" class="slider" id="temperature" min="0" max="1" step="0.1" value="0.5">
+          <div style="font-size: 12px; color: #666; text-align: center;" id="tempValue">0.5</div>
             </div>
-        
-        <div class="settings-group">
-          <label class="settings-label">save location</label>
-          <div class="radio-group">
-            <div class="radio-item">
-              <input type="radio" name="saveLocation" value="project" id="saveProject" checked>
-              <label for="saveProject">per project folder (sync. outputs)</label>
-            </div>
-            <div class="radio-item">
-              <input type="radio" name="saveLocation" value="documents" id="saveDocuments">
-              <label for="saveDocuments">universal folder in ~/Documents</label>
-            </div>
-          </div>
-        </div>
 
         <div class="settings-group">
           <div class="checkbox-group">
@@ -258,10 +283,62 @@
             </div>
           </div>
         </div>
+
+        <div class="settings-group">
+          <label class="settings-label">sync. mode</label>
+          <select id="syncMode" class="input-field" style="max-width:260px;">
+            <option value="loop">loop</option>
+            <option value="bounce">bounce</option>
+            <option value="cut_off">cut_off</option>
+            <option value="remap">remap</option>
+            <option value="silence">silence</option>
+          </select>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">render video</label>
+          <div class="radio-group">
+            <div class="radio-item"><input type="radio" name="renderVideo" value="h264" id="rv_h264" checked><label for="rv_h264">h.264 (match source)</label></div>
+            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422" id="rv_pr422"><label for="rv_pr422">prores 422 (match source)</label></div>
+            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422_proxy" id="rv_pr422p"><label for="rv_pr422p">prores 422 proxy (match source)</label></div>
+            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422_lt" id="rv_pr422lt"><label for="rv_pr422lt">prores 422 LT (match source)</label></div>
+            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422_hq" id="rv_pr422hq"><label for="rv_pr422hq">prores 422 HQ (match source)</label></div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">render audio</label>
+          <div class="radio-group">
+            <div class="radio-item"><input type="radio" name="renderAudio" value="wav" id="ra_wav" checked><label for="ra_wav">wav (match timeline)</label></div>
+            <div class="radio-item"><input type="radio" name="renderAudio" value="mp3" id="ra_mp3"><label for="ra_mp3">mp3 (320 kbps)</label></div>
+          </div>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">save location</label>
+          <div class="radio-group">
+            <div class="radio-item">
+              <input type="radio" name="saveLocation" value="project" id="saveProject" checked>
+              <label for="saveProject">per project folder (sync. outputs)</label>
+            </div>
+            <div class="radio-item">
+              <input type="radio" name="saveLocation" value="documents" id="saveDocuments">
+              <label for="saveDocuments">universal folder in ~/Documents</label>
+            </div>
+          </div>
+            </div>
         
         <div class="settings-group">
           <label class="settings-label">api key</label>
           <input type="password" class="input-field" id="apiKey" placeholder="enter your sync.so api key">
+        </div>
+        <div class="settings-group">
+          <label class="settings-label">supabase url</label>
+          <input type="text" class="input-field" id="supabaseUrl" placeholder="https://xxxxx.supabase.co">
+          <label class="settings-label" style="margin-top:8px;">supabase key</label>
+          <input type="password" class="input-field" id="supabaseKey" placeholder="service or anon key">
+          <label class="settings-label" style="margin-top:8px;">supabase bucket</label>
+          <input type="text" class="input-field" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)">
         </div>
           </div>
         </div>
@@ -271,7 +348,19 @@
       let selectedVideo = null;
       let selectedAudio = null;
       let jobs = [];
+      let insertingGuard = false;
+      let runToken = 0;
+      let currentFetchController = null;
       
+      let selectedVideoIsTemp = false;
+      let selectedAudioIsTemp = false;
+      let estimateTimer = null;
+      let hasStartedBackendForCost = false;
+
+      let uploadedVideoUrl = '';
+      let uploadedAudioUrl = '';
+      let costToken = 0;
+
       // Helper to call JSX with JSON payload and parse JSON response
       function evalExtendScript(fn, payload) {
         if (!cs) cs = new CSInterface();
@@ -296,15 +385,17 @@
 
       // Single inline ExtendScript picker (no host dependency)
       function openFileDialog(kind) {
-        if (!cs) cs = new CSInterface();
-        var es = "(function(){try{"+
-          "var kind='" + (typeof kind==='string'?kind:'video') + "';"+
-          "var allow = (kind==='audio') ? {wav:1,mp3:1,aac:1,aif:1,aiff:1,m4a:1} : {mov:1,mp4:1,mxf:1,mkv:1,avi:1,m4v:1,mpg:1,mpeg:1};"+
-          "var fn=function(f){try{if(f instanceof Folder) return true; var n=(f&&f.name)?String(f.name).toLowerCase():''; var i=n.lastIndexOf('.'); if(i<0) return true; var ext=n.substring(i+1); return allow[ext]===1;}catch(e){return true;}};"+
-          "var file = File.openDialog('Select ' + kind + ' file', fn);"+
-          "if (file && file.exists) { return file.fsName; } return '';"+
-        "}catch(e){return ''}})()";
-        return new Promise(function(resolve){ cs.evalScript(es, function(res){ resolve(res || ''); }); });
+        return new Promise(function(resolve){
+          if (!cs) cs = new CSInterface();
+          var payload = JSON.stringify({ kind: (typeof kind === 'string' ? kind : 'video') });
+          cs.evalScript('PPRO_showFileDialog(' + JSON.stringify(payload) + ')', function(res){
+            try {
+              var out = (typeof res === 'string') ? JSON.parse(res) : res;
+              if (out && out.ok && out.path) { resolve(out.path); return; }
+            } catch(_) {}
+            resolve('');
+          });
+        });
       }
       
       function showTab(tabName) {
@@ -319,6 +410,12 @@
         // Show selected tab
         document.getElementById(tabName).classList.add('active');
         document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
+        
+        // Ensure history is always populated when shown
+        if (tabName === 'history') {
+          try { updateHistory(); } catch(_) {}
+          try { loadJobsFromServer(); } catch(_) {}
+        }
       }
       
       async function selectVideo() {
@@ -327,11 +424,29 @@
           try { statusEl.textContent = 'opening video picker…'; } catch(_){ }
           const raw = await openFileDialog('video');
           if (raw && raw.indexOf('/') !== -1) {
+            selectedVideoIsTemp = false;
+            const ext = raw.split('.').pop().toLowerCase();
+            const ok = {mov:1,mp4:1,mxf:1,mkv:1,avi:1,m4v:1,mpg:1,mpeg:1}[ext] === 1;
+            if (!ok) { try { statusEl.textContent = 'please select a video file'; } catch(_){ } return; }
+            // 1GB guard via ExtendScript stat
+            const size = await new Promise(resolve=>{ const safe = String(raw).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';}})()`; cs.evalScript(es, function(r){ var n=Number(r||0); resolve(isNaN(n)?0:n); }); });
+            if (size > 1024*1024*1024) { try { statusEl.textContent = 'video exceeds 1GB (not allowed)'; } catch(_){ } return; }
             selectedVideo = raw;
             document.getElementById('videoPath').textContent = raw.split('/').pop();
             updateLipsyncButton();
             renderInputPreview();
+            try { statusEl.textContent = 'uploading video…'; } catch(_){ }
+            // Immediate upload to Supabase for cost/job
+            try{
+              const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
+              const body = { path: selectedVideo, apiKey: settings.apiKey||'', supabaseUrl: (settings.supabaseUrl||''), supabaseKey: (settings.supabaseKey||''), supabaseBucket: (settings.supabaseBucket||'') };
+              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+              const j = await r.json().catch(()=>null);
+              if (r.ok && j && j.ok && j.url){ uploadedVideoUrl = j.url; }
+            }catch(_){ }
             try { statusEl.textContent = ''; } catch(_){ }
+            try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
+            scheduleEstimate();
           } else {
             console.warn('No video selected');
             try { statusEl.textContent = 'no video selected'; } catch(_){ }
@@ -345,16 +460,68 @@
           try { statusEl.textContent = 'opening audio picker…'; } catch(_){ }
           const raw = await openFileDialog('audio');
           if (raw && raw.indexOf('/') !== -1) {
+            selectedAudioIsTemp = false;
+            const ext = raw.split('.').pop().toLowerCase();
+            const ok = {wav:1,mp3:1,aac:1,aif:1,aiff:1,m4a:1}[ext] === 1;
+            if (!ok) { try { statusEl.textContent = 'please select an audio file'; } catch(_){ } return; }
+            const size = await new Promise(resolve=>{ const safe = String(raw).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';}})()`; cs.evalScript(es, function(r){ var n=Number(r||0); resolve(isNaN(n)?0:n); }); });
+            if (size > 1024*1024*1024) { try { statusEl.textContent = 'audio exceeds 1GB (not allowed)'; } catch(_){ } return; }
             selectedAudio = raw;
             document.getElementById('audioPath').textContent = raw.split('/').pop();
             updateLipsyncButton();
             renderInputPreview();
+            try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
+            try{
+              const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
+              const body = { path: selectedAudio, apiKey: settings.apiKey||'', supabaseUrl: (settings.supabaseUrl||''), supabaseKey: (settings.supabaseKey||''), supabaseBucket: (settings.supabaseBucket||'') };
+              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+              const j = await r.json().catch(()=>null);
+              if (r.ok && j && j.ok && j.url){ uploadedAudioUrl = j.url; }
+            }catch(_){ }
             try { statusEl.textContent = ''; } catch(_){ }
+            try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
+            scheduleEstimate();
           } else {
             console.warn('No audio selected');
             try { statusEl.textContent = 'no audio selected'; } catch(_){ }
           }
         } catch (_) { console.warn('Audio select failed'); }
+      }
+      
+      async function selectVideoInOut(){
+        try{
+          const statusEl = document.getElementById('lipsyncStatus');
+          if (statusEl) statusEl.textContent = 'rendering video in/out…';
+          const codec = (document.querySelector('input[name="renderVideo"]:checked')||{}).value || 'h264';
+          const res = await evalExtendScript('PPRO_exportInOutVideo', { codec });
+          if (res && res.ok && res.path){
+            selectedVideo = res.path; selectedVideoIsTemp = true;
+            document.getElementById('videoPath').textContent = res.path.split('/').pop();
+            updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
+            try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
+            scheduleEstimate();
+          } else {
+            if (statusEl) statusEl.textContent = 'video in/out export failed: ' + (res && res.error ? res.error : 'unknown') + (res && res.eprRoot ? (' root=' + res.eprRoot) : '') + (res && res.preset ? (' preset=' + res.preset) : '');
+          }
+        }catch(e){ try{ document.getElementById('lipsyncStatus').textContent = 'video in/out export failed'; }catch(_){}}
+      }
+
+      async function selectAudioInOut(){
+        try{
+          const statusEl = document.getElementById('lipsyncStatus');
+          if (statusEl) statusEl.textContent = 'rendering audio in/out…';
+          const format = (document.querySelector('input[name=\"renderAudio\"]:checked')||{}).value || 'wav';
+          const res = await evalExtendScript('PPRO_exportInOutAudio', { format });
+          if (res && res.ok && res.path){
+            selectedAudio = res.path; selectedAudioIsTemp = true;
+            document.getElementById('audioPath').textContent = res.path.split('/').pop();
+            updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
+            try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
+            scheduleEstimate();
+          } else {
+            if (statusEl) statusEl.textContent = 'audio in/out export failed: ' + (res && res.error ? res.error : 'unknown');
+          }
+        }catch(e){ try{ document.getElementById('lipsyncStatus').textContent = 'audio in/out export failed'; }catch(_){}}
       }
       
       function updateLipsyncButton() {
@@ -368,6 +535,7 @@
       
       async function startLipsync() {
         if (!selectedVideo || !selectedAudio) return;
+        const myToken = ++runToken;
         
         const btn = document.getElementById('lipsyncBtn');
         btn.disabled = true;
@@ -380,16 +548,19 @@
         if (!cs) cs = new CSInterface();
         cs.evalScript('PPRO_startBackend()', async function(result) {
           console.log('Backend start result:', result);
+          if (myToken !== runToken) return;
           statusEl.textContent = 'waiting for backend health...';
           
-          const healthy = await waitForHealth();
+          const healthy = await waitForHealth(20, 250, myToken);
           if (!healthy) {
+            if (myToken !== runToken) return;
             statusEl.textContent = 'backend failed to start (health check failed)';
             btn.disabled = false;
             btn.textContent = 'lipsync';
             document.getElementById('clearBtn').style.display = 'inline-block';
             return;
           }
+          if (myToken !== runToken) return;
           statusEl.textContent = 'backend ready. creating job...';
           
           // Resolve output directory from Premiere project
@@ -408,11 +579,16 @@
           const jobData = {
             videoPath: selectedVideo,
             audioPath: selectedAudio,
+            isTempVideo: !!selectedVideoIsTemp,
+            isTempAudio: !!selectedAudioIsTemp,
             model: document.querySelector('input[name="model"]:checked').value,
             temperature: parseFloat(document.getElementById('temperature').value),
             activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
             detectObstructions: document.getElementById('detectObstructions').checked,
             apiKey: document.getElementById('apiKey').value,
+            supabaseUrl: (document.getElementById('supabaseUrl').value||'').trim(),
+            supabaseKey: (document.getElementById('supabaseKey').value||'').trim(),
+            supabaseBucket: (document.getElementById('supabaseBucket').value||'').trim(),
             outputDir: outputDir
           };
           const placeholderId = 'local-' + Date.now();
@@ -423,16 +599,15 @@
           
           console.log('POST /jobs', jobData);
           try {
-            const resp = await fetch('http://localhost:3000/jobs', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(jobData)
-            });
-            const data = await resp.json();
-            if (!resp.ok) {
-              throw new Error(data && data.error ? data.error : 'job creation failed');
-            }
+            try { if (currentFetchController) currentFetchController.abort(); } catch(_){ }
+            currentFetchController = new AbortController();
+            const resp = await fetch('http://localhost:3000/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(jobData), signal: currentFetchController.signal });
+            const text = await resp.text();
+            let data = {};
+            try { data = JSON.parse(text || '{}'); } catch(_) { data = { error: text }; }
+            if (!resp.ok) { throw new Error(data && data.error ? data.error : (text || 'job creation failed')); }
             console.log('Job created:', data);
+            if (myToken !== runToken) return;
             statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. polling status...';
             jobs = jobs.map(j => j.id === placeholderId ? data : j);
             saveJobsLocal();
@@ -442,6 +617,7 @@
             pollJobStatus(data.id);
           } catch (error) {
             console.error('Error creating job:', error);
+            if (myToken !== runToken) return;
             statusEl.textContent = 'job error: ' + error.message;
             jobs = jobs.map(j => j.id === placeholderId ? { ...j, status: 'failed', error: error.message } : j);
             saveJobsLocal();
@@ -453,7 +629,7 @@
         });
       }
 
-      async function waitForHealth(maxAttempts = 20, delayMs = 250) {
+      async function waitForHealth(maxAttempts = 20, delayMs = 250, expectedToken) {
         for (let i = 0; i < maxAttempts; i++) {
           try {
             const resp = await fetch('http://localhost:3000/health', { cache: 'no-store' });
@@ -461,6 +637,7 @@
           } catch (e) {
             // ignore until attempts exhausted
           }
+          if (expectedToken != null && expectedToken !== runToken) return false;
           await new Promise(r => setTimeout(r, delayMs));
         }
         return false;
@@ -503,8 +680,13 @@
       }
 
       function clearSelection() {
+        try { if (currentFetchController) currentFetchController.abort(); } catch(_) {}
+        currentFetchController = null;
+        runToken++;
         selectedVideo = null;
         selectedAudio = null;
+        selectedVideoIsTemp = false;
+        selectedAudioIsTemp = false;
         document.getElementById('videoPath').textContent = 'no file selected';
         document.getElementById('audioPath').textContent = 'no file selected';
         const btn = document.getElementById('lipsyncBtn');
@@ -512,7 +694,11 @@
         btn.textContent = 'lipsync';
         document.getElementById('clearBtn').style.display = 'none';
         document.getElementById('postActions').style.display = 'none';
-        document.getElementById('preview').innerHTML = '';
+        const preview = document.getElementById('preview');
+        const badge = document.getElementById('costIndicator');
+        preview.innerHTML = '';
+        if (badge) { preview.appendChild(badge); badge.textContent = 'cost: —'; }
+        try { document.getElementById('lipsyncStatus').textContent = ''; } catch(_){ }
       }
       
       function updateHistory() {
@@ -521,11 +707,13 @@
         const sorted = jobs.slice().sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
         historyList.innerHTML = (sorted.length ? sorted : []).map(job => {
           const started = job.createdAt ? new Date(job.createdAt).toLocaleString() : '';
+          const vName = niceName(job.videoPath, 'video');
+          const aName = niceName(job.audioPath, 'audio');
           const base = `
             <div class="history-item">
               <div class="history-status ${job.status}">${job.status}</div>
-              <div style=\"font-size:12px;color:#888;\">${(job.syncJobId || job.id) ? '<span class=\\"jid\\" data-id=\\"'+(job.syncJobId || job.id)+'\\" style=\\"cursor:pointer;\\">job id '+(job.syncJobId || job.id)+'</span>' : ''} • ${job.model || ''} • ${started}</div>
-              <div>${job.videoPath.split('/').pop()} + ${job.audioPath.split('/').pop()}</div>
+              <div style=\"font-size:12px;color:#888;\">${(job.syncJobId || job.id) ? '<span class=\\"jid\\" data-id=\\"'+(job.syncJobId || job.id)+'\\" tabindex=\\"0\\" role=\\"button\\" title=\\"click to copy\\" style=\\"cursor:pointer;\\">job id '+(job.syncJobId || job.id)+'</span>' : ''} • ${job.model || ''} • ${started}</div>
+              <div>${vName}${aName ? ' + '+aName : ''}</div>
               ${job.error ? `<div style=\"font-size:12px;color:#f87171;margin-top:6px;\">${job.error}</div>` : ''}
           `;
           const done = job.status === 'completed' ? `
@@ -537,16 +725,97 @@
         }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">no generations yet</div>';
       }
 
-      // Delegate jid click-to-copy
+      // Delegate jid click/Enter-to-copy
+      function copyJobId(el){
+        const id = el.getAttribute('data-id');
+        if (!id) return;
+        try { navigator.clipboard.writeText(id); } catch(_) {}
+        const original = el.textContent;
+        el.textContent = 'copied!';
+        setTimeout(()=>{ el.textContent = original; }, 800);
+      }
       document.addEventListener('click', function(e){
         const el = e.target;
-        if (el && el.classList && el.classList.contains('jid')) {
-          const id = el.getAttribute('data-id');
-          if (id) {
-            try { navigator.clipboard.writeText(id); } catch(_) {}
-          }
+        if (el && el.classList && el.classList.contains('jid')) { copyJobId(el); }
+      });
+      document.addEventListener('keydown', function(e){
+        if ((e.key === 'Enter' || e.key === ' ') && document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('jid')){
+          e.preventDefault();
+          copyJobId(document.activeElement);
         }
       });
+      // Block Premiere keyboard shortcuts from this panel.
+      function isEditable(el){ return el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
+      function isMeta(e){ return e.metaKey || e.ctrlKey; }
+      function isStandardEditCombo(e){
+        if (!isMeta(e)) return false;
+        const k = e.key.toLowerCase();
+        return k === 'c' || k === 'x' || k === 'v' || k === 'a';
+      }
+      // Register interest in common edit shortcuts so CEP routes them to this panel
+      (function registerKeyInterest(){
+        try {
+          if (!cs) cs = new CSInterface();
+          cs.registerKeyEventsInterest([
+            { keyCode: 67, metaKey: true }, // Cmd/Ctrl+C
+            { keyCode: 88, metaKey: true }, // Cmd/Ctrl+X
+            { keyCode: 86, metaKey: true }, // Cmd/Ctrl+V
+            { keyCode: 65, metaKey: true }  // Cmd/Ctrl+A
+          ]);
+        } catch(_) {}
+      })();
+
+      // Clipboard helpers
+      function performCopy(){
+        try {
+          if (document.execCommand && document.execCommand('copy')) return true;
+        } catch(_) {}
+        try {
+          const sel = window.getSelection && window.getSelection().toString();
+          if (sel && navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(sel); return true; }
+        } catch(_) {}
+        return false;
+      }
+      function performPasteInto(el){
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.readText) return false;
+          navigator.clipboard.readText().then(text => {
+            if (!text) return;
+            if (el && typeof el.setRangeText === 'function') {
+              const start = el.selectionStart||0; const end = el.selectionEnd||0;
+              el.setRangeText(text, start, end, 'end');
+            } else if (document.execCommand) {
+              document.execCommand('insertText', false, text);
+            }
+          });
+          return true;
+        } catch(_) { return false; }
+      }
+      document.addEventListener('keydown', function(e){
+        const targetEditable = isEditable(e.target);
+        // Allow standard edit combos in editable fields
+        if (targetEditable && isStandardEditCombo(e)) {
+          // Handle copy/paste/select-all ourselves so CEP honors Cmd/Ctrl in panel
+          const k = e.key.toLowerCase();
+          if (k === 'a') { try { document.execCommand('selectAll', false, null); } catch(_) {} }
+          if (k === 'c') { performCopy(); }
+          if (k === 'v') { performPasteInto(e.target); }
+          // cut will be handled by the input default; ensure Premiere doesn't catch it
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
+        // Block browser back/forward keys and all other shortcuts from reaching Premiere
+        const k = e.key;
+        if (k === 'Backspace' && !targetEditable) { e.preventDefault(); }
+        if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+          // prevent Premiere timeline nudges when panel focused
+          e.preventDefault();
+        }
+        e.stopImmediatePropagation();
+      }, true);
+      document.addEventListener('keyup', function(e){ e.stopImmediatePropagation(); }, true);
+      document.addEventListener('keypress', function(e){ e.stopImmediatePropagation(); }, true);
 
       // History action handlers
       function revealFile(jobId) {
@@ -559,7 +828,7 @@
       function addHistoryBin(jobId) { /* removed */ }
 
       // remove button disabled per requirements
-
+      
       function markSaved(buttonId) {
         const btn = document.getElementById(buttonId);
         if (!btn) return;
@@ -571,10 +840,28 @@
         btn.style.borderColor = '#166534';
         setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
       }
+      function markWorking(buttonId, label){
+        const btn = document.getElementById(buttonId);
+        if (!btn) return ()=>{};
+        const original = btn.textContent;
+        btn.textContent = label || 'working…';
+        btn.disabled = true;
+        return function reset(){ btn.textContent = original; btn.disabled = false; };
+      }
+      function markError(buttonId, message){
+        const btn = document.getElementById(buttonId);
+        if (!btn) return;
+        const original = btn.textContent;
+        const originalBg = btn.style.background;
+        const originalBorder = btn.style.borderColor;
+        btn.textContent = message || 'error';
+        btn.style.background = '#7f1d1d';
+        btn.style.borderColor = '#7f1d1d';
+        setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
+      }
 
       async function saveJob(jobId) {
-        const job = jobs.find(j => String(j.id) === String(jobId));
-        if (!job) return;
+        const job = jobs.find(j => String(j.id) === String(jobId)) || { id: jobId, status: 'completed' };
         const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
@@ -586,17 +873,30 @@
             });
           });
         }
-        try { await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ location, targetDir }) }); } catch(_){ }
-        try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`); const j = await res.json(); if (j && j.outputPath) { job.outputPath = j.outputPath; } } catch(_){ }
-        if (job.outputPath) {
-          const fp = job.outputPath.replace(/"/g,'\\"');
-          cs.evalScript(`PPRO_importFileToBin("${fp}", "sync. outputs")`, function(){ markSaved('save-'+jobId); });
+        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+        let savedPath = '';
+        const reset = markWorking('save-'+jobId, 'saving…');
+        try {
+          const resp = await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ location, targetDir, apiKey }) });
+          const data = await resp.json().catch(()=>null);
+          if (resp.ok && data && data.outputPath) { savedPath = data.outputPath; }
+          else if (!resp.ok) { markError('save-'+jobId, 'error'); reset(); return; }
+        } catch(_){ markError('save-'+jobId, 'error'); reset(); return; }
+        if (!savedPath) {
+          try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`); const j = await res.json(); if (j && j.outputPath) { savedPath = j.outputPath; } } catch(_){ }
+        }
+        reset();
+        if (savedPath) {
+          const fp = savedPath.replace(/\"/g,'\\\"');
+          cs.evalScript(`PPRO_importFileToBin(\"${fp}\", \"sync. outputs\")`, function(){ markSaved('save-'+jobId); });
+        } else {
+          markError('save-'+jobId, 'not ready');
         }
       }
 
       async function insertJob(jobId) {
-        const job = jobs.find(j => String(j.id) === String(jobId));
-        if (!job) return;
+        if (insertingGuard) return; insertingGuard = true;
+        const job = jobs.find(j => String(j.id) === String(jobId)) || { id: jobId, status: 'completed' };
         const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
@@ -608,46 +908,90 @@
             });
           });
         }
-        try { await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ location, targetDir }) }); } catch(_){ }
-        try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`); const j = await res.json(); if (j && j.outputPath) { job.outputPath = j.outputPath; } } catch(_){ }
-        if (!job.outputPath) return;
-        const fp = job.outputPath.replace(/"/g,'\\"');
-        cs.evalScript(`PPRO_insertFileAtPlayhead("${fp}")`, function(r){ console.log('insert result', r); });
+        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+        let savedPath = '';
+        const reset = markWorking('insert-'+jobId, 'inserting…');
+        const mainInsertBtn = document.getElementById('insertBtn');
+        const mainInsertWasDisabled = mainInsertBtn ? mainInsertBtn.disabled : false;
+        if (mainInsertBtn) { mainInsertBtn.disabled = true; mainInsertBtn.textContent = 'inserting…'; }
+        try {
+          const resp = await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ location, targetDir, apiKey }) });
+          const data = await resp.json().catch(()=>null);
+          if (resp.ok && data && data.outputPath) { savedPath = data.outputPath; }
+          else if (!resp.ok) { markError('insert-'+jobId, 'error'); reset(); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
+        } catch(_){ markError('insert-'+jobId, 'error'); reset(); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
+        if (!savedPath) {
+          try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`); const j = await res.json(); if (j && j.outputPath) { savedPath = j.outputPath; } } catch(_){ }
+        }
+        reset();
+        if (!savedPath) { markError('insert-'+jobId, 'not ready'); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
+        const fp = savedPath.replace(/\"/g,'\\\"');
+        cs.evalScript(`PPRO_insertFileAtPlayhead(\"${fp}\")`, function(r){
+           try { console.log('insert result', r); } catch(_){ }
+           try {
+             const out = (typeof r === 'string') ? JSON.parse(r) : r;
+             const statusEl = document.getElementById('lipsyncStatus');
+             if (!out || out.ok !== true) {
+               if (statusEl) statusEl.textContent = 'insert failed; retrying…' + (out && out.error ? ' ('+out.error+')' : '') + (out && out.diag ? ' ['+out.diag+']' : '');
+               // fallback: try importing to bin directly and re-invoking
+               cs.evalScript(`PPRO_importFileToBin(\"${fp}\", \"sync. outputs\")`, function(){
+                 cs.evalScript(`PPRO_insertFileAtPlayhead(\"${fp}\")`, function(rr){
+                   try { const oo = (typeof rr==='string')?JSON.parse(rr):rr; if (statusEl) statusEl.textContent = (oo&&oo.ok===true) ? ('inserted (retry)' + (oo.diag? ' ['+oo.diag+']':'')) : ('insert failed (retry)' + (oo&&oo.error? ' ('+oo.error+')':'' + (oo&&oo.diag? ' ['+oo.diag+']':''))); } catch(_){ }
+                   try { console.log('insert retry', rr); } catch(_){}
+                 });
+               });
+             } else {
+               if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':'');
+               try { console.log('inserted to tracks', out.videoTrack, out.audioTrack, 'diag=', out.diag); } catch(_){}
+             }
+           } catch(_){ }
+           if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
+           insertingGuard = false;
+         });
       }
 
       async function loadJobsFromServer() {
         const historyList = document.getElementById('historyList');
-        if (historyList) {
+        if (historyList && !historyList.innerHTML.trim()) {
           historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">loading…</div>';
         }
         try {
-          const resp = await fetch('http://localhost:3000/jobs', { cache: 'no-store' });
-          const data = await resp.json();
-          if (Array.isArray(data)) {
-            jobs = data;
-          } else if (data && Array.isArray(data.jobs)) {
-            jobs = data.jobs;
+          const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+          if (!apiKey) {
+            if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">add your API key in settings to load history</div>';
+            return;
           }
+          const gen = await fetch('http://localhost:3000/generations?'+new URLSearchParams({ apiKey })).then(r=>r.json()).catch(()=>null);
+          if (Array.isArray(gen)) {
+            jobs = gen.map(g=>({ id:g.id, status: (String(g.status||'').toLowerCase()==='completed'?'completed': String(g.status||'processing').toLowerCase()), model:g.model, createdAt:g.createdAt, videoPath: (g.input||[]).find(x=>x.type==='video')?.url||'', audioPath: (g.input||[]).find(x=>x.type==='audio')?.url||'', syncJobId:g.id, outputPath: g.outputUrl||'' }));
           saveJobsLocal();
           updateHistory();
+            return;
+          }
+          if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations found</div>';
         } catch (e) {
-          console.warn('Failed to load jobs from server');
+          console.warn('Failed to load cloud history');
+          if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#f87171; text-align:center; padding:20px;">failed to load history</div>';
         }
       }
 
       function renderPreview(job) {
         const preview = document.getElementById('preview');
+        const badge = document.getElementById('costIndicator');
         if (!job || !job.outputPath) {
           preview.innerHTML = '';
+          if (badge) { preview.appendChild(badge); }
           return;
         }
         // Local file preview via file://
-        const src = 'file://' + job.outputPath.replace(/ /g, '%20');
+        const src = 'file://' + job.outputPath.replace(/"/g,'\\"').replace(/ /g, '%20');
         preview.innerHTML = `<video src="${src}" controls style="width:100%;max-height:260px;background:#111;border:1px solid #333;border-radius:6px;"></video>`;
+        if (badge) { preview.appendChild(badge); }
       }
 
       function renderInputPreview() {
         const preview = document.getElementById('preview');
+        const badge = document.getElementById('costIndicator');
         const parts = [];
         if (selectedVideo) {
           const v = 'file://' + selectedVideo.replace(/ /g, '%20');
@@ -658,6 +1002,7 @@
           parts.push(`<audio src="${a}" controls style="width:100%;margin-top:8px;"></audio>`);
         }
         preview.innerHTML = parts.join('');
+        if (badge) { preview.appendChild(badge); }
       }
 
       async function saveOutput() {
@@ -686,7 +1031,7 @@
         if (settings.model) {
           document.querySelector(`input[value="${settings.model}"]`).checked = true;
         }
-        if (settings.temperature) {
+        if (settings.temperature !== undefined) {
           document.getElementById('temperature').value = settings.temperature;
           document.getElementById('tempValue').textContent = settings.temperature;
         }
@@ -696,12 +1041,32 @@
         if (settings.detectObstructions) {
           document.getElementById('detectObstructions').checked = settings.detectObstructions;
         }
+        if (settings.syncMode) {
+          const sm = document.getElementById('syncMode'); if (sm) sm.value = settings.syncMode;
+        }
         if (settings.apiKey) {
           document.getElementById('apiKey').value = settings.apiKey;
+        }
+        if (settings.supabaseUrl) {
+          document.getElementById('supabaseUrl').value = settings.supabaseUrl;
+        }
+        if (settings.supabaseKey) {
+          document.getElementById('supabaseKey').value = settings.supabaseKey;
+        }
+        if (settings.supabaseBucket) {
+          document.getElementById('supabaseBucket').value = settings.supabaseBucket;
         }
         if (settings.saveLocation) {
           const opt = document.querySelector(`input[name="saveLocation"][value="${settings.saveLocation}"]`);
           if (opt) opt.checked = true;
+        }
+        if (settings.renderVideo) {
+          const rv = document.querySelector(`input[name=renderVideo][value="${settings.renderVideo}"]`);
+          if (rv) rv.checked = true;
+        }
+        if (settings.renderAudio) {
+          const ra = document.querySelector(`input[name=renderAudio][value="${settings.renderAudio}"]`);
+          if (ra) ra.checked = true;
         }
       }
 
@@ -723,15 +1088,120 @@
           temperature: parseFloat(document.getElementById('temperature').value),
           activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
           detectObstructions: document.getElementById('detectObstructions').checked,
+          syncMode: (document.getElementById('syncMode')||{}).value || 'loop',
           apiKey: document.getElementById('apiKey').value,
-          saveLocation: (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project'
+          supabaseUrl: (document.getElementById('supabaseUrl').value||'').trim(),
+          supabaseKey: (document.getElementById('supabaseKey').value||'').trim(),
+          supabaseBucket: (document.getElementById('supabaseBucket').value||'').trim(),
+          saveLocation: (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project',
+          renderVideo: (document.querySelector('input[name="renderVideo"]:checked')||{}).value || 'h264',
+          renderAudio: (document.querySelector('input[name="renderAudio"]:checked')||{}).value || 'wav'
         };
         localStorage.setItem('syncSettings', JSON.stringify(settings));
+        scheduleEstimate();
       }
       
       // Save settings on change
       document.addEventListener('change', saveSettings);
       document.getElementById('apiKey').addEventListener('input', saveSettings);
+      
+      async function saveLatest(){
+        const latest = jobs.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))[0];
+        if (!latest || latest.status !== 'completed') return;
+        return saveJob(String(latest.id));
+      }
+      async function insertLatest(){
+        const latest = jobs.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))[0];
+        if (!latest || latest.status !== 'completed') return;
+        return insertJob(String(latest.id));
+      }
+
+      function scheduleEstimate(){
+        try{ if (estimateTimer) clearTimeout(estimateTimer); }catch(_){ }
+        estimateTimer = setTimeout(()=>estimateCost(true), 800);
+      }
+
+      async function estimateCost(auto, retry){
+        const statusEl = document.getElementById('lipsyncStatus');
+        const badge = document.getElementById('costIndicator');
+        const myToken = ++costToken;
+        try{
+          if (!selectedVideo || !selectedAudio) { if (!auto && statusEl) statusEl.textContent = 'select both video and audio first'; if (badge){ badge.style.display='block'; badge.textContent='cost: select both'; } try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: select both'; }catch(_){ } return; }
+          const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
+          const apiKey = settings.apiKey||'';
+          if (!apiKey) { if (badge){ badge.style.display='block'; badge.textContent='cost: set API key'; } try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: set API key'; }catch(_){ } if (!auto && statusEl) statusEl.textContent = 'add API key in settings'; return; }
+          if (!settings.supabaseUrl || !settings.supabaseKey || !settings.supabaseBucket) { if (badge){ badge.style.display='block'; badge.textContent='cost: set supabase in settings'; } try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: set supabase in settings'; }catch(_){ } return; }
+          if (badge){ badge.style.display='block'; badge.textContent='cost: estimating…'; } try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: estimating…'; }catch(_){ }
+          const body = {
+            videoPath: selectedVideo,
+            audioPath: selectedAudio,
+            videoUrl: uploadedVideoUrl || '',
+            audioUrl: uploadedAudioUrl || '',
+            model: (document.querySelector('input[name="model"]:checked')||{}).value || 'lipsync-2-pro',
+            temperature: parseFloat(document.getElementById('temperature').value),
+            activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
+            detectObstructions: document.getElementById('detectObstructions').checked,
+            apiKey,
+            supabaseUrl: (settings.supabaseUrl||''),
+            supabaseKey: (settings.supabaseKey||''),
+            supabaseBucket: (settings.supabaseBucket||''),
+            options: {
+              sync_mode: (document.getElementById('syncMode')||{}).value || 'loop',
+              temperature: parseFloat(document.getElementById('temperature').value),
+              active_speaker_detection: { auto_detect: !!document.getElementById('activeSpeakerOnly').checked },
+              occlusion_detection_enabled: !!document.getElementById('detectObstructions').checked
+            }
+          };
+          let resp, data;
+          try {
+            try { console.log('cost request', body); } catch(_){ }
+            resp = await fetch('http://127.0.0.1:3000/costs', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+            data = await resp.json().catch(()=>null);
+          } catch (netErr) {
+            // Start backend and retry once
+            if (!hasStartedBackendForCost) {
+              try { cs.evalScript('PPRO_startBackend()', function(){ /* no-op */ }); } catch(_){ }
+              hasStartedBackendForCost = true;
+            }
+            await new Promise(r=>setTimeout(r, 1200));
+            if (!retry) return estimateCost(auto, true);
+            throw netErr;
+          }
+          if (myToken !== costToken) return; // stale
+          if (resp.ok && data) {
+            let est = [];
+            try {
+              if (Array.isArray(data.estimate)) est = data.estimate;
+              else if (data.estimate && typeof data.estimate === 'object') est = [data.estimate];
+            } catch(_){ }
+            const val = (est.length && est[0] && typeof est[0].estimatedGenerationCost !== 'undefined') ? Number(est[0].estimatedGenerationCost) : NaN;
+            if (isFinite(val)) {
+              const txt = `cost: $${val.toFixed(2)}`;
+              if (badge){ badge.style.display='block'; badge.textContent = txt; }
+              try { const below = document.getElementById('costBelow'); if (below){ below.textContent = txt; } } catch(_){ }
+            } else {
+              // Do not clobber a recent valid value on ambiguous success
+              try { if (statusEl && data && data.error) statusEl.textContent = String(data.error).slice(0,200); } catch(_){ }
+            }
+          } else {
+            if (myToken !== costToken) return; // stale
+            if (badge){ badge.style.display='block'; badge.textContent = 'cost: n/a'; }
+            try { if (statusEl && data && data.error) statusEl.textContent = String(data.error).slice(0,200); } catch(_){ }
+            try { const below = document.getElementById('costBelow'); if (below){ below.textContent = 'cost: n/a'; } } catch(_){ }
+          }
+        }catch(e){ if (myToken !== costToken) return; if (badge){ badge.style.display='block'; badge.textContent = 'cost: n/a'; } try { const below=document.getElementById('costBelow'); if (below){ below.textContent = 'cost: n/a'; } } catch(_){ } }
+      }
+
+      function niceName(p, fallback){
+        try{
+          if (!p || typeof p !== 'string') return fallback || '';
+          const noQuery = p.split('?')[0];
+          const last = noQuery.split('/').pop() || fallback || '';
+          const dec = decodeURIComponent(last);
+          if (dec.length > 80) return dec.slice(0, 77) + '…';
+          return dec;
+        }catch(_){ return fallback || ''; }
+      }
       
       document.addEventListener('DOMContentLoaded', function() {
         try {
@@ -759,7 +1229,11 @@
             await loadJobsFromServer();
             // Periodic refresh
             setInterval(loadJobsFromServer, 4000);
+            // Kick initial estimate if inputs preloaded
+            scheduleEstimate();
           });
+          // Ensure cost badge is inside preview from the start
+          try { const pv=document.getElementById('preview'); const badge=document.getElementById('costIndicator'); if (pv && badge){ pv.appendChild(badge); badge.style.position='absolute'; badge.style.left='8px'; badge.style.bottom='8px'; } } catch(_){ }
         } catch(e) {
           console.error('CSInterface error:', e);
         }
