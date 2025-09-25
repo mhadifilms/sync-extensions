@@ -5,12 +5,31 @@
     <meta http-equiv="x-ua-compatible" content="ie=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>sync. extension</title>
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+      :root{
+        --bg:#0a0a0a; /* page background - darker */
+        --surface:#111111; /* cards - darker */
+        --text:#ffffff; /* primary text - pure white */
+        --muted:#888888; /* secondary - lighter gray */
+        --border:#333333; /* borders - lighter */
+        --blue:#0066ff; /* primary blue - sync blue */
+        --orange:#ff7700; /* secondary orange - sync orange */
+        --success:#00aa44;
+        --danger:#ff4444;
+        --radius:8px; /* less rounded */
+        --sync-bg:#0a0a0a; /* sync website bg */
+        --sync-surface:#111111; /* sync surface */
+        --sync-border:#333333; /* sync borders */
+        --accent:#0066ff; /* accent color */
+        --hover:#1a1a1a; /* hover states */
+      }
       * { box-sizing: border-box; }
       body { 
         font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif; 
-        background: #000; 
-        color: #fff; 
+        background: var(--bg); 
+        color: var(--text); 
         margin: 0; 
         padding: 0; 
         font-size: 14px;
@@ -18,19 +37,38 @@
         -webkit-user-select: text;
         user-select: text;
         position: relative;
+        overflow-y: auto;
+        height: auto;
+        min-height: 100vh;
       }
-      .container { padding: 20px; }
-      .header { margin-bottom: 20px; }
+      .container { 
+        max-width: 100%; 
+        margin: 0; 
+        padding: 0; 
+        height: auto; 
+        overflow: visible;
+        display: flex; 
+        flex-direction: column; 
+        background: var(--bg);
+      }
+      .header { 
+        padding: 20px 24px 16px; 
+        display: flex; 
+        justify-content: center; 
+        align-items: center;
+      }
       .header h1 { 
         font-size: 18px; 
         font-weight: 500; 
         margin: 0; 
         text-transform: lowercase;
+        color: var(--text);
       }
       .tabs { 
         display: flex; 
-        border-bottom: 1px solid #333; 
-        margin-bottom: 20px; 
+        border-bottom: 1px solid var(--border); 
+        margin: 0 24px; 
+        flex-shrink: 0;
       }
       .tab { 
         padding: 12px 16px; 
@@ -38,168 +76,1328 @@
         border-bottom: 2px solid transparent;
         text-transform: lowercase;
         font-weight: 500;
+        color: var(--muted); 
+        transition: all 0.2s ease;
+      }
+      .tab:hover { 
+        color: var(--text); 
       }
       .tab.active { 
-        border-bottom-color: #fff; 
+        border-bottom-color: var(--text); 
+        color: var(--text); 
       }
-      .tab-content { display: none; }
-      .tab-content.active { display: block; }
-      .upload-section { margin-bottom: 20px; }
-      .upload-row { 
+      .tab-content { 
+        display: none; 
+        flex: 1; 
+        overflow-y: visible; 
+        overflow-x: visible;
+        position: relative;
+      }
+      .tab-content.active { 
+        display: flex; 
+        flex-direction: column; 
+      }
+      
+      /* Video Player Section */
+      .video-player-section { 
+        flex: 1; 
+        background: var(--sync-bg); 
+        margin: 20px 24px; 
+        border-radius: var(--radius); 
+        border: 1px solid var(--sync-border); 
+        position: relative; 
+        min-height: 320px;
         display: flex; 
         align-items: center; 
-        margin-bottom: 12px; 
+        justify-content: center;
+        overflow: hidden;
       }
-      .upload-label { 
-        width: 60px; 
-        text-transform: lowercase;
+      
+      /* Audio Waveform Section */
+      .audio-waveform-section {
+        margin: 0 24px 16px;
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        padding: 16px;
+      }
+      
+      .audio-waveform-container {
+        position: relative;
+      }
+      
+      .audio-waveform {
+        width: 100%;
+        height: 64px;
+        background: var(--sync-bg);
+        border-radius: 6px;
+        border: 1px solid var(--sync-border);
+      }
+      
+      .audio-waveform-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      
+      .waveform-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,0.2);
+        background: rgba(255,255,255,0.1);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .waveform-btn:hover {
+        background: rgba(255,255,255,0.2);
+        transform: scale(1.05);
+      }
+      
+      .waveform-time {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        color: var(--text);
+        min-width: 120px;
+        text-align: center;
         font-weight: 500;
       }
+      
+      .waveform-seek {
+        flex: 1;
+        appearance: none;
+        height: 4px;
+        background: rgba(255,255,255,0.2);
+        border-radius: 2px;
+        outline: none;
+        cursor: pointer;
+      }
+      
+      .waveform-seek::-webkit-slider-thumb {
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 2px solid #fff;
+        margin-top: -5px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .waveform-seek::-webkit-slider-thumb:hover {
+        transform: scale(1.2);
+      }
+      
+      /* Audio Controls Section */
+      .audio-controls-section {
+        margin: 0 24px 16px;
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        padding: 20px;
+      }
+      
+      /* Lipsync Section */
+      .lipsync-section {
+        margin: 0 0 20px;
+      }
+      
+      /* Control panel */
+      .control-panel { 
+        background: var(--sync-surface); 
+        margin: 0 24px 24px; 
+        border-radius: 16px; 
+        border: 1px solid var(--sync-border); 
+        padding: 20px; 
+        flex-shrink: 0;
+      }
+      
       .btn { 
         appearance: none;
-        background: #1a1a1a; 
-        color: #fff; 
-        border: 1px solid #333; 
-        padding: 8px 12px; 
+        background: var(--sync-surface); 
+        color: var(--text); 
+        border: 1px solid var(--sync-border); 
+        padding: 10px 16px; 
         border-radius: 6px; 
         cursor: pointer; 
         text-transform: lowercase;
         font-weight: 500;
+        display: flex; 
+        align-items: center; 
+        gap: 8px; 
+        transition: all 0.2s ease;
+        font-family: 'Satoshi', sans-serif;
+        font-size: 14px;
       }
-      .btn:hover { background: #2a2a2a; }
-      .btn-primary { background: #fff; color: #000; border-color: #fff; }
-      .btn-primary:hover { background: #f0f0f0; }
-      .btn-danger { background: #2a1a1a; border-color: #553; }
-      .btn-ghost { background: transparent; border-color: #444; color:#aaa; }
-      .jid { cursor: pointer; outline: none; }
-      .jid:hover { text-decoration: underline; }
-      .jid:focus { text-decoration: underline; }
+      .btn-outline {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        color: var(--text);
+      }
+      
+      .btn-outline:hover {
+        background: rgba(255, 119, 0, 0.12);
+        border-color: var(--orange);
+        color: var(--orange);
+      }
+      .btn:hover { 
+        border-color: var(--orange); 
+        background: var(--sync-bg); 
+        transform: translateY(-1px);
+      }
+      .btn-primary { 
+        background: var(--blue); 
+        color: #fff; 
+        border-color: transparent; 
+        box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset; 
+      }
+      .btn-primary:hover { 
+        filter: brightness(1.1); 
+        box-shadow: 0 0 0 1px rgba(255,255,255,0.12) inset; 
+        transform: translateY(-1px);
+      }
+      .btn-ghost { 
+        background: transparent; 
+        border-color: var(--sync-border); 
+        color: var(--muted); 
+      }
       .file-path { 
-        margin-left: 12px; 
-        color: #888; 
+        color: var(--muted); 
         font-size: 12px;
-        max-width: 200px;
+        max-width: 240px; 
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-family: 'IBM Plex Mono', monospace;
       }
       .lipsync-button { 
-        width: 100%;
-        margin-top: 20px;
+        width: 100%; 
+        margin: 0 24px 20px; 
+        border-radius: 6px; 
+        padding: 16px 24px; 
+        font-size: 16px; 
+        font-weight: 600; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        gap: 10px;
+        background: var(--accent);
+        color: white;
+        border: none;
+        transition: all 0.2s ease;
+        text-transform: lowercase;
+        letter-spacing: 0.5px;
+        box-shadow: 0 2px 8px rgba(0, 102, 255, 0.2);
+      }
+      .lipsync-button:hover:not(:disabled) { 
+        background: #0052cc;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 102, 255, 0.4);
       }
       .lipsync-button:disabled { 
-        background: #333; 
-        color: #666; 
-        cursor: not-allowed; 
+        background: #333333; 
+        color: #666666; 
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
       }
-      .settings-group { margin-bottom: 20px; }
-      .settings-label { 
-        display: block; 
-        margin-bottom: 8px; 
-        text-transform: lowercase;
+      
+      /* Audio upload area */
+      .audio-upload-area { 
+        background: var(--sync-bg); 
+        border: 2px dashed var(--sync-border); 
+        border-radius: 6px; 
+        padding: 16px; 
+        margin-bottom: 20px; 
+        text-align: center; 
+        color: var(--muted); 
+        font-size: 13px; 
+        transition: all 0.3s ease;
+        cursor: pointer;
+        min-height: 60px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin-top: 16px;
+      }
+      .audio-upload-area:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+        transform: translateY(-1px);
+      }
+      
+      /* Cost and model info */
+      .bottom-info { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        margin: 0 24px 24px; 
+        font-size: 13px; 
+        color: var(--muted); 
+        font-family: 'IBM Plex Mono', monospace;
         font-weight: 500;
       }
-      .radio-group { margin-bottom: 12px; }
-      .radio-item { 
+      
+      /* Loading spinner inspired by Sync website */
+      .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid var(--sync-border);
+        border-radius: 50%;
+        border-top-color: var(--blue);
+        animation: spin 1s ease-in-out infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(11, 11, 14, 0.8);
         display: flex; 
         align-items: center; 
-        margin-bottom: 8px; 
+        justify-content: center;
+        z-index: 10;
+        border-radius: 16px;
       }
-      .radio-item input { margin-right: 8px; }
-      .slider-group { margin-bottom: 12px; }
-      .slider { 
+
+      /* Preview area */
+      #preview { 
+        margin-top: 0; 
+        position: relative; 
+        background: var(--sync-bg); 
+        border: 1px solid var(--sync-border); 
+        border-radius: var(--radius); 
+        padding: 0; 
+        min-height: 240px; 
+        display: block; 
+        overflow: hidden;
+      }
+      .player { 
+        position: relative; 
+        border-radius: var(--radius); 
+        overflow: hidden; 
+        background: var(--sync-bg); 
+        border: none;
+        width: 100%;
+        height: 240px;
+      }
+      .player-media { 
         width: 100%; 
-        margin: 8px 0; 
+        height: 100%; 
+        object-fit: cover; 
+        display: block; 
+        background: var(--sync-bg); 
       }
-      .checkbox-group { margin-bottom: 12px; }
-      .checkbox-item { 
+      .player-controls { 
+        position: absolute; 
+        left: 0; 
+        right: 0; 
+        bottom: 0; 
+        background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.7) 100%); 
+        padding: 16px 20px; 
         display: flex; 
         align-items: center; 
-        margin-bottom: 8px; 
+        gap: 12px; 
       }
-      .checkbox-item input { margin-right: 8px; }
-      .input-field { 
-        background: #1a1a1a; 
+      .player-btn { 
+        width: 32px; 
+        height: 32px; 
+        border-radius: 50%; 
+        border: 1px solid rgba(255,255,255,0.2); 
+        background: rgba(255,255,255,0.1); 
         color: #fff; 
-        border: 1px solid #333; 
-        padding: 8px 12px; 
-        border-radius: 4px; 
-        width: 100%; 
-        margin-top: 8px;
-      }
-      .history-item { 
-        background: #1a1a1a; 
-        border: 1px solid #333; 
-        padding: 12px; 
-        margin-bottom: 8px; 
-        border-radius: 4px; 
-      }
-      .history-status { 
-        font-size: 12px; 
-        margin-bottom: 4px; 
-        text-transform: uppercase;
-      }
-      .history-status.completed { color: #4ade80; }
-      .history-status.processing { color: #fbbf24; }
-      .history-status.failed { color: #f87171; }
-      .history-actions { 
-        margin-top: 8px; 
         display: flex; 
-        gap: 8px; 
-      }
-      .history-button { 
-        background: #333; 
-        color: #fff; 
-        border: 1px solid #444; 
-        padding: 6px 12px; 
-        border-radius: 6px; 
+        align-items: center; 
+        justify-content: center; 
         cursor: pointer; 
-        font-size: 12px;
+        transition: all 0.2s ease;
+      }
+      .player-btn:hover { 
+        background: rgba(255,255,255,0.2); 
+        transform: scale(1.05);
+      }
+      .player-time { 
+        font-family: 'IBM Plex Mono', monospace; 
+        font-size: 13px; 
+        color: var(--text); 
+        min-width: 120px; 
+        text-align: center; 
+        font-weight: 500;
+      }
+      .player-seek { 
+        flex: 1;
+        appearance: none; 
+        height: 4px; 
+        background: rgba(255,255,255,0.2); 
+        border-radius: 2px; 
+        outline: none; 
+        cursor: pointer;
+      }
+      .player-seek::-webkit-slider-thumb { 
+        appearance: none; 
+        width: 14px; 
+        height: 14px; 
+        border-radius: 50%; 
+        background: var(--accent); 
+        border: 2px solid #fff; 
+        margin-top: -5px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .player-seek::-webkit-slider-thumb:hover {
+        transform: scale(1.2);
+      }
+
+      /* Audio waveform */
+      .audio-wrap { 
+        padding: 16px; 
+        background: var(--sync-bg); 
+        border: 1px solid var(--sync-border); 
+        border-radius: var(--radius); 
+        margin-bottom: 16px;
+      }
+      .audio-canvas { 
+        width: 100%; 
+        height: 64px; 
+        display: block; 
+        background: var(--sync-surface); 
+        border-radius: 8px; 
+        border: 1px solid var(--sync-border);
+      }
+      .audio-controls { 
+        display: flex; 
+        align-items: center; 
+        gap: 12px; 
+        margin-top: 12px; 
+      }
+      .cost-badge { 
+        position: absolute; 
+        left: 12px; 
+        bottom: 12px; 
+        background: rgba(0,0,0,0.8); 
+        border: 1px solid var(--sync-border); 
+        color: var(--text); 
+        padding: 6px 12px; 
+        border-radius: 8px; 
+        font-size: 12px; 
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 500;
+        pointer-events: none; 
+        z-index: 10; 
+        backdrop-filter: blur(8px);
+      }
+      .cost-row { 
+        margin-top: 8px; 
+        font-size: 13px; 
+        color: var(--muted); 
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 500;
+      }
+      .brand { position: relative; padding-left: 42px; }
+      .brand::before { content:''; position:absolute; left:14px; top:50%; transform:translateY(-50%); width:20px; height:20px; background:url('icons/white_icon.png') no-repeat center/contain; }
+
+      /* Dropzone */
+      .dropzone { 
+        width: 100%; 
+        height: 280px; 
+        border-radius: 6px; 
+        background: var(--sync-bg); 
+        border: 2px dashed var(--sync-border); 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        transition: all 0.3s ease;
+        cursor: pointer;
+        position: relative;
+      }
+      .dropzone:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+        transform: translateY(-2px);
+      }
+      .dropzone-inner { 
+        text-align: center; 
+        color: var(--muted); 
+      }
+      .dropzone-icon {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 16px;
+        opacity: 0.8;
+      }
+      .dropzone-title { 
+        margin-top: 0; 
+        font-size: 16px; 
+        color: var(--text); 
+        font-weight: 500; 
+        font-family: 'Satoshi', sans-serif;
+        margin-bottom: 8px;
+      }
+      .dropzone-sub { 
+        margin-top: 0; 
+        font-size: 13px;
+        color: var(--muted); 
+        font-family: 'Satoshi', sans-serif;
+        margin-bottom: 20px;
+      }
+      .dropzone .btn-outline {
+        margin-top: 0;
+        padding: 10px 20px;
+        min-width: 120px;
+        justify-content: center;
+      }
+      .dropzone .btn-outline:hover {
+        background: rgba(255, 102, 0, 0.12);
+        border-color: var(--orange);
+        color: var(--orange);
+      }
+      .dropzone .btn-ghost {
+        border: 1px solid var(--sync-border);
+        color: var(--text);
+        background: var(--sync-surface);
+      }
+      .dropzone .btn-ghost:hover {
+        background: var(--hover);
+        color: var(--text);
+        border-color: var(--orange);
+      }
+
+      /* Settings styling */
+      .settings-group {
+        margin-bottom: 24px;
+      }
+      
+      .settings-label {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 12px;
+        font-weight: 500;
         text-transform: lowercase;
       }
-      .history-button:hover { background: #444; }
-      #preview { position: relative; }
-      .cost-badge {
+      
+      .radio-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      
+      .radio-item {
+        position: relative;
+        display: flex;
+        align-items: center;
+        padding: 16px;
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin-bottom: 8px;
+      }
+      
+      .radio-item:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+        transform: translateY(-1px);
+      }
+      
+      .radio-item:has(input:checked) {
+        border-color: var(--accent);
+        background: rgba(0, 102, 255, 0.1);
+      }
+      
+      .radio-item input[type="radio"] {
+        margin-right: 12px;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+      
+      .radio-item label {
+        flex: 1;
+        cursor: pointer;
+        margin: 0;
+      }
+      
+      .model-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 4px;
+      }
+      
+      .model-desc {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      
+      .new-badge {
         position: absolute;
-        left: 8px;
-        bottom: 8px;
-        background: rgba(20,20,20,0.85);
-        border: 1px solid #333;
-        color: #9ca3af;
+        top: 12px;
+        right: 12px;
+        background: var(--orange);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        box-shadow: 0 2px 4px rgba(255, 119, 0, 0.3);
+      }
+      
+      .slider {
+        width: 100%;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--sync-border);
+        outline: none;
+        appearance: none;
+        cursor: pointer;
+      }
+      
+      .slider::-webkit-slider-thumb {
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 2px solid white;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .slider::-webkit-slider-thumb:hover {
+        transform: scale(1.1);
+      }
+      
+      .checkbox-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      
+      .checkbox-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .checkbox-item:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+      }
+      
+      .checkbox-item input[type="checkbox"] {
+        margin-right: 12px;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
+      
+      .checkbox-item label {
+        cursor: pointer;
+        margin: 0;
+        font-size: 14px;
+        color: var(--text);
+      }
+      
+      .input-field {
+        background: var(--sync-surface);
+        color: var(--text);
+        border: 1px solid var(--sync-border);
+        padding: 12px 16px;
+        border-radius: 8px;
+        width: 100%;
+        font-size: 14px;
+        font-family: 'Satoshi', sans-serif;
+        font-weight: 500;
+        transition: all 0.2s ease;
+      }
+      
+      .input-field:focus {
+        outline: none;
+        border-color: var(--orange);
+        box-shadow: 0 0 0 2px rgba(255, 102, 0, 0.1);
+      }
+      
+      select.input-field {
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23666' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+        background-position: right 16px center;
+        background-repeat: no-repeat;
+        background-size: 12px;
+        padding-right: 44px;
+        width: 100%;
+        background-color: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: 8px;
+        font-family: 'Satoshi', sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text);
+        transition: all 0.2s ease;
+      }
+
+      select.input-field:hover {
+        border-color: var(--sync-border);
+      }
+
+      select.input-field:focus {
+        outline: none;
+        border-color: var(--orange);
+        box-shadow: none;
+      }
+
+      select.input-field option {
+        background-color: var(--sync-surface);
+        color: var(--text);
+        padding: 12px 16px;
+        font-family: 'Satoshi', sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      
+      .preference-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px;
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        margin-bottom: 12px;
+      }
+      
+      .preference-label {
+        font-size: 14px;
+        color: var(--text);
+        font-weight: 500;
+        margin: 0;
+      }
+      
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+      }
+      
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      
+      .toggle-label {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: var(--sync-border);
+        transition: 0.3s;
+        border-radius: 24px;
+        border: 1px solid var(--sync-border);
+      }
+      
+      .toggle-label:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: 0.3s;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      }
+      
+      .toggle-switch input:checked + .toggle-label {
+        background-color: var(--accent);
+        border-color: var(--accent);
+      }
+      
+      .toggle-switch input:checked + .toggle-label:before {
+        transform: translateX(20px);
+      }
+      
+      /* History styling */
+      .history-item {
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+        transition: all 0.2s ease;
+      }
+      
+      .history-item:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+      }
+      
+      .history-status {
+        display: inline-block;
         padding: 4px 8px;
         border-radius: 6px;
         font-size: 11px;
-        pointer-events: none;
-        z-index: 10;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
       }
-      #costIndicator {
-        position: absolute;
-        left: 10px;
-        bottom: 10px;
-        background: rgba(20,20,20,0.85);
-        border: 1px solid #333;
-        color: #9ca3af;
-        padding: 6px 10px;
+      
+      .history-status.completed {
+        background: rgba(0, 170, 68, 0.2);
+        color: #00aa44;
+        border: 1px solid rgba(0, 170, 68, 0.3);
+      }
+      
+      .history-status.processing {
+        background: rgba(0, 102, 255, 0.2);
+        color: var(--accent);
+        border: 1px solid rgba(0, 102, 255, 0.3);
+      }
+      
+      .history-status.failed {
+        background: rgba(255, 68, 68, 0.2);
+        color: #ff4444;
+        border: 1px solid rgba(255, 68, 68, 0.3);
+      }
+      
+      .history-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      
+      .history-button {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--sync-border);
+        padding: 8px 16px;
         border-radius: 6px;
-        font-size: 11px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-transform: lowercase;
+      }
+      
+      .history-button:hover {
+        background: var(--orange);
+        border-color: var(--orange);
+        color: white;
+        transform: translateY(-1px);
+      }
+      
+      .jid {
+        cursor: pointer;
+        color: var(--accent);
+        text-decoration: underline;
+        transition: all 0.2s ease;
+      }
+      
+      .jid:hover {
+        color: #0052cc;
+      }
+
+      /* Input sections */
+      .input-section {
+        margin: 20px 24px;
+        background: var(--sync-surface);
+        border: 1px solid var(--sync-border);
+        border-radius: var(--radius);
+        padding: 20px;
+        transition: box-shadow 0.2s ease;
+      }
+
+      .input-section:hover {
+        box-shadow: 0 2px 8px rgba(255, 255, 255, 0.05);
+      }
+
+      .input-dropzone {
+        background: var(--sync-bg);
+        border: 2px dashed var(--sync-border);
+        border-radius: 6px;
+        padding: 40px;
+        text-align: center;
+        cursor: pointer;
+        min-height: 200px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        transition: all 0.2s ease;
+      }
+
+      .input-dropzone:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+      }
+
+      .dropzone-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .dropzone-title {
+        font-size: 16px;
+        font-weight: 500;
+        margin: 16px 0 8px;
+      }
+
+      .dropzone-sub {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 20px;
+      }
+
+      .dropzone-buttons {
+        display: flex;
+        gap: 12px;
+      }
+
+      .btn-orange {
+        background: transparent;
+        border: 1px solid var(--orange);
+        color: var(--orange);
+      }
+
+      .btn-orange:hover {
+        background: var(--orange);
+        color: white;
+      }
+
+      /* Bottom info container */
+      .bottom-info-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 16px 24px;
+        font-size: 13px;
+        color: var(--muted);
+        font-family: 'IBM Plex Mono', monospace;
+        font-weight: 500;
+      }
+
+      .bottom-info-left {
+        flex: 0 0 auto;
+        text-align: left;
+      }
+
+      .bottom-info-center {
+        flex: 1;
+        text-align: center;
+        padding: 0 20px;
+      }
+
+      .bottom-info-right {
+        flex: 0 0 auto;
+        text-align: right;
+        display: flex;
+        align-items: center;
+      }
+
+      /* Custom Video Player */
+      .custom-video-player {
+        position: relative;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .video-element {
+        width: 100%;
+        height: auto;
+        display: block;
+        background: #000;
+      }
+
+      .video-controls {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(transparent, rgba(0,0,0,0.8));
+        padding: 20px 16px 16px;
+      }
+
+      .video-progress-container {
+        margin-bottom: 12px;
+      }
+
+      .video-progress-bar {
+        position: relative;
+        height: 4px;
+        background: rgba(255,255,255,0.3);
+        border-radius: 2px;
+        cursor: pointer;
+      }
+
+      .video-progress-fill {
+        height: 100%;
+        background: var(--orange);
+        border-radius: 2px;
+        width: 5%;
+        transition: width 0.1s;
+      }
+
+      .video-progress-thumb {
+        position: absolute;
+        top: -4px;
+        left: 5%;
+        width: 12px;
+        height: 12px;
+        background: var(--orange);
+        border-radius: 50%;
+        transform: translateX(-50%);
+        cursor: pointer;
+      }
+
+      .video-play-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0,0,0,0.3);
+        opacity: 1;
+        transition: opacity 0.3s;
+        pointer-events: auto;
+      }
+
+      .video-play-overlay.hidden {
+        opacity: 0;
         pointer-events: none;
-        z-index: 2147483000;
+      }
+
+      .center-play-btn {
+        background: rgba(0,0,0,0.8);
+        border: 2px solid rgba(255,255,255,0.9);
+        color: #fff;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+      }
+
+      .center-play-btn:hover {
+        background: rgba(0,0,0,0.9);
+        border-color: #fff;
+        transform: scale(1.1);
+      }
+
+      .video-control-buttons {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        color: #fff;
+        font-family: 'IBM Plex Mono', monospace;
+      }
+
+      .video-left-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .video-center-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .video-right-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .volume-slider {
+        width: 60px;
+        height: 4px;
+        background: rgba(255,255,255,0.3);
+        border-radius: 2px;
+        outline: none;
+        cursor: pointer;
+        appearance: none;
+      }
+
+      .volume-slider::-webkit-slider-thumb {
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        cursor: pointer;
+      }
+
+      .video-control-btn {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        color: #fff;
+        padding: 6px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+      }
+
+      .video-control-btn:hover {
+        background: rgba(255,255,255,0.3);
+      }
+
+      .video-time {
+        color: #fff;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+      }
+
+      .video-frame-info {
+        color: #ccc;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        margin-left: auto;
+      }
+
+      .video-delete-btn {
+        margin-left: 8px;
+      }
+
+      /* Custom Audio Player */
+      .custom-audio-player {
+        background: var(--sync-surface);
+        border-radius: 8px;
+        padding: 16px;
+        border: 1px solid var(--sync-border);
+      }
+
+      .audio-upload-section {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .audio-upload-btn, .audio-speech-btn {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.16);
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+
+      .audio-upload-btn:hover, .audio-speech-btn:hover {
+        background: rgba(255,255,255,0.12);
+        border-color: rgba(255,255,255,0.24);
+      }
+
+      .audio-waveform-container {
+        position: relative;
+      }
+
+      .waveform-canvas {
+        width: 100%;
+        height: 80px;
+        background: #1a1a1a;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,0.1);
         display: block;
       }
-      .cost-row {
-        margin-top: 6px;
-        font-size: 12px;
-        color: #9ca3af;
+
+      .audio-controls-bottom {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
+        font-size: 13px;
+        color: #fff;
+        font-family: 'IBM Plex Mono', monospace;
+      }
+
+      .audio-play-btn {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        color: #fff;
+        padding: 6px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+      }
+
+      .audio-play-btn:hover {
+        background: rgba(255,255,255,0.3);
+      }
+
+      .audio-time {
+        color: #fff;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+      }
+
+      .audio-delete-btn {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        color: #fff;
+        padding: 6px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+        margin-left: auto;
+      }
+
+      .audio-delete-btn:hover {
+        background: rgba(255,255,255,0.3);
+      }
+
+      /* Lipsync button */
+      .lipsync-button {
+        width: calc(100% - 48px);
+        margin: 0 auto 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 16px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        gap: 8px;
+      }
+
+      .lipsync-button:disabled {
+        background: #333;
+        color: #666;
+        cursor: not-allowed;
+      }
+
+      .lipsync-button:hover:not(:disabled) {
+        background: #0052cc;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 102, 255, 0.3);
+      }
+
+      /* Tab container styling */
+      .tab-container {
+        padding: 24px;
+      }
+
+      .empty-state {
+        color: var(--muted);
+        text-align: center;
+        padding: 40px;
+        font-size: 14px;
+        font-family: 'Satoshi', sans-serif;
+      }
+
+      /* Post-lipsync action buttons */
+      .post-lipsync-actions {
+        display: flex;
+        gap: 12px;
+        margin: 20px 24px 0;
+        justify-content: center;
+      }
+
+      .action-btn {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        color: var(--text);
+        padding: 10px 20px;
+        min-width: 120px;
+        justify-content: center;
+        border-radius: 6px;
+        cursor: pointer;
+        font-family: 'Satoshi', sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        text-transform: lowercase;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .action-btn:hover {
+        background: rgba(255, 102, 0, 0.12);
+        border-color: var(--orange);
+        color: var(--orange);
+        transform: translateY(-1px);
+      }
+
+      .action-btn-primary {
+        background: var(--orange);
+        color: white;
+        border-color: var(--orange);
+      }
+
+      .action-btn-primary:hover {
+        background: #e66a00;
+        border-color: #e66a00;
       }
     </style>
     <script src="lib/CSInterface.js"></script>
   </head>
   <body>
-    <div id="debugBanner" style="background:#7c3aed;color:#fff;padding:6px 10px;font-size:12px;text-align:center;">DEBUG: repo build 0.4.33 — cost via 127.0.0.1</div>
+    <div id="debugBanner" style="display:none;background:#7c3aed;color:#fff;padding:6px 10px;font-size:12px;text-align:center;">DEBUG: repo build 0.4.33 — cost via 127.0.0.1</div>
     <div class="container">
       <div class="header">
-          <h1>sync. extension</h1>
-        </div>
+        <img src="icons/sync_logo_text@2x.png" alt="sync." style="height: 24px; width: auto;">
+      </div>
       
       <div class="tabs">
         <div class="tab active" onclick="showTab('sources')">sources</div>
@@ -208,85 +1406,144 @@
       </div>
       
       <div id="sources" class="tab-content active">
-        <div class="upload-section">
-          <div class="upload-row">
-            <div class="upload-label">video</div>
-            <button class="btn" onclick="selectVideo()">upload</button>
-            <button class="btn" onclick="selectVideoInOut()">use in/out</button>
-            <div class="file-path" id="videoPath">no file selected</div>
+        <!-- Video section -->
+        <div class="input-section video-section" id="videoSection">
+          <div class="input-dropzone" id="videoDropzone" onclick="selectVideo()">
+            <div class="dropzone-inner">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 3v12m0-12l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <rect x="4" y="14" width="16" height="6" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <p class="dropzone-title">drag and drop to upload</p>
+              <p class="dropzone-sub">mp4 and mov accepted</p>
+              <div class="dropzone-buttons">
+                <button class="btn btn-outline" onclick="event.stopPropagation(); selectVideo()">upload</button>
+                <button class="btn btn-outline" onclick="event.stopPropagation(); selectVideoInOut()">in/out points</button>
+              </div>
+            </div>
           </div>
-          <div class="upload-row">
-            <div class="upload-label">audio</div>
-            <button class="btn" onclick="selectAudio()">upload</button>
-            <button class="btn" onclick="selectAudioInOut()">use in/out</button>
-            <div class="file-path" id="audioPath">no file selected</div>
+          <div id="videoPreview" style="display: none;"></div>
+        </div>
+
+        <!-- Audio section -->
+        <div class="input-section audio-section" id="audioSection">
+          <div class="input-dropzone" id="audioDropzone" onclick="selectAudio()">
+            <div class="dropzone-inner">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 3v12m0-12l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <rect x="4" y="14" width="16" height="6" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <p class="dropzone-title">click to upload or drag audio file</p>
+              <p class="dropzone-sub">mp3 or wav accepted</p>
+              <div class="dropzone-buttons">
+                <button class="btn btn-outline" onclick="event.stopPropagation(); selectAudio()">upload</button>
+                <button class="btn btn-outline" onclick="event.stopPropagation(); selectAudioInOut()">in/out points</button>
+              </div>
+            </div>
+          </div>
+          <div id="audioPreview" style="display: none;"></div>
+        </div>
+
+        <!-- Bottom info container -->
+        <div class="bottom-info-container">
+          <div class="bottom-info-left">
+            <span id="costDisplay">cost: ~$1.35</span>
+          </div>
+          <div class="bottom-info-center">
+            <span id="statusMessage">ready to lipsync</span>
+          </div>
+          <div class="bottom-info-right">
+            <span id="currentModel">lipsync-2-pro</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="showTab('settings')" style="cursor: pointer; margin-left: 8px;">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
           </div>
         </div>
 
-        <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn btn-primary lipsync-button" id="lipsyncBtn" onclick="startLipsync()" disabled style="flex:1;">
-            lipsync
-          </button>
-          <button class="history-button btn-ghost" id="clearBtn" onclick="clearSelection()" style="height:40px; align-self:stretch; display:none;">clear</button>
-          <div id="postActions" style="display:none; gap:8px;">
-            <button class="history-button" id="saveBtn" onclick="saveLatest()">save</button>
-            <button class="history-button" id="insertBtn" onclick="insertLatest()">insert</button>
+        <!-- Lipsync button -->
+        <button class="lipsync-button" id="lipsyncBtn" onclick="startLipsync()" disabled>
+          <img src="icons/white_icon.png" alt="sync" style="height: 20px; width: auto; margin-right: 8px;">
+          lipsync
+        </button>
+
+        <!-- Hidden elements -->
+        <div style="display:none;">
+          <button id="clearBtn" onclick="clearSelection()">clear</button>
+          <div id="postActions">
+            <button id="saveBtn" onclick="saveLatest()">save</button>
+            <button id="insertBtn" onclick="insertLatest()">insert</button>
           </div>
         </div>
-        <div id="lipsyncStatus" style="margin-top:8px;font-size:12px;color:#888;"></div>
-        <div id="preview" style="margin-top:12px;"></div>
-        <div id="costBelow" class="cost-row">cost: —</div>
-        </div>
+      </div>
 
       <div id="history" class="tab-content">
-        <div id="historyList">
-          <div style="color: #666; text-align: center; padding: 20px;">
-            no generations yet
+        <div class="tab-container">
+          <div id="historyList">
+            <div class="empty-state">
+              no generations yet
+            </div>
           </div>
         </div>
-        </div>
+      </div>
 
       <div id="settings" class="tab-content">
-        <div class="settings-group">
-          <label class="settings-label">model</label>
-          <div class="radio-group" id="modelGroup">
-            <div class="radio-item">
-              <input type="radio" name="model" value="lipsync-2-pro" id="lipsync2pro" checked>
-              <label for="lipsync2pro">lipsync-2-pro</label>
-            </div>
-            <div class="radio-item">
-              <input type="radio" name="model" value="lipsync-2" id="lipsync2">
-              <label for="lipsync2">lipsync-2</label>
-            </div>
-            <div class="radio-item">
-              <input type="radio" name="model" value="lipsync-1.9.0-beta" id="lipsync19">
-              <label for="lipsync19">lipsync-1.9.0-beta</label>
+        <div class="tab-container">
+          <div class="settings-group">
+            <label class="settings-label">choose model</label>
+            <div class="radio-group" id="modelGroup">
+              <div class="radio-item">
+                <input type="radio" name="model" value="lipsync-2-pro" id="lipsync2pro" checked>
+                <label for="lipsync2pro">
+                  <div class="model-name">lipsync-2-pro</div>
+                  <div class="model-desc">lipsync-2 optimized for the highest resolution</div>
+                </label>
+                <span class="new-badge">new</span>
+              </div>
+              <div class="radio-item">
+                <input type="radio" name="model" value="lipsync-2" id="lipsync2">
+                <label for="lipsync2">
+                  <div class="model-name">lipsync-2</div>
+                  <div class="model-desc">best lipsync model, matches speaker style</div>
+                </label>
+              </div>
+              <div class="radio-item">
+                <input type="radio" name="model" value="lipsync-1.9.0-beta" id="lipsync19">
+                <label for="lipsync19">
+                  <div class="model-name">lipsync-1.9.0-beta</div>
+                  <div class="model-desc">our fastest lipsync model yet</div>
+                </label>
+              </div>
             </div>
           </div>
-        </div>
         
         <div class="settings-group">
-          <label class="settings-label">temperature</label>
-          <input type="range" class="slider" id="temperature" min="0" max="1" step="0.1" value="0.5">
-          <div style="font-size: 12px; color: #666; text-align: center;" id="tempValue">0.5</div>
-            </div>
-
-        <div class="settings-group">
-          <div class="checkbox-group">
-            <div class="checkbox-item">
+          <label class="settings-label">preferences</label>
+          <div class="preference-item">
+            <label class="preference-label">temperature: <span id="tempValue">0.5</span></label>
+            <input type="range" class="slider" id="temperature" min="0" max="1" step="0.1" value="0.5">
+          </div>
+          
+          <div class="preference-item">
+            <label class="preference-label">lipsync only active speaker</label>
+            <div class="toggle-switch">
               <input type="checkbox" id="activeSpeakerOnly">
-              <label for="activeSpeakerOnly">lipsync only active speaker</label>
+              <label for="activeSpeakerOnly" class="toggle-label"></label>
             </div>
-            <div class="checkbox-item">
+          </div>
+          
+          <div class="preference-item">
+            <label class="preference-label">detect obstructions</label>
+            <div class="toggle-switch">
               <input type="checkbox" id="detectObstructions">
-              <label for="detectObstructions">detect obstructions</label>
+              <label for="detectObstructions" class="toggle-label"></label>
             </div>
           </div>
         </div>
 
         <div class="settings-group">
           <label class="settings-label">sync. mode</label>
-          <select id="syncMode" class="input-field" style="max-width:260px;">
+          <select id="syncMode" class="input-field">
             <option value="loop">loop</option>
             <option value="bounce">bounce</option>
             <option value="cut_off">cut_off</option>
@@ -297,21 +1554,21 @@
         
         <div class="settings-group">
           <label class="settings-label">render video</label>
-          <div class="radio-group">
-            <div class="radio-item"><input type="radio" name="renderVideo" value="h264" id="rv_h264" checked><label for="rv_h264">h.264 (match source)</label></div>
-            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422" id="rv_pr422"><label for="rv_pr422">prores 422 (match source)</label></div>
-            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422_proxy" id="rv_pr422p"><label for="rv_pr422p">prores 422 proxy (match source)</label></div>
-            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422_lt" id="rv_pr422lt"><label for="rv_pr422lt">prores 422 LT (match source)</label></div>
-            <div class="radio-item"><input type="radio" name="renderVideo" value="prores_422_hq" id="rv_pr422hq"><label for="rv_pr422hq">prores 422 HQ (match source)</label></div>
-          </div>
+          <select id="renderVideo" class="input-field">
+            <option value="h264">h.264 (match source)</option>
+            <option value="prores_422">prores 422 (match source)</option>
+            <option value="prores_422_proxy">prores 422 proxy (match source)</option>
+            <option value="prores_422_lt">prores 422 LT (match source)</option>
+            <option value="prores_422_hq">prores 422 HQ (match source)</option>
+          </select>
         </div>
 
         <div class="settings-group">
           <label class="settings-label">render audio</label>
-          <div class="radio-group">
-            <div class="radio-item"><input type="radio" name="renderAudio" value="wav" id="ra_wav" checked><label for="ra_wav">wav (match timeline)</label></div>
-            <div class="radio-item"><input type="radio" name="renderAudio" value="mp3" id="ra_mp3"><label for="ra_mp3">mp3 (320 kbps)</label></div>
-          </div>
+          <select id="renderAudio" class="input-field">
+            <option value="wav">wav (match timeline)</option>
+            <option value="mp3">mp3 (320 kbps)</option>
+          </select>
         </div>
         
         <div class="settings-group">
@@ -326,7 +1583,7 @@
               <label for="saveDocuments">universal folder in ~/Documents</label>
             </div>
           </div>
-            </div>
+        </div>
         
         <div class="settings-group">
           <label class="settings-label">api key</label>
@@ -335,9 +1592,15 @@
         <div class="settings-group">
           <label class="settings-label">supabase url</label>
           <input type="text" class="input-field" id="supabaseUrl" placeholder="https://xxxxx.supabase.co">
-          <label class="settings-label" style="margin-top:8px;">supabase key</label>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">supabase key</label>
           <input type="password" class="input-field" id="supabaseKey" placeholder="service or anon key">
-          <label class="settings-label" style="margin-top:8px;">supabase bucket</label>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">supabase bucket</label>
           <input type="text" class="input-field" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)">
         </div>
           </div>
@@ -360,7 +1623,7 @@
       let uploadedVideoUrl = '';
       let uploadedAudioUrl = '';
       let costToken = 0;
-
+      
       // Helper to call JSX with JSON payload and parse JSON response
       function evalExtendScript(fn, payload) {
         if (!cs) cs = new CSInterface();
@@ -386,7 +1649,7 @@
       // Single inline ExtendScript picker (no host dependency)
       function openFileDialog(kind) {
         return new Promise(function(resolve){
-          if (!cs) cs = new CSInterface();
+        if (!cs) cs = new CSInterface();
           var payload = JSON.stringify({ kind: (typeof kind === 'string' ? kind : 'video') });
           cs.evalScript('PPRO_showFileDialog(' + JSON.stringify(payload) + ')', function(res){
             try {
@@ -420,7 +1683,7 @@
       
       async function selectVideo() {
         try {
-          var statusEl = document.getElementById('lipsyncStatus');
+          var statusEl = document.getElementById('statusMessage');
           try { statusEl.textContent = 'opening video picker…'; } catch(_){ }
           const raw = await openFileDialog('video');
           if (raw && raw.indexOf('/') !== -1) {
@@ -432,7 +1695,6 @@
             const size = await new Promise(resolve=>{ const safe = String(raw).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';}})()`; cs.evalScript(es, function(r){ var n=Number(r||0); resolve(isNaN(n)?0:n); }); });
             if (size > 1024*1024*1024) { try { statusEl.textContent = 'video exceeds 1GB (not allowed)'; } catch(_){ } return; }
             selectedVideo = raw;
-            document.getElementById('videoPath').textContent = raw.split('/').pop();
             updateLipsyncButton();
             renderInputPreview();
             try { statusEl.textContent = 'uploading video…'; } catch(_){ }
@@ -456,7 +1718,7 @@
       
       async function selectAudio() {
         try {
-          var statusEl = document.getElementById('lipsyncStatus');
+          var statusEl = document.getElementById('statusMessage');
           try { statusEl.textContent = 'opening audio picker…'; } catch(_){ }
           const raw = await openFileDialog('audio');
           if (raw && raw.indexOf('/') !== -1) {
@@ -467,9 +1729,9 @@
             const size = await new Promise(resolve=>{ const safe = String(raw).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';}})()`; cs.evalScript(es, function(r){ var n=Number(r||0); resolve(isNaN(n)?0:n); }); });
             if (size > 1024*1024*1024) { try { statusEl.textContent = 'audio exceeds 1GB (not allowed)'; } catch(_){ } return; }
             selectedAudio = raw;
-            document.getElementById('audioPath').textContent = raw.split('/').pop();
             updateLipsyncButton();
             renderInputPreview();
+            updateInputStatus();
             try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
@@ -478,50 +1740,50 @@
               const j = await r.json().catch(()=>null);
               if (r.ok && j && j.ok && j.url){ uploadedAudioUrl = j.url; }
             }catch(_){ }
-            try { statusEl.textContent = ''; } catch(_){ }
+            try { updateInputStatus(); } catch(_){ }
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
           } else {
             console.warn('No audio selected');
-            try { statusEl.textContent = 'no audio selected'; } catch(_){ }
+            try { updateInputStatus(); } catch(_){ }
           }
         } catch (_) { console.warn('Audio select failed'); }
       }
       
       async function selectVideoInOut(){
         try{
-          const statusEl = document.getElementById('lipsyncStatus');
+          const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering video in/out…';
-          const codec = (document.querySelector('input[name="renderVideo"]:checked')||{}).value || 'h264';
+          const codec = document.getElementById('renderVideo').value || 'h264';
           const res = await evalExtendScript('PPRO_exportInOutVideo', { codec });
           if (res && res.ok && res.path){
             selectedVideo = res.path; selectedVideoIsTemp = true;
-            document.getElementById('videoPath').textContent = res.path.split('/').pop();
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
+            updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
           } else {
             if (statusEl) statusEl.textContent = 'video in/out export failed: ' + (res && res.error ? res.error : 'unknown') + (res && res.eprRoot ? (' root=' + res.eprRoot) : '') + (res && res.preset ? (' preset=' + res.preset) : '');
           }
-        }catch(e){ try{ document.getElementById('lipsyncStatus').textContent = 'video in/out export failed'; }catch(_){}}
+        }catch(e){ try{ updateInputStatus(); }catch(_){}}
       }
 
       async function selectAudioInOut(){
         try{
-          const statusEl = document.getElementById('lipsyncStatus');
+          const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering audio in/out…';
-          const format = (document.querySelector('input[name=\"renderAudio\"]:checked')||{}).value || 'wav';
+          const format = document.getElementById('renderAudio').value || 'wav';
           const res = await evalExtendScript('PPRO_exportInOutAudio', { format });
           if (res && res.ok && res.path){
             selectedAudio = res.path; selectedAudioIsTemp = true;
-            document.getElementById('audioPath').textContent = res.path.split('/').pop();
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
+            updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
           } else {
             if (statusEl) statusEl.textContent = 'audio in/out export failed: ' + (res && res.error ? res.error : 'unknown');
           }
-        }catch(e){ try{ document.getElementById('lipsyncStatus').textContent = 'audio in/out export failed'; }catch(_){}}
+        }catch(e){ try{ updateInputStatus(); }catch(_){}}
       }
       
       function updateLipsyncButton() {
@@ -541,7 +1803,7 @@
         btn.disabled = true;
         btn.textContent = 'generating...';
         document.getElementById('clearBtn').style.display = 'inline-block';
-        const statusEl = document.getElementById('lipsyncStatus');
+        const statusEl = document.getElementById('statusMessage');
         statusEl.textContent = 'starting backend...';
         
         // Start backend server
@@ -653,13 +1915,24 @@
               jobs = jobs.map(j => j.id === jobId ? data : j);
               saveJobsLocal();
               updateHistory();
-              // Replace main button with post-actions
+              
+              // Update status message
+              const statusEl = document.getElementById('statusMessage');
+              if (statusEl) statusEl.textContent = 'lipsync completed';
+              
+              // Hide lipsync button and show completion state
               const btn = document.getElementById('lipsyncBtn');
-              btn.disabled = true;
-              btn.textContent = 'completed';
-              // Show preview and actions
-              renderPreview(data);
-              document.getElementById('postActions').style.display = 'flex';
+              btn.style.display = 'none';
+              
+              // Hide audio player and show output video
+              const audioSection = document.getElementById('audioSection');
+              if (audioSection) audioSection.style.display = 'none';
+              
+              // Update video player with output
+              renderOutputVideo(data);
+              
+              // Show post-lipsync actions
+              showPostLipsyncActions(data);
             } else if (data.status === 'failed') {
               clearInterval(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
@@ -687,8 +1960,7 @@
         selectedAudio = null;
         selectedVideoIsTemp = false;
         selectedAudioIsTemp = false;
-        document.getElementById('videoPath').textContent = 'no file selected';
-        document.getElementById('audioPath').textContent = 'no file selected';
+        updateInputStatus();
         const btn = document.getElementById('lipsyncBtn');
         btn.disabled = true;
         btn.textContent = 'lipsync';
@@ -698,7 +1970,7 @@
         const badge = document.getElementById('costIndicator');
         preview.innerHTML = '';
         if (badge) { preview.appendChild(badge); badge.textContent = 'cost: —'; }
-        try { document.getElementById('lipsyncStatus').textContent = ''; } catch(_){ }
+        try { updateInputStatus(); } catch(_){ }
       }
       
       function updateHistory() {
@@ -825,7 +2097,6 @@
         cs.evalScript(`PPRO_revealFile("${job.outputPath.replace(/"/g,'\\"')}")`, function(r){ console.log('reveal', r); });
       }
       function insertHistory(jobId) { insertJob(jobId); }
-      function addHistoryBin(jobId) { /* removed */ }
 
       // remove button disabled per requirements
       
@@ -930,7 +2201,7 @@
            try { console.log('insert result', r); } catch(_){ }
            try {
              const out = (typeof r === 'string') ? JSON.parse(r) : r;
-             const statusEl = document.getElementById('lipsyncStatus');
+             const statusEl = document.getElementById('statusMessage');
              if (!out || out.ok !== true) {
                if (statusEl) statusEl.textContent = 'insert failed; retrying…' + (out && out.error ? ' ('+out.error+')' : '') + (out && out.diag ? ' ['+out.diag+']' : '');
                // fallback: try importing to bin directly and re-invoking
@@ -985,24 +2256,151 @@
         }
         // Local file preview via file://
         const src = 'file://' + job.outputPath.replace(/"/g,'\\"').replace(/ /g, '%20');
-        preview.innerHTML = `<video src="${src}" controls style="width:100%;max-height:260px;background:#111;border:1px solid #333;border-radius:6px;"></video>`;
+        preview.innerHTML = `<div class="player">
+          <video class="player-media" src="${src}"></video>
+          <div class="player-controls">
+            <button class="player-btn play-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+            </button>
+            <div class="player-time">00:00 / 00:00</div>
+            <input type="range" class="player-seek" min="0" max="100" value="0">
+            <button class="player-btn fullscreen-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              </svg>
+            </button>
+          </div>
+        </div>`;
+        try { const p = preview.querySelector('.player'); if (p) initVideoPlayer(p); } catch(_){ }
         if (badge) { preview.appendChild(badge); }
       }
 
       function renderInputPreview() {
-        const preview = document.getElementById('preview');
-        const badge = document.getElementById('costIndicator');
-        const parts = [];
+        const videoSection = document.getElementById('videoSection');
+        const videoDropzone = document.getElementById('videoDropzone');
+        const videoPreview = document.getElementById('videoPreview');
+        
+        const audioSection = document.getElementById('audioSection');
+        const audioDropzone = document.getElementById('audioDropzone');
+        const audioPreview = document.getElementById('audioPreview');
+        
+        // Video
         if (selectedVideo) {
-          const v = 'file://' + selectedVideo.replace(/ /g, '%20');
-          parts.push(`<video src="${v}" controls style="width:100%;max-height:260px;background:#111;border:1px solid #333;border-radius:6px;"></video>`);
+          videoDropzone.style.display = 'none';
+          videoPreview.style.display = 'block';
+          videoPreview.innerHTML = `
+            <div class="custom-video-player">
+              <video id="mainVideo" class="video-element" src="file://${selectedVideo.replace(/ /g, '%20')}">
+                <source src="file://${selectedVideo.replace(/ /g, '%20')}" type="video/mp4">
+              </video>
+              <!-- Center play button overlay -->
+              <div class="video-play-overlay" id="videoPlayOverlay">
+                <button class="center-play-btn" id="centerPlayBtn">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5,3 19,12 5,21"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="video-controls">
+                <div class="video-progress-container">
+                  <div class="video-progress-bar">
+                    <div class="video-progress-fill" id="videoProgress"></div>
+                    <div class="video-progress-thumb" id="videoThumb"></div>
+                  </div>
+                </div>
+                <div class="video-control-buttons">
+                  <div class="video-left-controls">
+                    <button class="video-control-btn volume-btn" id="volumeBtn">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                      </svg>
+                    </button>
+                    <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="100">
+                  </div>
+                  <div class="video-center-controls">
+                    <div class="video-time" id="videoTime">00:00 / 00:00</div>
+                    <div class="video-frame-info" id="videoFrameInfo">0 / 0</div>
+                  </div>
+                  <div class="video-right-controls">
+                    <button class="video-control-btn fullscreen-btn" id="fullscreenBtn">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2 2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                      </svg>
+                    </button>
+                    <button class="video-control-btn video-delete-btn" onclick="clearVideoSelection()">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3,6 5,6 21,6"></polyline>
+                        <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          initCustomVideoPlayer();
+        } else {
+          videoDropzone.style.display = 'flex';
+          videoPreview.style.display = 'none';
         }
+        
+        // Audio
         if (selectedAudio) {
-          const a = 'file://' + selectedAudio.replace(/ /g, '%20');
-          parts.push(`<audio src="${a}" controls style="width:100%;margin-top:8px;"></audio>`);
+          audioDropzone.style.display = 'none';
+          audioPreview.style.display = 'block';
+          audioPreview.innerHTML = `
+            <div class="custom-audio-player">
+              <audio id="audioPlayer" src="file://${selectedAudio.replace(/ /g, '%20')}" preload="auto"></audio>
+              <div class="audio-waveform-container">
+                <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
+                <div class="audio-controls-bottom">
+                  <button class="audio-play-btn" id="audioPlayBtn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="5,3 19,12 5,21"/>
+                    </svg>
+                  </button>
+                  <div class="audio-time" id="audioTime">00:00 / 00:00</div>
+                  <button class="audio-delete-btn" onclick="clearAudioSelection()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3,6 5,6 21,6"></polyline>
+                      <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>`;
+          initCustomAudioPlayer();
+        } else {
+          audioDropzone.style.display = 'flex';
+          audioPreview.style.display = 'none';
         }
-        preview.innerHTML = parts.join('');
-        if (badge) { preview.appendChild(badge); }
+        
+        updateLipsyncButton();
+        updateInputStatus();
+      }
+      
+      function updateInputStatus() {
+        const status = document.getElementById('statusMessage');
+        if (!status) return;
+        
+        if (!selectedVideo && !selectedAudio) {
+          status.textContent = 'no video/audio selected';
+        } else if (!selectedVideo) {
+          status.textContent = 'no video selected';
+        } else if (!selectedAudio) {
+          status.textContent = 'no audio selected';
+        } else {
+          status.textContent = 'ready to lipsync';
+        }
+      }
+
+      function updateModelDisplay() {
+        const modelEl = document.getElementById('currentModel');
+        if (modelEl) {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          const model = settings.model || 'lipsync-2-pro';
+          modelEl.textContent = model;
+        }
       }
 
       async function saveOutput() {
@@ -1061,12 +2459,12 @@
           if (opt) opt.checked = true;
         }
         if (settings.renderVideo) {
-          const rv = document.querySelector(`input[name=renderVideo][value="${settings.renderVideo}"]`);
-          if (rv) rv.checked = true;
+          const rv = document.getElementById('renderVideo');
+          if (rv) rv.value = settings.renderVideo;
         }
         if (settings.renderAudio) {
-          const ra = document.querySelector(`input[name=renderAudio][value="${settings.renderAudio}"]`);
-          if (ra) ra.checked = true;
+          const ra = document.getElementById('renderAudio');
+          if (ra) ra.value = settings.renderAudio;
         }
       }
 
@@ -1094,10 +2492,11 @@
           supabaseKey: (document.getElementById('supabaseKey').value||'').trim(),
           supabaseBucket: (document.getElementById('supabaseBucket').value||'').trim(),
           saveLocation: (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project',
-          renderVideo: (document.querySelector('input[name="renderVideo"]:checked')||{}).value || 'h264',
-          renderAudio: (document.querySelector('input[name="renderAudio"]:checked')||{}).value || 'wav'
+          renderVideo: document.getElementById('renderVideo').value || 'h264',
+          renderAudio: document.getElementById('renderAudio').value || 'wav'
         };
         localStorage.setItem('syncSettings', JSON.stringify(settings));
+        updateModelDisplay();
         scheduleEstimate();
       }
       
@@ -1122,7 +2521,7 @@
       }
 
       async function estimateCost(auto, retry){
-        const statusEl = document.getElementById('lipsyncStatus');
+        const statusEl = document.getElementById('statusMessage');
         const badge = document.getElementById('costIndicator');
         const myToken = ++costToken;
         try{
@@ -1202,6 +2601,150 @@
           return dec;
         }catch(_){ return fallback || ''; }
       }
+
+      // Custom video player functionality
+      function initVideoPlayer(playerEl) {
+        const video = playerEl.querySelector('.player-media');
+        if (!video) return;
+        
+        const playBtn = playerEl.querySelector('.play-btn');
+        const timeDisplay = playerEl.querySelector('.player-time');
+        const seekBar = playerEl.querySelector('.player-seek');
+        const fullscreenBtn = playerEl.querySelector('.fullscreen-btn');
+        
+        if (playBtn) {
+          playBtn.addEventListener('click', () => {
+            if (video.paused) {
+              video.play();
+              playBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+            } else {
+              video.pause();
+              playBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
+            }
+          });
+        }
+        
+        if (seekBar) {
+          seekBar.addEventListener('input', () => {
+            const time = (seekBar.value / 100) * video.duration;
+            video.currentTime = time;
+          });
+        }
+        
+        if (video) {
+          video.addEventListener('timeupdate', () => {
+            if (timeDisplay) {
+              const current = formatTime(video.currentTime);
+              const duration = formatTime(video.duration);
+              timeDisplay.textContent = `${current} / ${duration}`;
+            }
+            if (seekBar) {
+              seekBar.value = (video.currentTime / video.duration) * 100;
+            }
+          });
+        }
+        
+        if (fullscreenBtn) {
+          fullscreenBtn.addEventListener('click', () => {
+            if (video.requestFullscreen) {
+              video.requestFullscreen();
+            }
+          });
+        }
+      }
+
+      // Custom audio player functionality
+      function initAudioPlayer(audioWrap) {
+        const audio = audioWrap.querySelector('audio');
+        if (!audio) return;
+        
+        // Create waveform canvas
+        const canvas = document.createElement('canvas');
+        canvas.className = 'audio-canvas';
+        audioWrap.appendChild(canvas);
+        
+        // Create audio controls
+        const controls = document.createElement('div');
+        controls.className = 'audio-controls';
+        controls.innerHTML = `
+          <button class="player-btn play-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+          </button>
+          <div class="player-time">00:00 / 00:00</div>
+          <input type="range" class="player-seek" min="0" max="100" value="0">
+        `;
+        audioWrap.appendChild(controls);
+        
+        const playBtn = controls.querySelector('.play-btn');
+        const timeDisplay = controls.querySelector('.player-time');
+        const seekBar = controls.querySelector('.player-seek');
+        
+        if (playBtn) {
+          playBtn.addEventListener('click', () => {
+            if (audio.paused) {
+              audio.play();
+              playBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+            } else {
+              audio.pause();
+              playBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
+            }
+          });
+        }
+        
+        if (seekBar) {
+          seekBar.addEventListener('input', () => {
+            const time = (seekBar.value / 100) * audio.duration;
+            audio.currentTime = time;
+          });
+        }
+        
+        if (audio) {
+          audio.addEventListener('timeupdate', () => {
+            if (timeDisplay) {
+              const current = formatTime(audio.currentTime);
+              const duration = formatTime(audio.duration);
+              timeDisplay.textContent = `${current} / ${duration}`;
+            }
+            if (seekBar) {
+              seekBar.value = (audio.currentTime / audio.duration) * 100;
+            }
+          });
+        }
+        
+        // Generate waveform
+        generateWaveform(audio, canvas);
+      }
+
+      function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+
+      function generateWaveform(audio, canvas) {
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width = canvas.offsetWidth;
+        const height = canvas.height = canvas.offsetHeight;
+        
+        // Simple waveform visualization
+        ctx.fillStyle = '#333';
+        ctx.fillRect(0, 0, width, height);
+        
+        ctx.strokeStyle = '#0066ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        for (let i = 0; i < width; i += 4) {
+          const x = i;
+          const y = height / 2 + Math.sin(i * 0.1) * 20;
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+      }
       
       document.addEventListener('DOMContentLoaded', function() {
         try {
@@ -1234,10 +2777,475 @@
           });
           // Ensure cost badge is inside preview from the start
           try { const pv=document.getElementById('preview'); const badge=document.getElementById('costIndicator'); if (pv && badge){ pv.appendChild(badge); badge.style.position='absolute'; badge.style.left='8px'; badge.style.bottom='8px'; } } catch(_){ }
+          // Render initial dropzone
+          try { renderInputPreview(); } catch(_){ }
+          // Update model display
+          try { updateModelDisplay(); } catch(_){ }
         } catch(e) {
           console.error('CSInterface error:', e);
         }
       });
+
+
+
+      function initCustomVideoPlayer() {
+        const video = document.getElementById('mainVideo');
+        const centerPlayBtn = document.getElementById('centerPlayBtn');
+        const playOverlay = document.getElementById('videoPlayOverlay');
+        const timeDisplay = document.getElementById('videoTime');
+        const frameInfo = document.getElementById('videoFrameInfo');
+        const progressFill = document.getElementById('videoProgress');
+        const progressThumb = document.getElementById('videoThumb');
+        const progressBar = document.querySelector('.video-progress-bar');
+        const volumeBtn = document.getElementById('volumeBtn');
+        const volumeSlider = document.getElementById('volumeSlider');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        
+        if (!video) return;
+
+        // Initialize display when metadata loads
+        video.addEventListener('loadedmetadata', () => {
+          const duration = formatTime(video.duration || 0);
+          if (timeDisplay) timeDisplay.textContent = `00:00 / ${duration}`;
+          if (frameInfo) {
+            const totalFrames = Math.floor(video.duration * 30);
+            frameInfo.textContent = `0 / ${totalFrames}`;
+          }
+        });
+
+        // Update time and progress during playback
+        video.addEventListener('timeupdate', () => {
+          const current = formatTime(video.currentTime);
+          const duration = formatTime(video.duration || 0);
+          const progress = (video.currentTime / (video.duration || 1)) * 100;
+          
+          if (timeDisplay) timeDisplay.textContent = `${current} / ${duration}`;
+          if (progressFill) progressFill.style.width = `${progress}%`;
+          if (progressThumb) progressThumb.style.left = `${progress}%`;
+          
+          // Frame info (approximate)
+          if (frameInfo && video.duration) {
+            const currentFrame = Math.floor(video.currentTime * 30); // Assume 30fps
+            const totalFrames = Math.floor(video.duration * 30);
+            frameInfo.textContent = `${currentFrame} / ${totalFrames}`;
+          }
+        });
+
+        // Hide overlay when playing, show when paused
+        video.addEventListener('play', () => {
+          if (playOverlay) playOverlay.classList.add('hidden');
+        });
+
+        video.addEventListener('pause', () => {
+          if (playOverlay) playOverlay.classList.remove('hidden');
+        });
+
+        // Progress bar scrubbing
+        if (progressBar) {
+          progressBar.addEventListener('click', (e) => {
+            const rect = progressBar.getBoundingClientRect();
+            const pos = (e.clientX - rect.left) / rect.width;
+            video.currentTime = pos * video.duration;
+          });
+        }
+
+        // Play/pause functionality - only center button
+        const togglePlay = () => {
+          if (video.paused) {
+            video.play();
+          } else {
+            video.pause();
+          }
+        };
+
+        // Only center play button
+        if (centerPlayBtn) centerPlayBtn.addEventListener('click', togglePlay);
+
+        // Volume control
+        if (volumeSlider) {
+          volumeSlider.addEventListener('input', (e) => {
+            video.volume = e.target.value / 100;
+          });
+        }
+
+        if (volumeBtn) {
+          volumeBtn.addEventListener('click', () => {
+            video.muted = !video.muted;
+            if (video.muted) {
+              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
+            } else {
+              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+            }
+          });
+        }
+
+        // Fullscreen
+        if (fullscreenBtn) {
+          fullscreenBtn.addEventListener('click', () => {
+            if (video.requestFullscreen) {
+              video.requestFullscreen();
+            } else if (video.webkitRequestFullscreen) {
+              video.webkitRequestFullscreen();
+            }
+          });
+        }
+      }
+
+      function initCustomAudioPlayer() {
+        const audio = document.getElementById('audioPlayer');
+        const playBtn = document.getElementById('audioPlayBtn');
+        const timeDisplay = document.getElementById('audioTime');
+        const canvas = document.getElementById('waveformCanvas');
+        
+        if (!audio || !canvas) return;
+
+        // Generate waveform and store bars for progress rendering
+        const waveformBars = generateProgressiveWaveform(audio, canvas);
+
+        // Initialize time display when metadata loads
+        audio.addEventListener('loadedmetadata', () => {
+          const duration = formatTime(audio.duration || 0);
+          if (timeDisplay) timeDisplay.textContent = `00:00 / ${duration}`;
+        });
+
+        // Update time and waveform progress
+        audio.addEventListener('timeupdate', () => {
+          const current = formatTime(audio.currentTime);
+          const duration = formatTime(audio.duration || 0);
+          if (timeDisplay) timeDisplay.textContent = `${current} / ${duration}`;
+          
+          // Update waveform progress
+          updateWaveformProgress(canvas, waveformBars, audio.currentTime / (audio.duration || 1));
+        });
+
+        // Play/pause functionality
+        const toggleAudioPlay = () => {
+          if (audio.paused) {
+            audio.play();
+            if (playBtn) playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+          } else {
+            audio.pause();
+            if (playBtn) playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
+          }
+        };
+
+        // Play/pause button
+        if (playBtn) {
+          playBtn.addEventListener('click', toggleAudioPlay);
+        }
+
+        // Click to seek on waveform
+        canvas.addEventListener('click', (e) => {
+          const rect = canvas.getBoundingClientRect();
+          const pos = (e.clientX - rect.left) / rect.width;
+          audio.currentTime = pos * audio.duration;
+        });
+      }
+
+      function generateProgressiveWaveform(audio, canvas) {
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+        const height = canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        
+        const displayWidth = canvas.offsetWidth;
+        const displayHeight = canvas.offsetHeight;
+        
+        // Generate waveform data
+        const barCount = Math.floor(displayWidth / 2); // Bars every 2 pixels for denser waveform
+        const barWidth = 1;
+        const centerY = displayHeight / 2;
+        const bars = [];
+        
+        for (let i = 0; i < barCount; i++) {
+          const x = i * 2;
+          
+          // Generate realistic audio waveform pattern
+          let amplitude = 0;
+          
+          // Create different frequency components for more realistic audio
+          const lowFreq = Math.sin(i * 0.01) * 0.4;
+          const midFreq = Math.sin(i * 0.05) * 0.3;
+          const highFreq = Math.sin(i * 0.15) * 0.2;
+          const noise = (Math.random() - 0.5) * 0.1;
+          
+          amplitude = Math.abs(lowFreq + midFreq + highFreq + noise);
+          
+          // Add variation and realistic audio patterns
+          if (Math.random() < 0.08) amplitude *= 1.8; // Random peaks
+          if (Math.random() < 0.03) amplitude *= 0.2; // Random valleys
+          
+          const barHeight = Math.max(2, amplitude * (displayHeight * 0.8)); // Minimum height of 2px
+          
+          bars.push({
+            x: x,
+            height: barHeight,
+            centerY: centerY
+          });
+        }
+        
+        // Initial render with all bars grey
+        renderWaveform(canvas, bars, 0);
+        
+        return bars;
+      }
+
+      function renderWaveform(canvas, bars, progress) {
+        const ctx = canvas.getContext('2d');
+        const displayWidth = canvas.offsetWidth;
+        const displayHeight = canvas.offsetHeight;
+        
+        // Clear canvas
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
+        
+        const progressX = progress * displayWidth;
+        
+        bars.forEach(bar => {
+          // Color based on progress: white for played, grey for unplayed
+          ctx.fillStyle = bar.x <= progressX ? '#ffffff' : '#666666';
+          ctx.fillRect(bar.x, bar.centerY - bar.height/2, 1, bar.height);
+        });
+        
+        // Add subtle center line
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, displayHeight / 2);
+        ctx.lineTo(displayWidth, displayHeight / 2);
+        ctx.stroke();
+      }
+
+      function updateWaveformProgress(canvas, bars, progress) {
+        renderWaveform(canvas, bars, progress);
+      }
+
+
+      function clearVideoSelection() {
+        selectedVideo = null;
+        selectedVideoIsTemp = false;
+        renderInputPreview();
+        updateInputStatus();
+      }
+
+      function clearAudioSelection() {
+        selectedAudio = null;
+        selectedAudioIsTemp = false;
+        renderInputPreview();
+        updateInputStatus();
+      }
+
+
+      function renderOutputVideo(job) {
+        if (!job || !job.outputPath) return;
+        
+        const videoSection = document.getElementById('videoSection');
+        const videoPreview = document.getElementById('videoPreview');
+        
+        if (videoSection && videoPreview) {
+          videoPreview.innerHTML = `
+            <div class="custom-video-player">
+              <video id="outputVideo" class="video-element" src="file://${job.outputPath.replace(/ /g, '%20')}">
+                <source src="file://${job.outputPath.replace(/ /g, '%20')}" type="video/mp4">
+              </video>
+              <!-- Center play button overlay -->
+              <div class="video-play-overlay" id="outputVideoPlayOverlay">
+                <button class="center-play-btn" id="outputCenterPlayBtn">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5,3 19,12 5,21"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="video-controls">
+                <div class="video-progress-container">
+                  <div class="video-progress-bar">
+                    <div class="video-progress-fill" id="outputVideoProgress"></div>
+                    <div class="video-progress-thumb" id="outputVideoThumb"></div>
+                  </div>
+                </div>
+                <div class="video-control-buttons">
+                  <div class="video-left-controls">
+                    <button class="video-control-btn volume-btn" id="outputVolumeBtn">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                      </svg>
+                    </button>
+                    <input type="range" class="volume-slider" id="outputVolumeSlider" min="0" max="100" value="100">
+                  </div>
+                  <div class="video-center-controls">
+                    <div class="video-time" id="outputVideoTime">00:00 / 00:00</div>
+                    <div class="video-frame-info" id="outputVideoFrameInfo">0 / 0</div>
+                  </div>
+                  <div class="video-right-controls">
+                    <button class="video-control-btn fullscreen-btn" id="outputFullscreenBtn">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2 2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+          initOutputVideoPlayer();
+        }
+      }
+
+      function showPostLipsyncActions(job) {
+        const videoSection = document.getElementById('videoSection');
+        if (!videoSection) return;
+        
+        // Create actions container
+        const actionsHtml = `
+          <div class="post-lipsync-actions" id="postLipsyncActions">
+            <button class="action-btn action-btn-primary" onclick="saveCompletedJob('${job.id}')">
+              save
+            </button>
+            <button class="action-btn" onclick="insertCompletedJob('${job.id}')">
+              insert
+            </button>
+            <button class="action-btn" onclick="clearCompletedJob()">
+              clear
+            </button>
+          </div>`;
+        
+        videoSection.insertAdjacentHTML('afterend', actionsHtml);
+      }
+
+      function initOutputVideoPlayer() {
+        const video = document.getElementById('outputVideo');
+        const centerPlayBtn = document.getElementById('outputCenterPlayBtn');
+        const playOverlay = document.getElementById('outputVideoPlayOverlay');
+        const timeDisplay = document.getElementById('outputVideoTime');
+        const frameInfo = document.getElementById('outputVideoFrameInfo');
+        const progressFill = document.getElementById('outputVideoProgress');
+        const progressThumb = document.getElementById('outputVideoThumb');
+        const progressBar = document.querySelector('.video-progress-bar');
+        const volumeBtn = document.getElementById('outputVolumeBtn');
+        const volumeSlider = document.getElementById('outputVolumeSlider');
+        const fullscreenBtn = document.getElementById('outputFullscreenBtn');
+        
+        if (!video) return;
+
+        // Initialize display when metadata loads
+        video.addEventListener('loadedmetadata', () => {
+          const duration = formatTime(video.duration || 0);
+          if (timeDisplay) timeDisplay.textContent = `00:00 / ${duration}`;
+          if (frameInfo) {
+            const totalFrames = Math.floor(video.duration * 30);
+            frameInfo.textContent = `0 / ${totalFrames}`;
+          }
+        });
+
+        // Update time and progress during playback
+        video.addEventListener('timeupdate', () => {
+          const current = formatTime(video.currentTime);
+          const duration = formatTime(video.duration || 0);
+          const progress = (video.currentTime / (video.duration || 1)) * 100;
+          
+          if (timeDisplay) timeDisplay.textContent = `${current} / ${duration}`;
+          if (progressFill) progressFill.style.width = `${progress}%`;
+          if (progressThumb) progressThumb.style.left = `${progress}%`;
+          
+          // Frame info (approximate)
+          if (frameInfo && video.duration) {
+            const currentFrame = Math.floor(video.currentTime * 30);
+            const totalFrames = Math.floor(video.duration * 30);
+            frameInfo.textContent = `${currentFrame} / ${totalFrames}`;
+          }
+        });
+
+        // Hide overlay when playing, show when paused
+        video.addEventListener('play', () => {
+          if (playOverlay) playOverlay.classList.add('hidden');
+        });
+
+        video.addEventListener('pause', () => {
+          if (playOverlay) playOverlay.classList.remove('hidden');
+        });
+
+        // Progress bar scrubbing
+        if (progressBar) {
+          progressBar.addEventListener('click', (e) => {
+            const rect = progressBar.getBoundingClientRect();
+            const pos = (e.clientX - rect.left) / rect.width;
+            video.currentTime = pos * video.duration;
+          });
+        }
+
+        // Play/pause functionality
+        const togglePlay = () => {
+          if (video.paused) {
+            video.play();
+          } else {
+            video.pause();
+          }
+        };
+
+        if (centerPlayBtn) centerPlayBtn.addEventListener('click', togglePlay);
+
+        // Volume control
+        if (volumeSlider) {
+          volumeSlider.addEventListener('input', (e) => {
+            video.volume = e.target.value / 100;
+          });
+        }
+
+        if (volumeBtn) {
+          volumeBtn.addEventListener('click', () => {
+            video.muted = !video.muted;
+            if (video.muted) {
+              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
+            } else {
+              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+            }
+          });
+        }
+
+        if (fullscreenBtn) {
+          fullscreenBtn.addEventListener('click', () => {
+            if (video.requestFullscreen) {
+              video.requestFullscreen();
+            } else if (video.webkitRequestFullscreen) {
+              video.webkitRequestFullscreen();
+            }
+          });
+        }
+      }
+
+      async function saveCompletedJob(jobId) {
+        await saveJob(jobId);
+      }
+
+      async function insertCompletedJob(jobId) {
+        await insertJob(jobId);
+      }
+
+      function clearCompletedJob() {
+        // Reset to initial state
+        selectedVideo = null;
+        selectedAudio = null;
+        selectedVideoIsTemp = false;
+        selectedAudioIsTemp = false;
+        
+        // Show lipsync button again
+        const btn = document.getElementById('lipsyncBtn');
+        btn.style.display = 'flex';
+        btn.disabled = true;
+        btn.textContent = 'lipsync';
+        
+        // Show audio section again
+        const audioSection = document.getElementById('audioSection');
+        if (audioSection) audioSection.style.display = 'block';
+        
+        // Remove post-lipsync actions
+        const actions = document.getElementById('postLipsyncActions');
+        if (actions) actions.remove();
+        
+        // Reset video and audio sections
+        renderInputPreview();
+        updateInputStatus();
+      }
     </script>
   </body>
 </html>

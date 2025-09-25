@@ -50,12 +50,12 @@
             </MaxSize>
           </Geometry>
           <Icons>
-            <Icon Type="Normal">./icons/icon.png</Icon>
-            <Icon Type="RollOver">./icons/icon.png</Icon>
-            <Icon Type="Disabled">./icons/icon.png</Icon>
-            <Icon Type="DarkNormal">./icons/icon.png</Icon>
-            <Icon Type="DarkRollOver">./icons/icon.png</Icon>
-            <Icon Type="DarkDisabled">./icons/icon.png</Icon>
+            <Icon Type="Normal">./icons/white_icon.png</Icon>
+            <Icon Type="RollOver">./icons/white_icon.png</Icon>
+            <Icon Type="Disabled">./icons/white_icon.png</Icon>
+            <Icon Type="DarkNormal">./icons/white_icon.png</Icon>
+            <Icon Type="DarkRollOver">./icons/white_icon.png</Icon>
+            <Icon Type="DarkDisabled">./icons/white_icon.png</Icon>
           </Icons>
         </UI>
       </DispatchInfo>

@@ -1,73 +1,50 @@
 # sync. extension for Adobe Premiere Pro (CEP)
 
-## Overview
+Beautiful, minimal Premiere Pro panel for lipsyncing with a local helper server. Open‑source and easy to install for developers and editors.
 
-This CEP panel integrates Premiere Pro with Sync.so Lipsync. It provides a simple end‑to‑end workflow:
+### Repository layout
+- `CSXS/manifest.xml` — CEP manifest (ExtensionBundleId, hosts, icons)
+- `index.html` — panel UI and logic
+- `host/ppro.jsx` — ExtendScript bridge to Premiere (exports, import/insert, dialogs)
+- `lib/CSInterface.js` — CEP host bridge
+- `epr/` — Adobe Media Encoder export presets used for In/Out renders
+- `server/` — local Node helper (jobs, costs, file operations)
+- `icons/` — panel icons
+- `scripts/` — helper scripts (dev install, package ZXP)
 
-- Select local video/audio on the Sources tab, or render timeline In/Out directly from Premiere
-- Get a cost estimate instantly
-- Create a lipsync job via a local Node backend
-- Track job progress on the History tab and insert/save the result
+## Quick start (unsigned dev install)
 
-## Key Features
+macOS:
+```bash
+git clone https://github.com/your-org/sync-premiere.git
+cd sync-premiere
+chmod +x scripts/dev-install.sh
+./scripts/dev-install.sh
+```
+Then launch Premiere Pro → Window → Extensions → “sync. extension”.
 
-- Strict type filters for local selection
-- Timeline In/Out export (Premiere direct exporter) using bundled presets in `epr/`
-  - Video: H.264 Match Source, ProRes 422 (422 / Proxy / LT / HQ)
-  - Audio: WAV (timeline sample rate/channels), MP3 320 kbps
-- Immediate Supabase upload on selection (≤1 GB) to power cost estimates and jobs
-- Cost estimate auto-badge and row under preview
-- Insert at targeted track, save to `sync. outputs` bin
-- 1 GB hard limit enforced client and server
+Note: This enables PlayerDebugMode for CSXS 12/13 which allows unsigned extensions.
 
-## Settings
+## Local server
+The panel speaks to a small local server on port 3000. It is bundled in `server/` and is started automatically via `PPRO_startBackend` when needed. If the port is occupied, quit conflicting apps or restart Premiere.
 
-- Model: lipsync‑2‑pro, lipsync‑2, lipsync‑1.9.0‑beta
-- Temperature: default 0.5
-- Active speaker detection (auto_detect)
-- Occlusion detection enabled
+Manual start (optional):
+```bash
+cd server
+npm install
+npm start
+```
+
+## Settings supported
+- Model selection
 - Sync mode: loop, bounce, cut_off, remap, silence
-- Supabase URL / Key / Bucket (public read policy required), Save Location
-
-## Cost Flow
-
-- On selecting video/audio (or using In/Out), the panel uploads both to Supabase and calls:
-
-POST /v2/analyze/cost
-{
-  "model": "<selected>",
-  "input": [{"type":"video","url":"…"},{"type":"audio","url":"…"}],
-  "options": {
-    "sync_mode": "<selected>",
-    "temperature": <slider>,
-    "active_speaker_detection": {"auto_detect": true|false},
-    "occlusion_detection_enabled": true|false
-  }
-}
-
-- The backend normalizes the response to an array. The panel shows `cost: $X.XX`.
-
-## Job Flow
-
-- Panel sends either URLs (preferred) or file paths; server supports both.
-- Server create generate body includes the same `options` shape as above.
-- Temp In/Out files are deleted after upload (kept on error).
-
-## Development
-
-- Repo path: `/Users/livestream/Documents/GitHub/sync-premiere`
-- Deployed CEP folder: `/Users/livestream/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.panel/`
-- Sync repo to extension:
-`rsync -av --delete --exclude 'server/node_modules' '/Users/livestream/Documents/GitHub/sync-premiere/' '/Users/livestream/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.panel/'`
-- Restart backend:
-`bash -lc 'lsof -tiTCP:3000 | xargs -r kill -9; cd "/Users/livestream/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.panel/server" && nohup node src/server.js > /tmp/sync_extension_server.log 2>&1 & disown'`
-- Inspect logs: http://127.0.0.1:3000/logs
-- Health: http://127.0.0.1:3000/health
+- Temperature
+- Active speaker detection
+- Occlusion detection
+- Supabase URL / Key / Bucket, Save location
 
 ## Troubleshooting
-
-- Cost shows n/a → verify API key and Supabase settings, then check `/logs` for `[costs]` lines.
-- Preset not found in `/epr` → confirm exact preset filenames exist.
-- EPERM on export → exports go next to the project or `~/Documents/sync_extension_temp`.
-- Old server code → free port 3000 and restart as above.
-- ProRes preview in panel → Chromium cannot decode ProRes; preview uses H.264 only.
+- Extension not visible → Ensure PlayerDebugMode is enabled (the install script sets it). Restart Premiere.
+- Backend not responding → Port 3000 might be blocked. Quit other apps or restart Premiere (panel auto‑starts backend).
+- ProRes preview shows black → Chromium won’t decode ProRes; preview uses H.264.
+- Export preset missing → Check files in `epr/` match names in the UI.
