@@ -5,16 +5,49 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import crypto from 'crypto';
+
+dotenv.config();
 
 const app = express();
-const PORT = 3000;
+app.disable('x-powered-by');
+const HOST = process.env.HOST || '127.0.0.1';
+const PORT = Number(process.env.PORT || 3000);
 
 app.use(express.json({ limit: '50mb' }));
-app.use(cors());
+// Restrict CORS to local panel (file:// → Origin null) and localhost
+app.use(cors({
+  origin: function(origin, cb){
+    try {
+      if (!origin || origin === 'null') return cb(null, true);
+      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(origin))) return cb(null, true);
+      return cb(new Error('CORS blocked'), false);
+    } catch(_) { return cb(new Error('CORS blocked'), false); }
+  },
+  methods: ['GET','POST'],
+  allowedHeaders: ['Content-Type','x-api-key','Authorization'],
+  maxAge: 86400
+}));
 
 let jobs = [];
 let jobCounter = 0;
 const jobsFile = path.join(os.homedir(), 'Documents', 'SyncExtension', 'jobs.json');
+const filesDir = path.dirname(jobsFile);
+if (!fs.existsSync(filesDir)) { try { fs.mkdirSync(filesDir, { recursive: true }); } catch(_) {} }
+const tokenFile = path.join(filesDir, 'auth_token');
+function getOrCreateToken(){
+  try{
+    if (fs.existsSync(tokenFile)){
+      const t = fs.readFileSync(tokenFile, 'utf8').trim();
+      if (t.length > 0) return t;
+    }
+  }catch(_){ }
+  const token = crypto.randomBytes(24).toString('hex');
+  try { fs.writeFileSync(tokenFile, token, { mode: 0o600 }); } catch(_) {}
+  return token;
+}
+const AUTH_TOKEN = getOrCreateToken();
 
 function loadJobs(){
   // Cloud-first: do not load persisted jobs
@@ -26,7 +59,31 @@ function saveJobs(){
   return;
 }
 loadJobs();
+// Public endpoints (no auth): health and token fetch
+app.get('/health', (req,res)=> res.json({ status:'ok', ts: Date.now() }));
+app.get('/auth/token', (req,res)=>{
+  // Only serve to localhost clients
+  try{
+    const ip = (req.socket && req.socket.remoteAddress) || '';
+    if (!(ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1')){
+      return res.status(403).json({ error:'forbidden' });
+    }
+  }catch(_){ }
+  res.json({ token: AUTH_TOKEN });
+});
 
+// Auth middleware
+function requireAuth(req, res, next){
+  try{
+    const h = String(req.headers['authorization']||'');
+    const m = /^Bearer\s+(.+)$/.exec(h);
+    if (!m || m[1] !== AUTH_TOKEN) return res.status(401).json({ error:'unauthorized' });
+    next();
+  }catch(_){ return res.status(401).json({ error:'unauthorized' }); }
+}
+
+// Apply auth to all routes below this line
+app.use(requireAuth);
 const SUPA_URL = process.env.SUPABASE_URL || '';
 const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const SUPA_BUCKET = process.env.SUPABASE_BUCKET || '';
@@ -77,8 +134,6 @@ async function supabaseUpload(localPath, job){
 
 const SYNC_API_BASE = 'https://api.sync.so/v2';
 
-app.get('/health', (req,res)=> res.json({ status:'ok', ts: Date.now() }));
-
 // Proxy models
 app.get('/models', async (req, res) => {
   try{
@@ -117,6 +172,14 @@ function normalizePaths(obj){
   if (obj.videoPath) obj.videoPath = resolveSafeLocalPath(obj.videoPath);
   if (obj.audioPath) obj.audioPath = resolveSafeLocalPath(obj.audioPath);
   return obj;
+}
+
+function normalizeOutputDir(p){
+  try{
+    if (!p || typeof p !== 'string') return '';
+    const abs = path.resolve(p);
+    return abs;
+  }catch(_){ return ''; }
 }
 
 app.post('/jobs', async (req, res) => {
@@ -160,13 +223,14 @@ app.post('/jobs', async (req, res) => {
       createdAt: new Date().toISOString(),
       syncJobId: null,
       outputPath: null,
-      outputDir: outputDir || null,
+      outputDir: normalizeOutputDir(outputDir || '') || null,
       apiKey,
       supabaseUrl: supabaseUrl || '',
       supabaseKey: supabaseKey || '',
       supabaseBucket: supabaseBucket || ''
     };
     jobs.push(job);
+    if (jobs.length > 500) { jobs = jobs.slice(-500); }
     saveJobs();
 
     try{
@@ -195,6 +259,16 @@ app.get('/jobs/:id/download', (req,res)=>{
   const job = jobs.find(j => String(j.id) === String(req.params.id));
   if (!job) return res.status(404).json({ error:'Job not found' });
   if (!job.outputPath || !fs.existsSync(job.outputPath)) return res.status(404).json({ error:'Output not ready' });
+  try{
+    const defaultDir = path.join(os.homedir(), 'Documents', 'sync. outputs');
+    const allowed = [defaultDir];
+    if (job.outputDir && typeof job.outputDir === 'string') allowed.push(job.outputDir);
+    const realOut = fs.realpathSync(job.outputPath);
+    const ok = allowed.some(root => {
+      try { return realOut.startsWith(fs.realpathSync(root) + path.sep); } catch(_) { return false; }
+    });
+    if (!ok) return res.status(403).json({ error:'forbidden path' });
+  }catch(_){ return res.status(500).json({ error:'download error' }); }
   res.download(job.outputPath);
 });
 
@@ -372,7 +446,7 @@ async function downloadIfReady(job){
   const response = await fetch(meta.outputUrl);
   if (!response.ok || !response.body) return false;
   const defaultDir = path.join(os.homedir(), 'Documents', 'sync. outputs');
-  const outDir = job.outputDir && typeof job.outputDir === 'string' ? job.outputDir : defaultDir;
+  const outDir = (job.outputDir && typeof job.outputDir === 'string' ? normalizeOutputDir(job.outputDir) : '') || defaultDir;
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const outputPath = path.join(outDir, `${job.id}_output.mp4`);
   await pipeToFile(response.body, outputPath);
@@ -427,8 +501,8 @@ app.get('/hostlog', (req, res)=>{
   res.json({ ok:true });
 });
 
-app.listen(PORT, ()=>{
-  console.log(`Sync Extension server running on port ${PORT}`);
+app.listen(PORT, HOST, ()=>{
+  console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
   console.log(`Jobs file: ${jobsFile}`);
 });
 
@@ -440,6 +514,8 @@ function getSupabaseBucket(job){ return (job && job.supabaseBucket) || SUPA_BUCK
 function resolveSafeLocalPath(p){
   try{
     if (!p || typeof p !== 'string') return p;
+    // Ensure absolute path to prevent traversal from relative inputs
+    if (!path.isAbsolute(p)) return p;
     const isTempItems = p.indexOf('/TemporaryItems/') !== -1;
     if (!isTempItems) return p;
     const docs = path.join(os.homedir(), 'Documents', 'sync_extension_temp');
@@ -448,3 +524,7 @@ function resolveSafeLocalPath(p){
     try { fs.copyFileSync(p, target); return target; } catch(_){ return p; }
   }catch(_){ return p; }
 }
+
+// Crash safety
+process.on('uncaughtException', (err)=>{ try { console.error('uncaughtException', err && err.stack || err); } catch(_) {} });
+process.on('unhandledRejection', (reason)=>{ try { console.error('unhandledRejection', reason); } catch(_) {} });

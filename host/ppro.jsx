@@ -9,7 +9,7 @@ function PPRO_startBackend() {
 
     // Kill any existing server processes to ensure we run updated code
     try {
-      system.callSystem("/bin/bash -lc 'pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true'");
+      system.callSystem("/bin/bash -lc 'pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5'");
     } catch(e) {}
 
     // Resolve node path robustly (macOS)
@@ -33,8 +33,12 @@ function PPRO_startBackend() {
       return _respond({ ok: false, error: "Node not found in common paths" });
     }
 
-    // Launch server in background with nohup
-    var launchCmd = "/bin/bash -lc \"cd '" + extPath + "/server' && nohup '" + nodePath + "' '" + serverPath + "' > /tmp/sync_extension_server.log 2>&1 & echo OK\"";
+    // Launch server in background with nohup (safely quoted)
+    var cdPath = _shq(extPath + "/server");
+    var nodeQ = _shq(nodePath);
+    var serverQ = _shq(serverPath);
+    var bash = "cd " + cdPath + " && nohup " + nodeQ + " " + serverQ + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
+    var launchCmd = "/bin/bash -lc " + _shq(bash);
     var out = system.callSystem(launchCmd);
     return _respond({ ok: true, message: "launched", details: out });
   } catch(e) {
@@ -104,7 +108,7 @@ function _hostLog(msg){
     var s = String(msg||'');
     // Use curl to send JSON to local server; ignore output
     var payload = '{"msg": ' + JSON.stringify(s) + '}';
-    var cmd = "/bin/bash -lc \"(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data '" + payload.replace(/'/g, "'\\''") + "' http://127.0.0.1:3000/hostlog || curl -s -m 1 'http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "') >/dev/null 2>&1\"";
+    var cmd = "/bin/bash -lc " + _shq("(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/hostlog || curl -s -m 1 \"http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "\") >/dev/null 2>&1");
     system.callSystem(cmd);
   }catch(e){ /* ignore */ }
 }
@@ -285,7 +289,8 @@ function PPRO_revealFile(fsPath) {
     var f = new File(fsPath);
     if (!f.exists) return _respond({ ok:false, error:'File not found' });
     // macOS: reveal in Finder
-    var cmd = "/usr/bin/osascript -e 'tell application " + '"Finder"' + " to reveal POSIX file \"" + f.fsName + "\"' -e 'tell application " + '"Finder"' + " to activate'";
+    var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/"/g, "\\\"");
+    var cmd = "/usr/bin/osascript -e 'tell application " + '"Finder"' + " to reveal POSIX file \"" + esc + "\"' -e 'tell application " + '"Finder"' + " to activate'";
     system.callSystem(cmd);
     return _respond({ ok:true });
   } catch (e) {
@@ -572,4 +577,9 @@ function _normPath(p){
   } catch(e) {
     return String(p||'');
   }
+}
+
+// Safely single-quote a string for bash -lc
+function _shq(s){
+  try { return "'" + String(s||'').replace(/'/g, "'\\''") + "'"; } catch(e){ return "''"; }
 }

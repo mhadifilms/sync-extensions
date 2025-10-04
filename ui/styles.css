@@ -524,6 +524,12 @@
         background: var(--hover);
         transform: translateY(-2px);
       }
+      /* Dragover state mirrors :hover visuals */
+      .dropzone.is-dragover {
+        border-color: var(--orange);
+        background: var(--hover);
+        transform: translateY(-2px);
+      }
       .dropzone-inner { 
         text-align: center; 
         color: var(--muted); 
@@ -953,6 +959,11 @@
       }
 
       .input-dropzone:hover {
+        border-color: var(--orange);
+        background: var(--hover);
+      }
+      /* Dragover state mirrors :hover visuals */
+      .input-dropzone.is-dragover {
         border-color: var(--orange);
         background: var(--hover);
       }
