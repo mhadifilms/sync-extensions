@@ -1,0 +1,245 @@
+      let cs = null;
+      let selectedVideo = null;
+      let selectedAudio = null;
+      let jobs = [];
+      let insertingGuard = false;
+      let runToken = 0;
+      let currentFetchController = null;
+      
+      let selectedVideoIsTemp = false;
+      let selectedAudioIsTemp = false;
+      let estimateTimer = null;
+      let hasStartedBackendForCost = false;
+
+      let uploadedVideoUrl = '';
+      let uploadedAudioUrl = '';
+      let costToken = 0;
+      
+      // Per-install auth token for local server
+      let __authToken = '';
+      async function ensureAuthToken(){
+        if (__authToken) return __authToken;
+        try{
+          const r = await fetch('http://127.0.0.1:3000/auth/token');
+          const j = await r.json().catch(()=>null);
+          if (r.ok && j && j.token){ __authToken = j.token; }
+        }catch(_){ }
+        return __authToken;
+      }
+      function authHeaders(extra){
+        const h = Object.assign({}, extra||{});
+        if (__authToken) h['Authorization'] = 'Bearer ' + __authToken;
+        return h;
+      }
+      
+      // UI logger to local server
+      function uiLog(msg){
+        try { fetch('http://127.0.0.1:3000/hostlog', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ msg: String(msg||'') }) }).catch(()=>{}); } catch(_) {}
+      }
+      
+      // Helper to call JSX with JSON payload and parse JSON response (with auto-load + retry)
+      function evalExtendScript(fn, payload) {
+        if (!cs) cs = new CSInterface();
+        const arg = JSON.stringify(payload || {});
+        function callOnce() {
+          return new Promise((resolve) => {
+            cs.evalScript(`${fn}(${JSON.stringify(arg)})`, function(res){
+              let out = null;
+              try { out = (typeof res === 'string') ? JSON.parse(res) : res; } catch(_) {}
+              if (!out || typeof out !== 'object' || out.ok === undefined) {
+                // Fallback: treat raw string as a selected path
+                if (res && typeof res === 'string' && res.indexOf('/') !== -1) {
+                  resolve({ ok: true, path: res, _local: true });
+                  return;
+                }
+                resolve({ ok:false, error: String(res || 'no response'), _local: true });
+                return;
+              }
+              resolve(out);
+            });
+          });
+        }
+        return new Promise(async (resolve) => {
+          const result = await callOnce();
+          // Do not auto-retry here to avoid triggering a second dialog
+          resolve(result);
+        });
+      }
+
+      // Single inline ExtendScript picker (host-independent) to avoid host bridge issues
+      let __pickerBusy = false;
+      async function openFileDialog(kind) {
+        if (__pickerBusy) { return ''; }
+        __pickerBusy = true;
+        try {
+          const k = (typeof kind === 'string' ? kind : 'video');
+          if (!cs) cs = new CSInterface();
+          const es = (
+            "(function(){\n"+
+            "  try{\n"+
+            "    var kind = " + JSON.stringify(k) + ";\n"+
+            "    var allow = (kind === 'audio') ? { wav:1, mp3:1, aac:1, aif:1, aiff:1, m4a:1 } : { mov:1, mp4:1, mxf:1, mkv:1, avi:1, m4v:1, mpg:1, mpeg:1 };\n"+
+            "    var file = null;\n"+
+            "    try {\n"+
+            "      if ($.os && $.os.toString().indexOf('Windows') !== -1) {\n"+
+            "        var filterStr = (kind === 'audio') ? 'Audio files:*.wav;*.mp3;*.aac;*.aif;*.aiff;*.m4a' : 'Video files:*.mov;*.mp4;*.mxf;*.mkv;*.avi;*.m4v;*.mpg;*.mpeg';\n"+
+            "        file = File.openDialog('Select ' + kind + ' file', filterStr);\n"+
+            "      } else {\n"+
+            "        var fn = function(f){ try { if (f instanceof Folder) return true; var n = (f && f.name) ? String(f.name).toLowerCase() : ''; var i = n.lastIndexOf('.'); if (i < 0) return false; var ext = n.substring(i+1); return allow[ext] === 1; } catch (e) { return true; } };\n"+
+            "        file = File.openDialog('Select ' + kind + ' file', fn);\n"+
+            "      }\n"+
+            "    } catch (_) { return 'ERROR: dialog failed ' + String(_); }\n"+
+            "    if (file && file.exists) {\n"+
+            "      try { var n = String(file.name || '').toLowerCase(); var i = n.lastIndexOf('.'); var ext = (i >= 0) ? n.substring(i+1) : ''; if (allow[ext] !== 1) { return 'ERROR: Invalid file type'; } } catch(e) { return 'ERROR: type check ' + String(e); }\n"+
+            "      return file.fsName;\n"+
+            "    }\n"+
+            "    return 'ERROR: No file selected';\n"+
+            "  } catch(e) {\n"+
+            "    return 'ERROR: ' + String(e);\n"+
+            "  }\n"+
+            "})()"
+          );
+          const inlineRes = await new Promise(resolve => { try { cs.evalScript(es, function(r){ resolve(r); }); } catch(e){ resolve(''); } });
+          if (inlineRes && typeof inlineRes === 'string' && inlineRes.indexOf('/') !== -1) {
+            return inlineRes;
+          } else if (inlineRes && inlineRes.startsWith('ERROR:')) {
+            console.warn(inlineRes);
+            return '';
+          } else {
+            return '';
+          }
+        } finally {
+          __pickerBusy = false;
+        }
+      }
+      
+      function showTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+          tab.classList.remove('active');
+        });
+        document.querySelectorAll('.tab').forEach(tab => {
+          tab.classList.remove('active');
+        });
+        
+        // Pause any playing media when switching tabs
+        try { const v = document.getElementById('mainVideo'); if (v) v.pause(); } catch(_){ }
+        try { const ov = document.getElementById('outputVideo'); if (ov) ov.pause(); } catch(_){ }
+        try { const a = document.getElementById('audioPlayer'); if (a) a.pause(); } catch(_){ }
+
+        // Show selected tab
+        document.getElementById(tabName).classList.add('active');
+        document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
+        
+        // Ensure history is always populated when shown
+        if (tabName === 'history') {
+          try { updateHistory(); } catch(_) {}
+          try { loadJobsFromServer(); } catch(_) {}
+        }
+      }
+
+      async function waitForHealth(maxAttempts = 20, delayMs = 250, expectedToken) {
+        for (let i = 0; i < maxAttempts; i++) {
+          try {
+            const resp = await fetch('http://localhost:3000/health', { cache: 'no-store' });
+            if (resp.ok) return true;
+          } catch (e) {
+            // ignore until attempts exhausted
+          }
+          if (expectedToken != null && expectedToken !== runToken) return false;
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+        return false;
+      }
+
+      function niceName(p, fallback){
+        try{
+          if (!p || typeof p !== 'string') return fallback || '';
+          const noQuery = p.split('?')[0];
+          const last = noQuery.split('/').pop() || fallback || '';
+          const dec = decodeURIComponent(last);
+          if (dec.length > 80) return dec.slice(0, 77) + '…';
+          return dec;
+        }catch(_){ return fallback || ''; }
+      }
+
+      function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+
+      // Block Premiere keyboard shortcuts from this panel.
+      function isEditable(el){ return el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable); }
+      function isMeta(e){ return e.metaKey || e.ctrlKey; }
+      function isStandardEditCombo(e){
+        if (!isMeta(e)) return false;
+        const k = e.key.toLowerCase();
+        return k === 'c' || k === 'x' || k === 'v' || k === 'a';
+      }
+      // Register interest in common edit shortcuts so CEP routes them to this panel
+      (function registerKeyInterest(){
+        try {
+          if (!cs) cs = new CSInterface();
+          cs.registerKeyEventsInterest([
+            { keyCode: 67, metaKey: true }, // Cmd/Ctrl+C
+            { keyCode: 88, metaKey: true }, // Cmd/Ctrl+X
+            { keyCode: 86, metaKey: true }, // Cmd/Ctrl+V
+            { keyCode: 65, metaKey: true }  // Cmd/Ctrl+A
+          ]);
+        } catch(_) {}
+      })();
+
+      // Clipboard helpers
+      function performCopy(){
+        try {
+          if (document.execCommand && document.execCommand('copy')) return true;
+        } catch(_) {}
+        try {
+          const sel = window.getSelection && window.getSelection().toString();
+          if (sel && navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(sel); return true; }
+        } catch(_) {}
+        return false;
+      }
+      function performPasteInto(el){
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.readText) return false;
+          navigator.clipboard.readText().then(text => {
+            if (!text) return;
+            if (el && typeof el.setRangeText === 'function') {
+              const start = el.selectionStart||0; const end = el.selectionEnd||0;
+              el.setRangeText(text, start, end, 'end');
+            } else if (document.execCommand) {
+              document.execCommand('insertText', false, text);
+            }
+          });
+          return true;
+        } catch(_) { return false; }
+      }
+      document.addEventListener('keydown', function(e){
+        const targetEditable = isEditable(e.target);
+        // Allow standard edit combos in editable fields
+        if (targetEditable && isStandardEditCombo(e)) {
+          // Handle copy/paste/select-all ourselves so CEP honors Cmd/Ctrl in panel
+          const k = e.key.toLowerCase();
+          if (k === 'a') { try { document.execCommand('selectAll', false, null); } catch(_) {} }
+          if (k === 'c') { performCopy(); }
+          if (k === 'v') { performPasteInto(e.target); }
+          // cut will be handled by the input default; ensure Premiere doesn't catch it
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
+        // Block browser back/forward keys and all other shortcuts from reaching Premiere
+        const k = e.key;
+        if (k === 'Backspace' && !targetEditable) { e.preventDefault(); }
+        if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+          // prevent Premiere timeline nudges when panel focused
+          e.preventDefault();
+        }
+        e.stopImmediatePropagation();
+      }, true);
+      document.addEventListener('keyup', function(e){ e.stopImmediatePropagation(); }, true);
+      document.addEventListener('keypress', function(e){ e.stopImmediatePropagation(); }, true);
+
+

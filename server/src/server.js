@@ -17,15 +17,10 @@ const PORT = Number(process.env.PORT || 3000);
 
 app.use(express.json({ limit: '50mb' }));
 // Restrict CORS to local panel (file:// → Origin null) and localhost
+// Relaxed CORS: allow any origin on localhost-only service
 app.use(cors({
-  origin: function(origin, cb){
-    try {
-      if (!origin || origin === 'null') return cb(null, true);
-      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(origin))) return cb(null, true);
-      return cb(new Error('CORS blocked'), false);
-    } catch(_) { return cb(new Error('CORS blocked'), false); }
-  },
-  methods: ['GET','POST'],
+  origin: function(_origin, cb){ cb(null, true); },
+  methods: ['GET','POST','OPTIONS'],
   allowedHeaders: ['Content-Type','x-api-key','Authorization'],
   maxAge: 86400
 }));
@@ -61,6 +56,8 @@ function saveJobs(){
 loadJobs();
 // Public endpoints (no auth): health and token fetch
 app.get('/health', (req,res)=> res.json({ status:'ok', ts: Date.now() }));
+// Friendly root
+app.get('/', (_req,res)=> res.json({ ok:true, service:'sync-extension-server' }));
 app.get('/auth/token', (req,res)=>{
   // Only serve to localhost clients
   try{
@@ -72,6 +69,23 @@ app.get('/auth/token', (req,res)=>{
   res.json({ token: AUTH_TOKEN });
 });
 
+// Public waveform file reader (before auth middleware)
+app.get('/waveform/file', async (req, res) => {
+  try{
+    const p = String(req.query.path||'');
+    if (!p || !path.isAbsolute(p)) return res.status(400).json({ error:'invalid path' });
+    let real = '';
+    try { real = fs.realpathSync(p); } catch(_){ return res.status(404).json({ error:'not found' }); }
+    if (!fs.existsSync(real)) return res.status(404).json({ error:'not found' });
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) return res.status(400).json({ error:'not a file' });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    fs.createReadStream(real).pipe(res);
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+// (temporary public logs removed)
+
 // Auth middleware
 function requireAuth(req, res, next){
   try{
@@ -82,12 +96,17 @@ function requireAuth(req, res, next){
   }catch(_){ return res.status(401).json({ error:'unauthorized' }); }
 }
 
-// Apply auth to all routes below this line
-app.use(requireAuth);
+// Apply auth to all routes below this line, but keep /logs public
+app.use((req,res,next)=>{
+  if (req.path === '/logs') return next();
+  return requireAuth(req,res,next);
+});
 const SUPA_URL = process.env.SUPABASE_URL || '';
 const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const SUPA_BUCKET = process.env.SUPABASE_BUCKET || '';
 const SUPA_PREFIX = 'sync. extension/';
+const DOCS_DEFAULT_DIR = path.join(os.homedir(), 'Documents', 'sync. outputs');
+const TEMP_DEFAULT_DIR = path.join(os.tmpdir(), 'sync_extension_outputs');
 
 function guessMime(p){
   const ext = String(p||'').toLowerCase().split('.').pop();
@@ -260,8 +279,7 @@ app.get('/jobs/:id/download', (req,res)=>{
   if (!job) return res.status(404).json({ error:'Job not found' });
   if (!job.outputPath || !fs.existsSync(job.outputPath)) return res.status(404).json({ error:'Output not ready' });
   try{
-    const defaultDir = path.join(os.homedir(), 'Documents', 'sync. outputs');
-    const allowed = [defaultDir];
+    const allowed = [DOCS_DEFAULT_DIR, TEMP_DEFAULT_DIR];
     if (job.outputDir && typeof job.outputDir === 'string') allowed.push(job.outputDir);
     const realOut = fs.realpathSync(job.outputPath);
     const ok = allowed.some(root => {
@@ -282,8 +300,8 @@ app.post('/jobs/:id/save', async (req,res)=>{
       job = { id: String(req.params.id), syncJobId: String(req.params.id), status: 'completed', outputDir: '', apiKey: keyOverride };
     }
 
-    const defaultDir = path.join(os.homedir(), 'Documents', 'sync. outputs');
-    const outDir = (location === 'documents') ? defaultDir : (targetDir || job.outputDir || defaultDir);
+    // Enforce per-project when selected: if 'project', require targetDir; otherwise fallback to temp, not Documents
+    const outDir = (location === 'documents') ? DOCS_DEFAULT_DIR : (targetDir || job.outputDir || TEMP_DEFAULT_DIR);
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
     if (job.outputPath && fs.existsSync(job.outputPath) && path.dirname(job.outputPath) === outDir){
@@ -357,6 +375,21 @@ app.post('/costs', async (req, res) => {
     try { slog('[costs] ok estimate', JSON.stringify(estimate)); } catch(_){ }
     res.json({ ok:true, estimate });
   }catch(e){ slog('[costs] exception', String(e)); res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+// Waveform helper: securely read local file bytes for the panel (same auth)
+app.get('/waveform/file', async (req, res) => {
+  try{
+    const p = String(req.query.path||'');
+    if (!p || !path.isAbsolute(p)) return res.status(400).json({ error:'invalid path' });
+    let real = '';
+    try { real = fs.realpathSync(p); } catch(_){ return res.status(404).json({ error:'not found' }); }
+    if (!fs.existsSync(real)) return res.status(404).json({ error:'not found' });
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) return res.status(400).json({ error:'not a file' });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    fs.createReadStream(real).pipe(res);
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 function pipeToFile(stream, dest){
@@ -445,8 +478,7 @@ async function downloadIfReady(job){
   if (!meta || !meta.outputUrl) return false;
   const response = await fetch(meta.outputUrl);
   if (!response.ok || !response.body) return false;
-  const defaultDir = path.join(os.homedir(), 'Documents', 'sync. outputs');
-  const outDir = (job.outputDir && typeof job.outputDir === 'string' ? normalizeOutputDir(job.outputDir) : '') || defaultDir;
+  const outDir = (job.outputDir && typeof job.outputDir === 'string' ? normalizeOutputDir(job.outputDir) : '') || TEMP_DEFAULT_DIR;
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const outputPath = path.join(outDir, `${job.id}_output.mp4`);
   await pipeToFile(response.body, outputPath);
@@ -481,25 +513,9 @@ function log(){ try{ console.log.apply(console, arguments);}catch(_){}}
 
 // Simple in-memory log buffer for panel debugging
 const LOGS = [];
-function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); LOGS.push(new Date().toISOString()+" "+msg); if (LOGS.length>500) LOGS.shift(); try{ console.log.apply(console, arguments);}catch(_){}}
+function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); LOGS.push(new Date().toISOString()+" "+msg); if (LOGS.length>500) LOGS.shift(); try{ console.log.apply(console, arguments);}catch(_){} }
 app.get('/logs', (_req,res)=>{ res.json({ ok:true, logs: LOGS.slice(-200) }); });
-
-// Accept logs from host/panel
-app.post('/hostlog', (req, res)=>{
-  try{
-    const body = req.body || {};
-    const msg = (typeof body === 'string') ? body : (body.msg || JSON.stringify(body));
-    slog('[host]', msg);
-    res.json({ ok:true });
-  }catch(e){ res.status(500).json({ ok:false, error: String(e?.message||e) }); }
-});
-
-// GET beacon fallback for constrained environments
-app.get('/hostlog', (req, res)=>{
-  const msg = String(req.query.msg||'');
-  slog('[host]', msg);
-  res.json({ ok:true });
-});
+// Keep only the slog + LOGS; public /logs is declared above
 
 app.listen(PORT, HOST, ()=>{
   console.log(`Sync Extension server running on http://${HOST}:${PORT}`);

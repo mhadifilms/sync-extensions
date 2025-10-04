@@ -197,17 +197,28 @@ function PPRO_insertFileAtPlayhead(fsPath) {
       }
     } catch(e) {}
 
+    // Overwrite at playhead rather than ripple insert
     try {
-      sequence.videoTracks[vIndex].insertClip(projItem, pos.ticks);
-      return _respond({ ok:true, videoTrack:vIndex });
+      var t = sequence.videoTracks[vIndex];
+      var beforeCount = (t && t.clips) ? t.clips.numItems : 0;
+      t.overwriteClip(projItem, pos.ticks);
+      // Some APIs may throw despite success; verify visually by checking overlap
+      var success = false;
+      try{
+        if (t && t.clips && t.clips.numItems >= beforeCount){
+          for (var ix=0; ix<t.clips.numItems; ix++){
+            var cc = t.clips[ix];
+            var st = cc.start.ticks; var en = cc.end.ticks;
+            if (st <= pos.ticks && en > pos.ticks) { success = true; break; }
+          }
+        }
+      }catch(e){}
+      if (success) return _respond({ ok:true, videoTrack:vIndex, mode:'overwrite' });
     } catch (e1) {
-      try {
-        sequence.videoTracks[vIndex].insertClip(projItem, pos.seconds);
-        return _respond({ ok:true, videoTrack:vIndex, note:'seconds' });
-      } catch (e2) {
-        return _respond({ ok:false, error: String(e1) + ' | ' + String(e2) });
-      }
+      // ignore and try fallback
     }
+    // Do not use ripple insert fallback to avoid duplicate placements
+    return _respond({ ok:false, error:'overwrite failed' });
   } catch (e) {
     return _respond({ ok:false, error:String(e) });
   }
