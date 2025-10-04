@@ -42,8 +42,13 @@ function PPRO_startBackend() {
   }
 }
 
+var __showDialogBusy = false;
+
 function PPRO_showFileDialog(payloadJson) {
   try {
+    if (__showDialogBusy) { try{ _hostLog('PPRO_showFileDialog busy'); }catch(_){} return _respond({ ok:false, error:'busy' }); }
+    __showDialogBusy = true;
+    _hostLog('PPRO_showFileDialog invoked');
     var p = {};
     try { p = JSON.parse(payloadJson); } catch(e) {}
     var kind = p.kind || 'video';
@@ -82,12 +87,26 @@ function PPRO_showFileDialog(payloadJson) {
         var ext = (i >= 0) ? n.substring(i+1) : '';
         if (allow[ext] !== 1) { return _respond({ ok:false, error:'Invalid file type' }); }
       } catch(e) {}
+      try { _hostLog('PPRO_showFileDialog selected: ' + file.fsName); } catch(_){ }
       return _respond({ ok: true, path: file.fsName });
     }
+    try { _hostLog('PPRO_showFileDialog canceled'); } catch(_){ }
     return _respond({ ok: false, error: 'No file selected' });
   } catch(e) {
     return _respond({ ok: false, error: String(e) });
+  } finally {
+    __showDialogBusy = false;
   }
+}
+
+function _hostLog(msg){
+  try{
+    var s = String(msg||'');
+    // Use curl to send JSON to local server; ignore output
+    var payload = '{"msg": ' + JSON.stringify(s) + '}';
+    var cmd = "/bin/bash -lc \"(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data '" + payload.replace(/'/g, "'\\''") + "' http://127.0.0.1:3000/hostlog || curl -s -m 1 'http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "') >/dev/null 2>&1\"";
+    system.callSystem(cmd);
+  }catch(e){ /* ignore */ }
 }
 
 function PPRO_insertAtPlayhead(jobId) {

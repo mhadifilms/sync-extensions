@@ -410,6 +410,23 @@ const LOGS = [];
 function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); LOGS.push(new Date().toISOString()+" "+msg); if (LOGS.length>500) LOGS.shift(); try{ console.log.apply(console, arguments);}catch(_){}}
 app.get('/logs', (_req,res)=>{ res.json({ ok:true, logs: LOGS.slice(-200) }); });
 
+// Accept logs from host/panel
+app.post('/hostlog', (req, res)=>{
+  try{
+    const body = req.body || {};
+    const msg = (typeof body === 'string') ? body : (body.msg || JSON.stringify(body));
+    slog('[host]', msg);
+    res.json({ ok:true });
+  }catch(e){ res.status(500).json({ ok:false, error: String(e?.message||e) }); }
+});
+
+// GET beacon fallback for constrained environments
+app.get('/hostlog', (req, res)=>{
+  const msg = String(req.query.msg||'');
+  slog('[host]', msg);
+  res.json({ ok:true });
+});
+
 app.listen(PORT, ()=>{
   console.log(`Sync Extension server running on port ${PORT}`);
   console.log(`Jobs file: ${jobsFile}`);
