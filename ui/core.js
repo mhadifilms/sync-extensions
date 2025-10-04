@@ -33,7 +33,9 @@
       }
       
       // UI logger to local server
+      const DEBUG_LOGS = false;
       function uiLog(msg){
+        if (!DEBUG_LOGS) return;
         try { fetch('http://127.0.0.1:3000/hostlog', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ msg: String(msg||'') }) }).catch(()=>{}); } catch(_) {}
       }
       
@@ -41,9 +43,31 @@
       function evalExtendScript(fn, payload) {
         if (!cs) cs = new CSInterface();
         const arg = JSON.stringify(payload || {});
+        const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION);
+        // Build safe IIFE that ensures host is loaded before invoking
+        function buildCode() {
+          function esc(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/"/g,'\\\"'); }
+          const call = fn + '(' + JSON.stringify(arg) + ')';
+          const code = [
+            '(function(){',
+            '  try {',
+            '    if (typeof ' + fn + " !== 'function') {",
+            '      $.evalFile("' + esc(extPath) + '/host/ppro.jsx");',
+            '    }',
+            '    var r = ' + call + ';',
+            '    return r;',
+            '  } catch(e) {',
+            '    return String(e);',
+            '  }',
+            '})()'
+          ].join('\n');
+          return code;
+        }
         function callOnce() {
           return new Promise((resolve) => {
-            cs.evalScript(`${fn}(${JSON.stringify(arg)})`, function(res){
+            try { uiLog('evalScript start ' + fn); } catch(_) {}
+            const code = buildCode();
+            cs.evalScript(code, function(res){
               let out = null;
               try { out = (typeof res === 'string') ? JSON.parse(res) : res; } catch(_) {}
               if (!out || typeof out !== 'object' || out.ok === undefined) {
@@ -52,18 +76,94 @@
                   resolve({ ok: true, path: res, _local: true });
                   return;
                 }
+                try { uiLog('evalScript cb raw ' + String(res||'')); } catch(_){ }
                 resolve({ ok:false, error: String(res || 'no response'), _local: true });
                 return;
               }
+              try { uiLog('evalScript cb ok ' + fn); } catch(_) {}
               resolve(out);
             });
           });
         }
         return new Promise(async (resolve) => {
-          const result = await callOnce();
-          // Do not auto-retry here to avoid triggering a second dialog
-          resolve(result);
+          let settled = false;
+          const timeoutMs = 20000;
+          const timer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              try { uiLog('evalScript timeout ' + fn); } catch(_) {}
+              resolve({ ok:false, error:'EvalScript timeout' });
+            }
+          }, timeoutMs);
+          try {
+            const result = await callOnce();
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(result);
+            }
+          } catch (e) {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve({ ok:false, error:String(e||'EvalScript error') });
+            }
+          }
         });
+      }
+
+      // Expose a quick diagnostic runner used by UI to surface host state
+      async function runInOutDiagnostics(){
+        try{
+          let res = await evalExtendScript('PPRO_diagInOut', {});
+          // If host call failed or missing fields, try inline diag that doesn't depend on host
+          const needsInline = !res || res.ok === false || (typeof res.hasActiveSequence === 'undefined' && typeof res.hasExportAsMediaDirect === 'undefined');
+          if (!needsInline) return res;
+          if (!cs) cs = new CSInterface();
+          const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION);
+          function esc(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/"/g,'\\\"'); }
+          const es = (
+            "(function(){\n"+
+            "  try{\n"+
+            "    var seq = (app && app.project) ? app.project.activeSequence : null;\n"+
+            "    var hasSeq = !!seq;\n"+
+            "    var hasDirect = !!(seq && typeof seq.exportAsMediaDirect === 'function');\n"+
+            "    var inT = 0, outT = 0;\n"+
+            "    try{ var ip = seq && seq.getInPoint ? seq.getInPoint() : null; inT = ip ? (ip.ticks||0) : 0; }catch(_){ inT=0; }\n"+
+            "    try{ var op = seq && seq.getOutPoint ? seq.getOutPoint() : null; outT = op ? (op.ticks||0) : 0; }catch(_){ outT=0; }\n"+
+            "    var eprRoot = '';\n"+
+            "    try{ var f = new Folder('" + esc(extPath) + "/epr'); if (f && f.exists) { eprRoot = f.fsName; } }catch(_){ eprRoot=''; }\n"+
+            "    var eprCount = 0;\n"+
+            "    try{ if (eprRoot){ var ff = new Folder(eprRoot); var items = ff.getFiles(function(x){ try { return (x instanceof File) && /\\.epr$/i.test(String(x.name||'')); } catch(e){ return false; } }); eprCount = (items||[]).length; } }catch(_){ eprCount=0; }\n"+
+            "    function escStr(s){ try{ s=String(s||''); s=s.replace(/\\\\|;/g,' '); return s; }catch(e){ return ''; } }\n"+
+            "    return 'ok='+(hasSeq?1:0)+';active='+(hasSeq?1:0)+';direct='+(hasDirect?1:0)+';in='+inT+';out='+outT+';eprRoot='+escStr(eprRoot)+';eprs='+eprCount;\n"+
+            "  } catch(e){ return 'ok=0;error='+String(e); }\n"+
+            "})()"
+          );
+          const inline = await new Promise(resolve => { cs.evalScript(es, function(r){ resolve(r); }); });
+          // Parse key=value; pairs into object
+          let txt = String(inline||'');
+          const out = { ok:false };
+          try {
+            const parts = txt.split(';');
+            const map = {};
+            for (let i=0;i<parts.length;i++){
+              const kv = parts[i].split('=');
+              if (kv.length >= 2) map[kv[0].trim()] = kv.slice(1).join('=').trim();
+            }
+            out.ok = map.ok === '1';
+            out.hasActiveSequence = map.active === '1';
+            out.hasExportAsMediaDirect = map.direct === '1';
+            out.inTicks = Number(map.in||0) || 0;
+            out.outTicks = Number(map.out||0) || 0;
+            out.eprRoot = map.eprRoot || '';
+            out.eprCount = Number(map.eprs||0) || 0;
+            if (map.error) out.error = map.error;
+          } catch(_) {
+            out.ok = false; out.error = 'parse';
+          }
+          return out;
+        }catch(e){ return { ok:false, error:String(e) }; }
       }
 
       // Single inline ExtendScript picker (host-independent) to avoid host bridge issues

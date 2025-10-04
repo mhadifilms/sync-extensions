@@ -391,7 +391,20 @@
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
           } else {
-            if (statusEl) statusEl.textContent = 'video in/out export failed: ' + (res && res.error ? res.error : 'unknown') + (res && res.eprRoot ? (' root=' + res.eprRoot) : '') + (res && res.preset ? (' preset=' + res.preset) : '');
+            let diag = null;
+            try { diag = await evalExtendScript('PPRO_diagInOut', {}); } catch(_){ }
+            let extra = '';
+            if (diag && typeof diag === 'object') {
+              extra = ' [diag: ' +
+                'active=' + String(diag.hasActiveSequence) +
+                ', direct=' + String(diag.hasExportAsMediaDirect) +
+                (diag.inTicks!=null?(', in='+diag.inTicks):'') +
+                (diag.outTicks!=null?(', out='+diag.outTicks):'') +
+                (diag.eprRoot?(', eprRoot='+diag.eprRoot):'') +
+                (diag.eprCount!=null?(', eprs='+diag.eprCount):'') +
+              ']';
+            }
+            if (statusEl) statusEl.textContent = 'video in/out export failed: ' + (res && res.error ? res.error : 'EvalScript error') + (res && res.eprRoot ? (' root=' + res.eprRoot) : '') + (res && res.preset ? (' preset=' + res.preset) : '') + extra;
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
       }
@@ -409,7 +422,20 @@
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
           } else {
-            if (statusEl) statusEl.textContent = 'audio in/out export failed: ' + (res && res.error ? res.error : 'unknown');
+            let diag = null;
+            try { diag = await evalExtendScript('PPRO_diagInOut', {}); } catch(_){ }
+            let extra = '';
+            if (diag && typeof diag === 'object') {
+              extra = ' [diag: ' +
+                'active=' + String(diag.hasActiveSequence) +
+                ', direct=' + String(diag.hasExportAsMediaDirect) +
+                (diag.inTicks!=null?(', in='+diag.inTicks):'') +
+                (diag.outTicks!=null?(', out='+diag.outTicks):'') +
+                (diag.eprRoot?(', eprRoot='+diag.eprRoot):'') +
+                (diag.eprCount!=null?(', eprs='+diag.eprCount):'') +
+              ']';
+            }
+            if (statusEl) statusEl.textContent = 'audio in/out export failed: ' + (res && res.error ? res.error : 'EvalScript error') + extra;
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
       }

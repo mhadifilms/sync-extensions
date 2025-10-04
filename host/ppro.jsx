@@ -48,6 +48,50 @@ function PPRO_startBackend() {
 
 var __showDialogBusy = false;
 
+// Minimal JSON polyfill for ExtendScript environments lacking JSON
+try {
+  if (typeof JSON === 'undefined') { JSON = {}; }
+  if (typeof JSON.stringify !== 'function') {
+    JSON.stringify = function(value){
+      function escStr(s){ return String(s).replace(/[\\\"\n\r\t\b\f]/g, function(ch){
+        if (ch === '"') return '\\"';
+        if (ch === '\\') return '\\\\';
+        if (ch === '\n') return '\\n';
+        if (ch === '\r') return '\\r';
+        if (ch === '\t') return '\\t';
+        if (ch === '\b') return '\\b';
+        if (ch === '\f') return '\\f';
+        return ch;
+      }); }
+      function ser(v){
+        if (v === null) return 'null';
+        var t = typeof v;
+        if (t === 'string') return '"' + escStr(v) + '"';
+        if (t === 'number' || t === 'boolean') return String(v);
+        if (t === 'undefined') return 'null';
+        if (v instanceof Array) {
+          var arr = [];
+          for (var i=0;i<v.length;i++){ arr.push(ser(v[i])); }
+          return '[' + arr.join(',') + ']';
+        }
+        var props = [];
+        for (var k in v) {
+          if (!v.hasOwnProperty(k)) continue;
+          props.push('"' + escStr(k) + '":' + ser(v[k]));
+        }
+        return '{' + props.join(',') + '}';
+      }
+      return ser(value);
+    };
+  }
+  if (typeof JSON.parse !== 'function') {
+    JSON.parse = function(text){
+      // Unsafe but acceptable for trusted payload from our own UI
+      return eval('(' + String(text) + ')');
+    };
+  }
+} catch(e) { /* ignore */ }
+
 function PPRO_showFileDialog(payloadJson) {
   try {
     if (__showDialogBusy) { try{ _hostLog('PPRO_showFileDialog busy'); }catch(_){} return _respond({ ok:false, error:'busy' }); }
@@ -334,16 +378,7 @@ function _respond(data) {
   return JSON.stringify(data);
 }
 
-function _diagSequenceState(seq){
-  try{
-    var v = []; var a = [];
-    var vc = seq.videoTracks ? seq.videoTracks.numTracks : 0;
-    for (var i=0;i<vc;i++){ var t = seq.videoTracks[i]; var tg = (typeof t.isTargeted==='function' && t.isTargeted()); v.push('V'+i+':' + (tg?'T':'-')); }
-    var ac = seq.audioTracks ? seq.audioTracks.numTracks : 0;
-    for (var j=0;j<ac;j++){ var tt = seq.audioTracks[j]; var tg2 = (typeof tt.isTargeted==='function' && tt.isTargeted()); a.push('A'+j+':' + (tg2?'T':'-')); }
-    return 'video['+v.join(',')+'] audio['+a.join(',')+']';
-  }catch(e){ return 'diag-error:'+String(e); }
-}
+// _diagSequenceState removed (unused)
 
 function _listFilesRec(folder, depth){
   var out = [];
@@ -548,6 +583,7 @@ function PPRO_exportInOutVideo(payloadJson){
     var codec=String(p.codec||'h264');
     var presetPath = _pickVideoPresetPath(codec);
     if(!presetPath) return _respond({ ok:false, error:'Preset not found in /epr for '+codec, eprRoot:_eprRoot() });
+    try { var pf = new File(presetPath); if (!pf || !pf.exists) { return _respond({ ok:false, error:'Preset path missing', preset:presetPath }); } } catch(e) { return _respond({ ok:false, error:'Preset path invalid: '+String(e), preset:presetPath }); }
     var ext=''; try{ ext = String(seq.getExportFileExtension(presetPath)||''); }catch(e){}
     if(!ext) ext = (codec==='h264')?'.mp4':'.mov';
     var out = _chooseOutPath(ext.replace(/^\./,'')); if(!out) return _respond({ ok:false, error:'Temp path failed' });
@@ -568,6 +604,7 @@ function PPRO_exportInOutAudio(payloadJson){
     var format=String(p.format||'wav');
     var presetPath = _pickAudioPresetPath(format);
     if(!presetPath) return _respond({ ok:false, error:'Preset not found in /epr for '+format, eprRoot:_eprRoot() });
+    try { var pf = new File(presetPath); if (!pf || !pf.exists) { return _respond({ ok:false, error:'Preset path missing', preset:presetPath }); } } catch(e) { return _respond({ ok:false, error:'Preset path invalid: '+String(e), preset:presetPath }); }
     var ext=''; try{ ext = String(seq.getExportFileExtension(presetPath)||''); }catch(e){}
     if(!ext) ext = (format==='mp3')?'.mp3':'.wav';
     var out = _chooseOutPath(ext.replace(/^\./,'')); if(!out) return _respond({ ok:false, error:'Temp path failed' });
@@ -578,6 +615,35 @@ function PPRO_exportInOutAudio(payloadJson){
     var done = _waitForFile(out, 180000);
     if(!done) return _respond({ ok:false, error:'Export timeout', out: out });
     return _respond({ ok:true, path: out, preset: presetPath });
+  }catch(e){ return _respond({ ok:false, error:String(e) }); }
+}
+
+function PPRO_diagInOut(payloadJson){
+  try{
+    var info = { ok:true };
+    try { info.extRoot = _extensionRoot(); } catch(e) { info.extRootError = String(e); }
+    try { info.eprRoot = _eprRoot(); } catch(e) { info.eprRootError = String(e); }
+    var seq = null;
+    try { seq = app.project.activeSequence; } catch(e){ info.activeSequenceError = String(e); }
+    info.hasActiveSequence = !!seq;
+    info.hasExportAsMediaDirect = !!(seq && typeof seq.exportAsMediaDirect === 'function');
+    try {
+      app.enableQE();
+      info.qeActive = !!(qe && qe.project && qe.project.getActiveSequence());
+    } catch(e) { info.qeError = String(e); }
+    try {
+      if (seq && typeof seq.getInPoint === 'function') { var ip = seq.getInPoint(); info.inTicks = ip ? ip.ticks : 0; }
+    } catch(e) { info.inError = String(e); }
+    try {
+      if (seq && typeof seq.getOutPoint === 'function') { var op = seq.getOutPoint(); info.outTicks = op ? op.ticks : 0; }
+    } catch(e) { info.outError = String(e); }
+    try {
+      var root = info.eprRoot || '';
+      var files = root ? _listEprRec(root, 1) : [];
+      info.eprCount = files.length;
+      info.firstEpr = (files.length && files[0] && files[0].fsName) ? files[0].fsName : '';
+    } catch(e){ info.eprListError = String(e); }
+    return _respond(info);
   }catch(e){ return _respond({ ok:false, error:String(e) }); }
 }
 
