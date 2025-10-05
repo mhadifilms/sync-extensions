@@ -213,6 +213,18 @@
             if (window.nle && typeof window.nle.getProjectDir === 'function') {
               const r = await window.nle.getProjectDir();
               if (r && r.ok && r.outputDir) targetDir = r.outputDir;
+              // AE direct fallback if unresolved
+              if (!targetDir) {
+                try {
+                  if (!cs) cs = new CSInterface();
+                  await new Promise((resolve) => {
+                    cs.evalScript('AEFT_getProjectDir()', function(resp){
+                      try { const r2 = JSON.parse(resp||'{}'); if (r2 && r2.ok && r2.outputDir) targetDir = r2.outputDir; } catch(_){ }
+                      resolve();
+                    });
+                  });
+                } catch(_){ }
+              }
             } else {
               await new Promise((resolve) => {
                 cs.evalScript('PPRO_getProjectDir()', function(resp){
@@ -222,13 +234,23 @@
               });
             }
           } catch(_){ }
-          // If project selected but host didn’t resolve, stop here with user-facing error
+          // If AE and project dir unresolved, fall back to Documents (do not affect Premiere logic)
           if (!targetDir) {
-            const statusEl = document.getElementById('statusMessage');
-            if (statusEl) statusEl.textContent = 'could not resolve project folder; open/switch to a saved project and try again';
-            markError('insert-'+jobId, 'project dir');
-            if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
-            insertingGuard = false; return;
+            try {
+              if (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT') {
+                location = 'documents';
+              } else {
+                const statusEl = document.getElementById('statusMessage');
+                if (statusEl) statusEl.textContent = 'could not resolve project folder; open/switch to a saved project and try again';
+                markError('save-'+jobId, 'project dir');
+                return;
+              }
+            } catch(_) {
+              const statusEl = document.getElementById('statusMessage');
+              if (statusEl) statusEl.textContent = 'could not resolve project folder; open/switch to a saved project and try again';
+              markError('save-'+jobId, 'project dir');
+              return;
+            }
           }
         }
         const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
@@ -247,12 +269,15 @@
         if (savedPath) {
           const fp = savedPath.replace(/\"/g,'\\\"');
           try {
-            if (window.nle && typeof window.nle.importFileToBin === 'function') {
-              await window.nle.importFileToBin(savedPath, 'sync. outputs');
-              markSaved('save-'+jobId);
-            } else {
+            if (!cs) cs = new CSInterface();
+            const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+            // Try AE first, fall back to Premiere
+            cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); AEFT_importFileToBin(\"${fp}\")`, function(r){
+              let ok = false;
+              try { var out = (typeof r === 'string') ? JSON.parse(r) : r; ok = !!(out && out.ok); } catch(_){ ok = false; }
+              if (ok) { markSaved('save-'+jobId); return; }
               cs.evalScript(`PPRO_importFileToBin(\"${fp}\", \"sync. outputs\")`, function(){ markSaved('save-'+jobId); });
-            }
+            });
           } catch(_){ markError('save-'+jobId, 'error'); }
         } else {
           markError('save-'+jobId, 'not ready');
@@ -266,12 +291,50 @@
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
         if (location === 'project') {
-          await new Promise((resolve) => {
-            cs.evalScript('PPRO_getProjectDir()', function(resp){
-              try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
-              resolve();
-            });
-          });
+          try {
+            if (window.nle && typeof window.nle.getProjectDir === 'function') {
+              const r = await window.nle.getProjectDir();
+              if (r && r.ok && r.outputDir) targetDir = r.outputDir;
+              // AE direct fallback if unresolved
+              if (!targetDir) {
+                try {
+                  if (!cs) cs = new CSInterface();
+                  await new Promise((resolve) => {
+                    cs.evalScript('AEFT_getProjectDir()', function(resp){
+                      try { const r2 = JSON.parse(resp||'{}'); if (r2 && r2.ok && r2.outputDir) targetDir = r2.outputDir; } catch(_){ }
+                      resolve();
+                    });
+                  });
+                } catch(_){ }
+              }
+            } else {
+              await new Promise((resolve) => {
+                cs.evalScript('PPRO_getProjectDir()', function(resp){
+                  try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
+                  resolve();
+                });
+              });
+            }
+          } catch(_){ }
+          // If AE and project dir unresolved, fall back to Documents (do not affect Premiere logic)
+          if (!targetDir) {
+            let usedFallback = false;
+            try {
+              if (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT') {
+                location = 'documents';
+                usedFallback = true;
+              }
+            } catch(_) { }
+            if (!usedFallback) {
+              const statusEl = document.getElementById('statusMessage');
+              if (statusEl) statusEl.textContent = 'could not resolve project folder; open/switch to a saved project and try again';
+              markError('insert-'+jobId, 'project dir');
+              const mainInsertBtn = document.getElementById('insertBtn');
+              const mainInsertWasDisabled = mainInsertBtn ? mainInsertBtn.disabled : false;
+              if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
+              insertingGuard = false; return;
+            }
+          }
         }
         const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
         let savedPath = '';
@@ -292,27 +355,31 @@
         if (!savedPath) { markError('insert-'+jobId, 'not ready'); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
         const fp = savedPath.replace(/\"/g,'\\\"');
         try {
-          if (window.nle && typeof window.nle.insertFileAtPlayhead === 'function') {
-            const out = await window.nle.insertFileAtPlayhead(savedPath);
+          if (!cs) cs = new CSInterface();
+          const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+          // Try AE first, fall back to Premiere
+          cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); AEFT_insertFileAtPlayhead(\"${fp}\")`, function(r){
+            let handled = false;
             try {
-              const statusEl = document.getElementById('statusMessage');
-              if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
-              else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
-            } catch(_){ }
-            if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
-            insertingGuard = false;
-          } else {
-            cs.evalScript(`PPRO_insertFileAtPlayhead(\"${fp}\")`, function(r){
-               try {
-                 const out = (typeof r === 'string') ? JSON.parse(r) : r;
-                 const statusEl = document.getElementById('statusMessage');
-                 if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
-                 else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
-               } catch(_){ }
-               if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
-               insertingGuard = false;
-             });
-          }
+              const out = (typeof r === 'string') ? JSON.parse(r) : r;
+              if (out && out.ok === true) {
+                const statusEl = document.getElementById('statusMessage');
+                if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':'');
+                handled = true;
+              }
+            } catch(_){ handled = false; }
+            if (handled) { if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
+            cs.evalScript(`PPRO_insertFileAtPlayhead(\"${fp}\")`, function(r2){
+              try {
+                const out2 = (typeof r2 === 'string') ? JSON.parse(r2) : r2;
+                const statusEl = document.getElementById('statusMessage');
+                if (out2 && out2.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out2.diag? ' ['+out2.diag+']':''); }
+                else { if (statusEl) statusEl.textContent = 'insert failed' + (out2 && out2.error ? ' ('+out2.error+')' : ''); }
+              } catch(_){ }
+              if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
+              insertingGuard = false;
+            });
+          });
         } catch(_){
           markError('insert-'+jobId, 'error');
           if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }

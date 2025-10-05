@@ -7,6 +7,9 @@ import os from 'os';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import { exec as _exec } from 'child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -24,6 +27,73 @@ app.use(cors({
   allowedHeaders: ['Content-Type','x-api-key','Authorization'],
   maxAge: 86400
 }));
+
+const exec = promisify(_exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const EXT_ROOT = path.resolve(__dirname, '..', '..');
+const MANIFEST_PATH = path.join(EXT_ROOT, 'CSXS', 'manifest.xml');
+const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-premiere';
+const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
+
+function parseBundleVersion(xmlText){
+  try{
+    const m = /ExtensionBundleVersion\s*=\s*"([^"]+)"/i.exec(String(xmlText||''));
+    if (m && m[1]) return m[1].trim();
+  }catch(_){ }
+  return '';
+}
+
+function normalizeVersion(v){
+  try{ return String(v||'').trim().replace(/^v/i, ''); }catch(_){ return ''; }
+}
+
+function compareSemver(a, b){
+  const pa = normalizeVersion(a).split('.').map(x=>parseInt(x,10)||0);
+  const pb = normalizeVersion(b).split('.').map(x=>parseInt(x,10)||0);
+  for (let i=0; i<Math.max(pa.length, pb.length); i++){
+    const ai = pa[i]||0; const bi = pb[i]||0;
+    if (ai > bi) return 1; if (ai < bi) return -1;
+  }
+  return 0;
+}
+
+async function getCurrentVersion(){
+  try{
+    const xml = fs.readFileSync(MANIFEST_PATH, 'utf8');
+    return parseBundleVersion(xml) || '';
+  }catch(_){ return ''; }
+}
+
+async function getLatestReleaseInfo(){
+  const repo = UPDATES_REPO;
+  const base = `https://api.github.com/repos/${repo}`;
+  // Try releases first (preferred), then fallback to tags if no releases
+  async function tryReleases(){
+    const r = await fetch(`${base}/releases/latest`, { headers: { 'Accept':'application/vnd.github+json' }});
+    if (!r.ok) return null;
+    const j = await r.json();
+    const tag = j.tag_name || j.name || '';
+    if (!tag) return null;
+    return { tag, version: normalizeVersion(tag), html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`, zip_url: j.zipball_url || `${base}/zipball/${tag}` };
+  }
+  async function tryTags(){
+    const r = await fetch(`${base}/tags`, { headers: { 'Accept':'application/vnd.github+json' }});
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!Array.isArray(j) || !j.length) return null;
+    const tag = j[0].name || j[0].tag_name || '';
+    return { tag, version: normalizeVersion(tag), html_url: `https://github.com/${repo}/releases/tag/${tag}`, zip_url: `${base}/zipball/${tag}` };
+  }
+  if (UPDATES_CHANNEL === 'tags') {
+    return await tryTags();
+  }
+  const fromReleases = await tryReleases();
+  if (fromReleases) return fromReleases;
+  const fromTags = await tryTags();
+  if (fromTags) return fromTags;
+  return null;
+}
 
 let jobs = [];
 let jobCounter = 0;
@@ -124,6 +194,95 @@ app.use((req,res,next)=>{
   // Keep logs and health/token public for panel bootstrap
   if (req.path === '/logs' || req.path === '/health' || req.path === '/auth/token') return next();
   return requireAuth(req,res,next);
+});
+
+// Updates: version, check, apply
+app.get('/update/version', async (_req,res)=>{
+  try{
+    const current = await getCurrentVersion();
+    res.json({ ok:true, version: current });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+app.get('/update/check', async (_req,res)=>{
+  try{
+    const current = await getCurrentVersion();
+    const latest = await getLatestReleaseInfo();
+    if (!latest){
+      return res.json({ ok:true, current, latest: null, tag: null, html_url: `https://github.com/${UPDATES_REPO}/releases`, canUpdate: false, repo: UPDATES_REPO, message: 'no releases/tags found' });
+    }
+    const cmp = (current && latest.version) ? compareSemver(latest.version, current) : 0;
+    res.json({ ok:true, current, latest: latest.version, tag: latest.tag, html_url: latest.html_url, canUpdate: cmp > 0, repo: UPDATES_REPO });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+app.post('/update/apply', async (req,res)=>{
+  try{
+    const { tag: desiredTag } = req.body || {};
+    const current = await getCurrentVersion();
+    const latest = await getLatestReleaseInfo();
+    if (!latest) return res.status(400).json({ error:'no releases/tags found for updates' });
+    const tag = desiredTag || latest.tag;
+    const latestVersion = normalizeVersion(latest.version || tag || '');
+    if (current && latestVersion && compareSemver(latestVersion, current) <= 0){
+      return res.json({ ok:true, updated:false, message:'Already up to date', current, latest: latestVersion });
+    }
+    // Prepare temp paths
+    const tmpRoot = path.join(os.tmpdir(), 'sync_extension_update');
+    try { fs.rmSync(tmpRoot, { recursive:true, force:true }); } catch(_){ }
+    fs.mkdirSync(tmpRoot, { recursive:true });
+    const zipPath = path.join(tmpRoot, 'update.zip');
+    const extractDir = path.join(tmpRoot, 'extracted');
+    fs.mkdirSync(extractDir, { recursive:true });
+
+    // Download zipball
+    const resp = await fetch(latest.zip_url, { headers: { 'Accept':'application/vnd.github+json' } });
+    if (!resp.ok || !resp.body) return res.status(500).json({ error:`download failed ${resp.status}` });
+    await new Promise((resolve, reject)=>{
+      const ws = fs.createWriteStream(zipPath);
+      resp.body.pipe(ws);
+      resp.body.on('error', reject);
+      ws.on('finish', resolve);
+      ws.on('error', reject);
+    });
+
+    // Unzip using system unzip (macOS)
+    try { await exec(`/usr/bin/unzip -q ${JSON.stringify(zipPath)} -d ${JSON.stringify(extractDir)}`); }
+    catch(e){ return res.status(500).json({ error:'unzip failed; please update manually', details: String(e?.message||e) }); }
+
+    // Find root folder inside extracted
+    const contents = fs.readdirSync(extractDir);
+    const rootDirName = contents.find(n=>{ try{ return fs.statSync(path.join(extractDir, n)).isDirectory(); }catch(_){ return false; } });
+    if (!rootDirName) return res.status(500).json({ error:'invalid zip contents' });
+    const rootDir = path.join(extractDir, rootDirName);
+
+    // rsync copy into extension root, preserving node_modules to avoid slow reinstalls
+    const rsyncBin = '/usr/bin/rsync';
+    try{
+      await exec(`${rsyncBin} -a --delete --exclude server/node_modules/ ${JSON.stringify(rootDir + '/') } ${JSON.stringify(EXT_ROOT)}`);
+    }catch(e){
+      // Fallback: naive copy (best-effort)
+      const copyRecursive = (src, dst)=>{
+        const items = fs.readdirSync(src);
+        for (const name of items){
+          const s = path.join(src, name);
+          const d = path.join(dst, name);
+          const st = fs.statSync(s);
+          if (st.isDirectory()){
+            if (s.indexOf(path.join('server', 'node_modules')) !== -1) continue;
+            if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive:true });
+            copyRecursive(s, d);
+          } else {
+            fs.copyFileSync(s, d);
+          }
+        }
+      };
+      try{ copyRecursive(rootDir, EXT_ROOT); } catch(e2){ return res.status(500).json({ error:'copy failed; update manually', details:String(e2?.message||e2) }); }
+    }
+
+    // Success; advise reload
+    return res.json({ ok:true, updated:true, current, latest: latestVersion, message:'Update applied. Please reload the panel or restart the host app.' });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
 const SUPA_URL = process.env.SUPABASE_URL || '';
 const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';

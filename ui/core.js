@@ -176,7 +176,7 @@
         }catch(e){ return { ok:false, error:String(e) }; }
       }
 
-      // Host-backed file picker to avoid inline ExtendScript parser issues
+      // Host-backed file picker to avoid inline ExtendScript parser popups
       let __pickerBusy = false;
       async function openFileDialog(kind) {
         if (__pickerBusy) { return ''; }
@@ -189,18 +189,13 @@
             const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
             await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); $.evalFile(\"${extPath}/host/ppro.jsx\")`, ()=>resolve()));
           } catch(_){ }
-          // Prefer AE/PPRO host helpers when available
+          // Prefer AE/PPRO host helpers via evalExtendScript IIFE to suppress host popups
           try {
-            const payload = JSON.stringify({ kind: k }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-            return await new Promise(resolve => {
-              cs.evalScript(`AEFT_showFileDialog(\"${payload}\")`, function(r1){
-                try { var j1 = JSON.parse(r1||'{}'); if (j1 && j1.ok && j1.path) { resolve(j1.path); return; } } catch(_){ }
-                cs.evalScript(`PPRO_showFileDialog(\"${payload}\")`, function(r2){
-                  try { var j2 = JSON.parse(r2||'{}'); if (j2 && j2.ok && j2.path) { resolve(j2.path); return; } } catch(_){ }
-                  resolve('');
-                });
-              });
-            });
+            const j1 = await evalExtendScript('AEFT_showFileDialog', { kind: k });
+            if (j1 && j1.ok && j1.path) return j1.path || '';
+            const j2 = await evalExtendScript('PPRO_showFileDialog', { kind: k });
+            if (j2 && j2.ok && j2.path) return j2.path || '';
+            return '';
           } catch(_){ return ''; }
         } finally {
           __pickerBusy = false;

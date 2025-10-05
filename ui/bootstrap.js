@@ -7,6 +7,8 @@
             fetch('http://127.0.0.1:3000/health', { cache:'no-store' }).catch(function(){});
           } catch(_){ }
           try { if (typeof ensureAuthToken === 'function') await ensureAuthToken(); } catch(_){ }
+          // Silent update check on load
+          try { if (typeof checkForUpdate === 'function') checkForUpdate(true); } catch(_){ }
         }
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); }
         else { init(); }

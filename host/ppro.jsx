@@ -184,8 +184,18 @@ function PPRO_insertAtPlayhead(jobId) {
   }
 }
 
-function PPRO_insertFileAtPlayhead(fsPath) {
+function PPRO_insertFileAtPlayhead(payloadOrPath) {
   try {
+    // Compatibility: accept JSON payload string or raw path
+    var fsPath = '';
+    try {
+      if (payloadOrPath && typeof payloadOrPath === 'string' && (payloadOrPath.charAt(0) === '{' || payloadOrPath.charAt(0) === '"')) {
+        var tmp = JSON.parse(payloadOrPath);
+        if (tmp && tmp.path) { fsPath = String(tmp.path); }
+      }
+    } catch(e) { /* ignore and treat as raw path */ }
+    if (!fsPath) { fsPath = String(payloadOrPath||''); }
+
     var file = new File(fsPath);
     if (!file.exists) return _respond({ ok:false, error:'File not found' });
 
@@ -311,8 +321,20 @@ function PPRO_getProjectDir() {
   }
 }
 
-function PPRO_importFileToBin(fsPath, binName) {
+function PPRO_importFileToBin(payloadOrPath, binNameParam) {
   try {
+    // Compatibility: accept JSON payload string { path, binName } or raw (fsPath, binName)
+    var fsPath = '';
+    var binName = binNameParam;
+    try {
+      if (payloadOrPath && typeof payloadOrPath === 'string' && (payloadOrPath.charAt(0) === '{' || payloadOrPath.charAt(0) === '"')) {
+        var p = JSON.parse(payloadOrPath);
+        if (p && p.path) fsPath = String(p.path);
+        if (p && p.binName) binName = String(p.binName);
+      }
+    } catch(e) { /* ignore, treat as raw args */ }
+    if (!fsPath) fsPath = String(payloadOrPath||'');
+
     var project = app.project;
     if (!project) return _respond({ ok:false, error:'No project' });
     var targetBin = project.getInsertionBin();

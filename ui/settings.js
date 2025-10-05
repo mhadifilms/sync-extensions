@@ -75,6 +75,58 @@
         scheduleEstimate();
       }
 
+      // ===== Updates UI =====
+      async function getAuth(){ try{ return await ensureAuthToken(); }catch(_){ return ''; } }
+      async function api(pathname, opts){
+        const token = await getAuth();
+        const h = Object.assign({ 'Content-Type':'application/json' }, token ? { 'Authorization': 'Bearer ' + token } : {});
+        return fetch('http://127.0.0.1:3000' + pathname, Object.assign({ headers: h }, opts||{}));
+      }
+
+      async function refreshCurrentVersion(){
+        const el = document.getElementById('versionDisplay'); if (!el) return;
+        try{
+          const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }).catch(()=>null);
+          if (!r || !r.ok) { el.textContent = 'version (start panel server to fetch)'; return; }
+          const v = await (await api('/update/version')).json().catch(()=>({}));
+          if (v && v.version) el.textContent = 'version v' + v.version;
+          else el.textContent = 'version (unknown)';
+        }catch(_){ el.textContent = 'version (unavailable)'; }
+      }
+
+      async function checkForUpdate(silent = false){
+        const status = document.getElementById('updateStatus'); if (status) { status.style.display='block'; status.textContent = 'checking for updates…'; }
+        const btnApply = document.getElementById('applyUpdateBtn'); if (btnApply) btnApply.style.display = 'none';
+        const notes = document.getElementById('releaseNotesLink'); if (notes) { notes.style.display='none'; notes.href = '#'; }
+        try{
+          await ensureAuthToken();
+          const r = await api('/update/check');
+          const j = await r.json().catch(()=>({}));
+          if (!r.ok) throw new Error(j && j.error ? j.error : 'update check failed');
+          const vEl = document.getElementById('versionDisplay');
+          if (vEl) vEl.textContent = 'version v' + (j.current || '—');
+          if (status) status.textContent = j.canUpdate ? ('update available → v' + j.latest) : 'you are up to date';
+          if (notes && j.html_url) { notes.style.display='inline'; notes.href = j.html_url; notes.textContent = 'release notes'; }
+          if (btnApply && j.canUpdate) { btnApply.dataset.tag = j.tag || ''; btnApply.style.display = 'inline-block'; }
+        }catch(e){ if (status) status.textContent = 'update check failed: ' + String(e && e.message || e); }
+      }
+
+      async function applyUpdate(){
+        const btn = document.getElementById('applyUpdateBtn');
+        const status = document.getElementById('updateStatus'); if (status) { status.style.display='block'; status.textContent = 'downloading and applying update…'; }
+        try{
+          const tag = (btn && btn.dataset && btn.dataset.tag) ? btn.dataset.tag : undefined;
+          const r = await api('/update/apply', { method:'POST', body: JSON.stringify(tag ? { tag } : {}) });
+          const j = await r.json().catch(()=>({}));
+          if (!r.ok) throw new Error(j && j.error ? j.error : 'update failed');
+          if (status) status.textContent = j.updated ? 'update applied. please reload the panel.' : (j.message || 'no update applied');
+          await refreshCurrentVersion();
+        }catch(e){ if (status) status.textContent = 'update failed: ' + String(e && e.message || e); }
+      }
+
+      // Initial fetch on settings load
+      (function initUpdates(){ try{ refreshCurrentVersion(); }catch(_){ } })();
+
       // On load, if localStorage missing, try to hydrate from backend
       (function hydrateSettings(){
         try {

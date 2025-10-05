@@ -53,6 +53,24 @@ function _ffmpegPath(){
   return '';
 }
 
+// Wait until a file exists and its size is stable (helps AE import after downloads)
+function _waitForFileReady(file, timeoutMs){
+  try {
+    var start = (new Date()).getTime();
+    var lastSize = -1; var stable = 0;
+    while (((new Date()).getTime() - start) < (timeoutMs||20000)){
+      try{
+        if (file && file.exists){
+          var sz = 0; try { file.open('r'); file.seek(0,2); sz = file.length; file.close(); } catch(e){ sz = file.length; }
+          if (sz > 0){ if (sz === lastSize) { stable++; if (stable > 2) return true; } else { lastSize = sz; stable = 0; } }
+        }
+      }catch(e){}
+      $.sleep(200);
+    }
+    try{ return file && file.exists; }catch(e){ return false; }
+  } catch(e){ return false; }
+}
+
 function AEFT_startBackend() {
   try {
     var extPath = _extensionRoot();
@@ -96,14 +114,17 @@ function AEFT_getProjectDir() {
   try {
     var proj = (app && app.project) ? app.project : null;
     var base = null;
-    try { if (proj && proj.file) { base = proj.file.parent; } } catch (e) {}
+    if (proj && proj.file) {
+      base = proj.file.parent;
+    }
     if (!base || !base.exists) {
-      try { base = Folder('~/Documents'); } catch (e2) { base = null; }
+      try { base = Folder.userDocuments; } catch(_) { base = null; }
     }
     if (!base || !base.exists) return _respond({ ok: false, error: 'No project folder' });
     var outFolder = new Folder(base.fsName + '/sync. outputs');
     if (!outFolder.exists) { try { outFolder.create(); } catch (e3) {} }
-    return _respond({ ok: true, projectDir: base.fsName, outputDir: outFolder.fsName });
+    var isFallback = !(proj && proj.file);
+    return _respond({ ok: true, projectDir: base.fsName, outputDir: outFolder.fsName, fallback: isFallback });
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
   }
@@ -118,6 +139,19 @@ function AEFT_diagInOut() {
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
   }
+}
+
+function AEFT_statFile(payloadJson) {
+  try {
+    var p = {}; try { p = JSON.parse(payloadJson || '{}'); } catch (e) {}
+    var path = String(p.path || '');
+    if (!path) return _respond({ ok:false, error:'No path' });
+    var f = new File(path);
+    if (!f || !f.exists) return _respond({ ok:false, error:'Not found' });
+    var size = 0;
+    try { f.open('r'); f.seek(0,2); size = f.length; f.close(); } catch(_){ try{ size = f.length || 0; }catch(_){ size = 0; } }
+    return _respond({ ok:true, size: Number(size)||0 });
+  } catch (e) { return _respond({ ok:false, error:String(e) }); }
 }
 
 function AEFT_showFileDialog(payloadJson) {
@@ -257,19 +291,63 @@ function AEFT_exportInOutAudio(payloadJson) {
   }
 }
 
-function AEFT_insertFileAtPlayhead(payloadJson) {
+function AEFT_insertFileAtPlayhead(payloadOrJson) {
   try {
-    var p = {}; try { p = JSON.parse(payloadJson || '{}'); } catch (e) {}
-    var path = String(p.path || '');
+    var p = {};
+    var path = '';
+    try {
+      if (payloadOrJson && typeof payloadOrJson === 'string' && (payloadOrJson.charAt(0) === '{' || payloadOrJson.charAt(0) === '"')) {
+        p = JSON.parse(payloadOrJson || '{}');
+        path = String(p.path || '');
+      }
+    } catch (_) { }
+    if (!path) { path = String(payloadOrJson || ''); }
     if (!path) return _respond({ ok: false, error: 'No path' });
     var f = new File(path);
     if (!f.exists) return _respond({ ok: false, error: 'File not found' });
+    // Ensure file is fully written
+    _waitForFileReady(f, 20000);
     try {
       app.beginUndoGroup('sync. import');
-      var imported = app.project && app.project.importFile ? app.project.importFile(new ImportOptions(f)) : null;
-      app.endUndoGroup();
-      if (imported) return _respond({ ok: true, mode: 'import' });
-      return _respond({ ok: false, error: 'Import failed' });
+      // Find existing or import the file with ImportOptions
+      var imported = null;
+      try {
+        var items = app.project.items; var n = items ? items.length : 0;
+        for (var i=1;i<=n;i++){
+          var it = items[i];
+          try { if (it && it instanceof FootageItem && it.file && it.file.fsName === f.fsName) { imported = it; break; } } catch(_){ }
+        }
+      } catch(_){ }
+      if (!imported) {
+        var io = new ImportOptions(f);
+        try { if (io && io.canImportAs && io.canImportAs(ImportAsType.FOOTAGE)) { io.importAs = ImportAsType.FOOTAGE; } } catch(_){ }
+        imported = (app.project && app.project.importFile) ? app.project.importFile(io) : null;
+      }
+      if (!imported) { try { app.endUndoGroup(); } catch(_){} return _respond({ ok: false, error: 'Import failed' }); }
+      // Ensure/locate "sync. outputs" folder in project bin and move item there
+      var outputsFolder = null;
+      try {
+        var items = app.project.items;
+        var n = items ? items.length : 0;
+        for (var i = 1; i <= n; i++) {
+          var it = items[i];
+          if (it && (it instanceof FolderItem) && String(it.name) === 'sync. outputs') { outputsFolder = it; break; }
+        }
+        if (!outputsFolder) { outputsFolder = app.project.items.addFolder('sync. outputs'); }
+      } catch(_){ }
+      try { if (outputsFolder && imported && imported.parentFolder !== outputsFolder) { imported.parentFolder = outputsFolder; } } catch(_){ }
+      // Insert as a new layer in the active comp at playhead (robust)
+      var comp = app.project.activeItem;
+      if (!comp || !(comp instanceof CompItem)) { try { app.endUndoGroup(); } catch(_){ } return _respond({ ok:false, error:'No active composition' }); }
+      var before = 0; try { before = comp.layers ? comp.layers.length : 0; } catch(_){ }
+      var layer = null;
+      try { layer = comp.layers.add(imported); } catch(eAdd) { layer = null; }
+      if (!layer) { try { app.endUndoGroup(); } catch(_){ } return _respond({ ok:false, error:'Layer add failed' }); }
+      try { layer.startTime = comp.time; } catch(_){ }
+      var after = 0; try { after = comp.layers ? comp.layers.length : 0; } catch(_){ }
+      try { app.endUndoGroup(); } catch(_){ }
+      if (after > before) { return _respond({ ok:true, mode:'insert', layerName: (layer && layer.name) || '' }); }
+      return _respond({ ok:false, error:'Insert verification failed' });
     } catch (e) {
       try { app.endUndoGroup(); } catch (_) {}
       return _respond({ ok: false, error: String(e) });
@@ -279,19 +357,54 @@ function AEFT_insertFileAtPlayhead(payloadJson) {
   }
 }
 
-function AEFT_importFileToBin(payloadJson) {
+function AEFT_importFileToBin(payloadOrJson) {
   try {
-    var p = {}; try { p = JSON.parse(payloadJson || '{}'); } catch (e) {}
-    var path = String(p.path || '');
+    var p = {};
+    var path = '';
+    var binName = 'sync. outputs';
+    try {
+      if (payloadOrJson && typeof payloadOrJson === 'string' && (payloadOrJson.charAt(0) === '{' || payloadOrJson.charAt(0) === '"')) {
+        p = JSON.parse(payloadOrJson || '{}');
+        path = String(p.path || '');
+        if (p && p.binName) { binName = String(p.binName); }
+      }
+    } catch (_) { }
+    if (!path) { path = String(payloadOrJson || ''); }
     if (!path) return _respond({ ok: false, error: 'No path' });
     var f = new File(path);
     if (!f.exists) return _respond({ ok: false, error: 'File not found' });
+    // Ensure file is fully written
+    _waitForFileReady(f, 20000);
     try {
       app.beginUndoGroup('sync. import');
-      var imported = app.project && app.project.importFile ? app.project.importFile(new ImportOptions(f)) : null;
-      app.endUndoGroup();
-      if (imported) return _respond({ ok: true });
-      return _respond({ ok: false, error: 'Import failed' });
+      var imported = null;
+      try {
+        var items = app.project.items; var n = items ? items.length : 0;
+        for (var i=1;i<=n;i++){
+          var it = items[i];
+          try { if (it && it instanceof FootageItem && it.file && it.file.fsName === f.fsName) { imported = it; break; } } catch(_){ }
+        }
+      } catch(_){ }
+      if (!imported) {
+        var io = new ImportOptions(f);
+        try { if (io && io.canImportAs && io.canImportAs(ImportAsType.FOOTAGE)) { io.importAs = ImportAsType.FOOTAGE; } } catch(_){ }
+        imported = (app.project && app.project.importFile) ? app.project.importFile(io) : null;
+      }
+      if (!imported) { try { app.endUndoGroup(); } catch(_){} return _respond({ ok:false, error:'Import failed' }); }
+      // Move to requested bin (default "sync. outputs")
+      var target = null;
+      try {
+        var items = app.project.items;
+        var n = items ? items.length : 0;
+        for (var i = 1; i <= n; i++) {
+          var it = items[i];
+          if (it && (it instanceof FolderItem) && String(it.name) === binName) { target = it; break; }
+        }
+        if (!target) { target = app.project.items.addFolder(binName); }
+      } catch(_){ }
+      try { if (target && imported && imported.parentFolder !== target) { imported.parentFolder = target; } } catch(_){ }
+      try { app.endUndoGroup(); } catch(_){}
+      return _respond({ ok: true });
     } catch (e) {
       try { app.endUndoGroup(); } catch (_) {}
       return _respond({ ok: false, error: String(e) });

@@ -19,7 +19,7 @@
               <div class=\"history-actions\">\n                \n        </div>
             </div>`;
           return base + done;
-        }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">no generations yet</div>';
+        }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">loading generations...</div>';
       }
 
       // Delegate jid click/Enter-to-copy
