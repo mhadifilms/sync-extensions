@@ -19,7 +19,8 @@
         const statusEl = document.getElementById('statusMessage');
         statusEl.textContent = 'starting backend...';
         
-        // Start backend server
+        // Start backend server (host-agnostic)
+        try { await (window.nle && window.nle.startBackend ? window.nle.startBackend() : Promise.resolve({ ok:true })); } catch(_){ }
         if (!cs) cs = new CSInterface();
         cs.evalScript('PPRO_startBackend()', async function(result) {
           console.log('Backend start result:', result);
@@ -38,18 +39,28 @@
           }
           if (myToken !== runToken) return;
           statusEl.textContent = 'backend ready. creating job...';
+          const mainBtn = document.getElementById('lipsyncBtn');
+          if (mainBtn) { mainBtn.textContent = 'rendering…'; mainBtn.disabled = true; }
           
-          // Resolve output directory from Premiere project
+          // Resolve output directory from host project
           let outputDir = null;
-          await new Promise((resolve) => {
-            cs.evalScript('PPRO_getProjectDir()', function(resp){
-              try {
-                const r = JSON.parse(resp || '{}');
-                if (r && r.ok && r.outputDir) outputDir = r.outputDir;
-              } catch(_) {}
-              resolve();
-            });
-          });
+          try {
+            if (window.nle && typeof window.nle.getProjectDir === 'function') {
+              const r = await window.nle.getProjectDir();
+              if (r && r.ok && r.outputDir) outputDir = r.outputDir;
+              // AE fallback: if no project folder, prefer ~/Documents mode
+              if ((!outputDir || !r.ok) && window.nle.getHostId && window.nle.getHostId() === 'AEFT') {
+                try { const r2 = await window.nle.getProjectDir(); if (r2 && r2.ok && r2.outputDir) outputDir = r2.outputDir; } catch(_){ }
+              }
+            } else {
+              await new Promise((resolve) => {
+                cs.evalScript('PPRO_getProjectDir()', function(resp){
+                  try { const r = JSON.parse(resp || '{}'); if (r && r.ok && r.outputDir) outputDir = r.outputDir; } catch(_) {}
+                  resolve();
+                });
+              });
+            }
+          } catch(_){ }
 
           // Create job via backend
           const jobData = {
@@ -82,7 +93,7 @@
             try { data = JSON.parse(text || '{}'); } catch(_) { data = { error: text }; }
             if (!resp.ok) { throw new Error(data && data.error ? data.error : (text || 'job creation failed')); }
             if (myToken !== runToken) return;
-            statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. polling status...';
+            statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. rendering/transcoding…';
             jobs = jobs.map(j => j.id === placeholderId ? data : j);
             saveJobsLocal();
             updateHistory();
@@ -198,16 +209,23 @@
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
         if (location === 'project') {
-          await new Promise((resolve) => {
-            cs.evalScript('PPRO_getProjectDir()', function(resp){
-              try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
-              resolve();
-            });
-          });
+          try {
+            if (window.nle && typeof window.nle.getProjectDir === 'function') {
+              const r = await window.nle.getProjectDir();
+              if (r && r.ok && r.outputDir) targetDir = r.outputDir;
+            } else {
+              await new Promise((resolve) => {
+                cs.evalScript('PPRO_getProjectDir()', function(resp){
+                  try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
+                  resolve();
+                });
+              });
+            }
+          } catch(_){ }
           // If project selected but host didn’t resolve, stop here with user-facing error
           if (!targetDir) {
             const statusEl = document.getElementById('statusMessage');
-            if (statusEl) statusEl.textContent = 'could not resolve project folder; open/switch to a saved Premiere project and try again';
+            if (statusEl) statusEl.textContent = 'could not resolve project folder; open/switch to a saved project and try again';
             markError('insert-'+jobId, 'project dir');
             if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
             insertingGuard = false; return;
@@ -228,7 +246,14 @@
         reset();
         if (savedPath) {
           const fp = savedPath.replace(/\"/g,'\\\"');
-          cs.evalScript(`PPRO_importFileToBin(\"${fp}\", \"sync. outputs\")`, function(){ markSaved('save-'+jobId); });
+          try {
+            if (window.nle && typeof window.nle.importFileToBin === 'function') {
+              await window.nle.importFileToBin(savedPath, 'sync. outputs');
+              markSaved('save-'+jobId);
+            } else {
+              cs.evalScript(`PPRO_importFileToBin(\"${fp}\", \"sync. outputs\")`, function(){ markSaved('save-'+jobId); });
+            }
+          } catch(_){ markError('save-'+jobId, 'error'); }
         } else {
           markError('save-'+jobId, 'not ready');
         }
@@ -266,16 +291,33 @@
         reset();
         if (!savedPath) { markError('insert-'+jobId, 'not ready'); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
         const fp = savedPath.replace(/\"/g,'\\\"');
-        cs.evalScript(`PPRO_insertFileAtPlayhead(\"${fp}\")`, function(r){
-           try {
-             const out = (typeof r === 'string') ? JSON.parse(r) : r;
-             const statusEl = document.getElementById('statusMessage');
-             if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
-             else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
-           } catch(_){ }
-           if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
-           insertingGuard = false;
-         });
+        try {
+          if (window.nle && typeof window.nle.insertFileAtPlayhead === 'function') {
+            const out = await window.nle.insertFileAtPlayhead(savedPath);
+            try {
+              const statusEl = document.getElementById('statusMessage');
+              if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
+              else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
+            } catch(_){ }
+            if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
+            insertingGuard = false;
+          } else {
+            cs.evalScript(`PPRO_insertFileAtPlayhead(\"${fp}\")`, function(r){
+               try {
+                 const out = (typeof r === 'string') ? JSON.parse(r) : r;
+                 const statusEl = document.getElementById('statusMessage');
+                 if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
+                 else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
+               } catch(_){ }
+               if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
+               insertingGuard = false;
+             });
+          }
+        } catch(_){
+          markError('insert-'+jobId, 'error');
+          if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
+          insertingGuard = false;
+        }
       }
 
       async function loadJobsFromServer() {
@@ -290,14 +332,28 @@
             return;
           }
           await ensureAuthToken();
-          const gen = await fetch('http://localhost:3000/generations?'+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(r=>r.json()).catch(()=>null);
+          const gen = await fetch('http://127.0.0.1:3000/generations?'+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });
           if (Array.isArray(gen)) {
-            jobs = gen.map(g=>({ id:g.id, status: (String(g.status||'').toLowerCase()==='completed'?'completed': String(g.status||'processing').toLowerCase()), model:g.model, createdAt:g.createdAt, videoPath: (g.input||[]).find(x=>x.type==='video')?.url||'', audioPath: (g.input||[]).find(x=>x.type==='audio')?.url||'', syncJobId:g.id, outputPath: g.outputUrl||'' }));
+            jobs = gen.map(function(g){
+              var arr = (g && g.input && g.input.slice) ? g.input.slice() : [];
+              var vid = null, aud = null;
+              for (var i=0;i<arr.length;i++){ var it = arr[i]; if (it && it.type==='video' && !vid) vid = it; if (it && it.type==='audio' && !aud) aud = it; }
+              return {
+                id: g && g.id,
+                status: (String(g && g.status || '').toLowerCase()==='completed' ? 'completed' : String(g && g.status || 'processing').toLowerCase()),
+                model: g && g.model,
+                createdAt: g && g.createdAt,
+                videoPath: (vid && vid.url) || '',
+                audioPath: (aud && aud.url) || '',
+                syncJobId: g && g.id,
+                outputPath: (g && g.outputUrl) || ''
+              };
+            });
             saveJobsLocal();
             updateHistory();
             return;
           }
-          if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations found</div>';
+          if (historyList) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
         } catch (e) {
           console.warn('Failed to load cloud history');
           if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#f87171; text-align:center; padding:20px;">failed to load history</div>';
@@ -348,5 +404,6 @@
         if (!latest || latest.status !== 'completed') return;
         return insertJob(String(latest.id));
       }
+
 
 

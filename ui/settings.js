@@ -66,10 +66,26 @@
           renderVideo: document.getElementById('renderVideo').value || 'h264',
           renderAudio: document.getElementById('renderAudio').value || 'wav'
         };
-        localStorage.setItem('syncSettings', JSON.stringify(settings));
+        try { localStorage.setItem('syncSettings', JSON.stringify(settings)); } catch(_){ }
+        // Persist to backend as a secondary store in case localStorage resets on AE reload
+        try {
+          fetch('http://127.0.0.1:3000/settings', { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ settings }) }).catch(()=>{});
+        }catch(_){ }
         updateModelDisplay();
         scheduleEstimate();
       }
+
+      // On load, if localStorage missing, try to hydrate from backend
+      (function hydrateSettings(){
+        try {
+          var raw = localStorage.getItem('syncSettings');
+          if (!raw) {
+            fetch('http://127.0.0.1:3000/settings', { method:'GET' }).then(function(r){ return r.json(); }).then(function(j){
+              if (j && j.settings) { try { localStorage.setItem('syncSettings', JSON.stringify(j.settings)); loadSettings(); updateModelDisplay(); } catch(_){ } }
+            }).catch(function(){ });
+          }
+        } catch(_){ }
+      })();
 
       // listeners
       document.addEventListener('change', saveSettings);

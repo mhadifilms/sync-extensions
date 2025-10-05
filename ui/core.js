@@ -48,11 +48,13 @@
         function buildCode() {
           function esc(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/"/g,'\\\"'); }
           const call = fn + '(' + JSON.stringify(arg) + ')';
+          var hostFile = '/host/ppro.jsx';
+          try { if (String(fn||'').indexOf('AEFT_') === 0) hostFile = '/host/ae.jsx'; } catch(_){ }
           const code = [
             '(function(){',
             '  try {',
             '    if (typeof ' + fn + " !== 'function') {",
-            '      $.evalFile("' + esc(extPath) + '/host/ppro.jsx");',
+            '      $.evalFile("' + esc(extPath) + hostFile + '");',
             '    }',
             '    var r = ' + call + ';',
             '    return r;',
@@ -115,6 +117,14 @@
       // Expose a quick diagnostic runner used by UI to surface host state
       async function runInOutDiagnostics(){
         try{
+          const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+          if (isAE) {
+            try {
+              const aeRes = await evalExtendScript('AEFT_diagInOut', {});
+              if (aeRes && typeof aeRes === 'object') return aeRes;
+            } catch(_){ }
+            return { ok:true, host:'AEFT' };
+          }
           let res = await evalExtendScript('PPRO_diagInOut', {});
           // If host call failed or missing fields, try inline diag that doesn't depend on host
           const needsInline = !res || res.ok === false || (typeof res.hasActiveSequence === 'undefined' && typeof res.hasExportAsMediaDirect === 'undefined');
@@ -166,7 +176,7 @@
         }catch(e){ return { ok:false, error:String(e) }; }
       }
 
-      // Single inline ExtendScript picker (host-independent) to avoid host bridge issues
+      // Host-backed file picker to avoid inline ExtendScript parser issues
       let __pickerBusy = false;
       async function openFileDialog(kind) {
         if (__pickerBusy) { return ''; }
@@ -174,40 +184,24 @@
         try {
           const k = (typeof kind === 'string' ? kind : 'video');
           if (!cs) cs = new CSInterface();
-          const es = (
-            "(function(){\n"+
-            "  try{\n"+
-            "    var kind = " + JSON.stringify(k) + ";\n"+
-            "    var allow = (kind === 'audio') ? { wav:1, mp3:1, aac:1, aif:1, aiff:1, m4a:1 } : { mov:1, mp4:1, mxf:1, mkv:1, avi:1, m4v:1, mpg:1, mpeg:1 };\n"+
-            "    var file = null;\n"+
-            "    try {\n"+
-            "      if ($.os && $.os.toString().indexOf('Windows') !== -1) {\n"+
-            "        var filterStr = (kind === 'audio') ? 'Audio files:*.wav;*.mp3;*.aac;*.aif;*.aiff;*.m4a' : 'Video files:*.mov;*.mp4;*.mxf;*.mkv;*.avi;*.m4v;*.mpg;*.mpeg';\n"+
-            "        file = File.openDialog('Select ' + kind + ' file', filterStr);\n"+
-            "      } else {\n"+
-            "        var fn = function(f){ try { if (f instanceof Folder) return true; var n = (f && f.name) ? String(f.name).toLowerCase() : ''; var i = n.lastIndexOf('.'); if (i < 0) return false; var ext = n.substring(i+1); return allow[ext] === 1; } catch (e) { return true; } };\n"+
-            "        file = File.openDialog('Select ' + kind + ' file', fn);\n"+
-            "      }\n"+
-            "    } catch (_) { return 'ERROR: dialog failed ' + String(_); }\n"+
-            "    if (file && file.exists) {\n"+
-            "      try { var n = String(file.name || '').toLowerCase(); var i = n.lastIndexOf('.'); var ext = (i >= 0) ? n.substring(i+1) : ''; if (allow[ext] !== 1) { return 'ERROR: Invalid file type'; } } catch(e) { return 'ERROR: type check ' + String(e); }\n"+
-            "      return file.fsName;\n"+
-            "    }\n"+
-            "    return 'ERROR: No file selected';\n"+
-            "  } catch(e) {\n"+
-            "    return 'ERROR: ' + String(e);\n"+
-            "  }\n"+
-            "})()"
-          );
-          const inlineRes = await new Promise(resolve => { try { cs.evalScript(es, function(r){ resolve(r); }); } catch(e){ resolve(''); } });
-          if (inlineRes && typeof inlineRes === 'string' && inlineRes.indexOf('/') !== -1) {
-            return inlineRes;
-          } else if (inlineRes && inlineRes.startsWith('ERROR:')) {
-            console.warn(inlineRes);
-            return '';
-          } else {
-            return '';
-          }
+          // Ensure host scripts are loaded before invoking
+          try {
+            const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+            await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); $.evalFile(\"${extPath}/host/ppro.jsx\")`, ()=>resolve()));
+          } catch(_){ }
+          // Prefer AE/PPRO host helpers when available
+          try {
+            const payload = JSON.stringify({ kind: k }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+            return await new Promise(resolve => {
+              cs.evalScript(`AEFT_showFileDialog(\"${payload}\")`, function(r1){
+                try { var j1 = JSON.parse(r1||'{}'); if (j1 && j1.ok && j1.path) { resolve(j1.path); return; } } catch(_){ }
+                cs.evalScript(`PPRO_showFileDialog(\"${payload}\")`, function(r2){
+                  try { var j2 = JSON.parse(r2||'{}'); if (j2 && j2.ok && j2.path) { resolve(j2.path); return; } } catch(_){ }
+                  resolve('');
+                });
+              });
+            });
+          } catch(_){ return ''; }
         } finally {
           __pickerBusy = false;
         }
@@ -341,5 +335,8 @@
       }, true);
       document.addEventListener('keyup', function(e){ e.stopImmediatePropagation(); }, true);
       document.addEventListener('keypress', function(e){ e.stopImmediatePropagation(); }, true);
+
+
+
 
 

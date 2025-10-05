@@ -382,8 +382,28 @@
         try{
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering video in/out…';
+          try { const btns = document.querySelectorAll('.btn, .lipsync-button'); btns.forEach(b=>{ try{ if (b && b.textContent && b.textContent.toLowerCase().indexOf('in/out')!==-1) b.textContent='loading…'; }catch(_){ } }); } catch(_){ }
           const codec = document.getElementById('renderVideo').value || 'h264';
-          const res = await evalExtendScript('PPRO_exportInOutVideo', { codec });
+          let res = null;
+          try {
+            // Always try AE route first (preload ae.jsx), then fall back
+            let triedAE = false;
+            try {
+              if (!cs) cs = new CSInterface();
+              const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\")`, ()=>resolve()));
+              const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+              res = await new Promise(resolve => { cs.evalScript(`AEFT_exportInOutVideo(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
+              triedAE = true;
+            } catch(_){ }
+            if (!res || !res.ok) {
+              if (window.nle && typeof window.nle.exportInOutVideo === 'function') {
+                res = await window.nle.exportInOutVideo({ codec });
+              } else {
+                res = await evalExtendScript('PPRO_exportInOutVideo', { codec });
+              }
+            }
+          } catch(e){ res = { ok:false, error: String(e) }; }
           if (res && res.ok && res.path){
             selectedVideo = res.path; selectedVideoIsTemp = true;
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
@@ -392,12 +412,19 @@
             scheduleEstimate();
           } else {
             let diag = null;
-            try { diag = await evalExtendScript('PPRO_diagInOut', {}); } catch(_){ }
+            try {
+              const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+              if (isAE) {
+                if (!cs) cs = new CSInterface();
+                try { const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\")`, ()=>resolve())); } catch(_){ }
+                diag = await new Promise(resolve=>{ cs.evalScript('AEFT_diagInOut()', r=>{ try{ resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:true, host:'AEFT' }); } }); });
+              } else if (window.nle && typeof window.nle.diagInOut === 'function') diag = await window.nle.diagInOut();
+              else diag = await evalExtendScript('PPRO_diagInOut', {});
+            } catch(_){ }
             let extra = '';
             if (diag && typeof diag === 'object') {
               extra = ' [diag: ' +
-                'active=' + String(diag.hasActiveSequence) +
-                ', direct=' + String(diag.hasExportAsMediaDirect) +
+                (typeof diag.hasActiveSequence !== 'undefined' ? ('active=' + String(diag.hasActiveSequence) + ', direct=' + String(diag.hasExportAsMediaDirect)) : ('projectOpen=' + String(diag.projectOpen))) +
                 (diag.inTicks!=null?(', in='+diag.inTicks):'') +
                 (diag.outTicks!=null?(', out='+diag.outTicks):'') +
                 (diag.eprRoot?(', eprRoot='+diag.eprRoot):'') +
@@ -413,8 +440,28 @@
         try{
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering audio in/out…';
+          try { const btns = document.querySelectorAll('.btn'); btns.forEach(b=>{ try{ if (b && b.textContent && b.textContent.toLowerCase().indexOf('in/out')!==-1) b.textContent='loading…'; }catch(_){ } }); } catch(_){ }
           const format = document.getElementById('renderAudio').value || 'wav';
-          const res = await evalExtendScript('PPRO_exportInOutAudio', { format });
+          let res = null;
+          try {
+            // Always try AE route first (preload ae.jsx), then fall back
+            let triedAE = false;
+            try {
+              if (!cs) cs = new CSInterface();
+              const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\")`, ()=>resolve()));
+              const arg = JSON.stringify({ format }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+              res = await new Promise(resolve => { cs.evalScript(`AEFT_exportInOutAudio(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
+              triedAE = true;
+            } catch(_){ }
+            if (!res || !res.ok) {
+              if (window.nle && typeof window.nle.exportInOutAudio === 'function') {
+                res = await window.nle.exportInOutAudio({ format });
+              } else {
+                res = await evalExtendScript('PPRO_exportInOutAudio', { format });
+              }
+            }
+          } catch(e){ res = { ok:false, error: String(e) }; }
           if (res && res.ok && res.path){
             selectedAudio = res.path; selectedAudioIsTemp = true;
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
@@ -423,7 +470,10 @@
             scheduleEstimate();
           } else {
             let diag = null;
-            try { diag = await evalExtendScript('PPRO_diagInOut', {}); } catch(_){ }
+            try {
+              if (window.nle && typeof window.nle.diagInOut === 'function') diag = await window.nle.diagInOut();
+              else diag = await evalExtendScript('PPRO_diagInOut', {});
+            } catch(_){ }
             let extra = '';
             if (diag && typeof diag === 'object') {
               extra = ' [diag: ' +

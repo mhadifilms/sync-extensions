@@ -27,10 +27,11 @@ app.use(cors({
 
 let jobs = [];
 let jobCounter = 0;
-const jobsFile = path.join(os.homedir(), 'Documents', 'SyncExtension', 'jobs.json');
-const filesDir = path.dirname(jobsFile);
-if (!fs.existsSync(filesDir)) { try { fs.mkdirSync(filesDir, { recursive: true }); } catch(_) {} }
-const tokenFile = path.join(filesDir, 'auth_token');
+// Store state in OS temp, not visible in Documents
+const STATE_DIR = path.join(os.tmpdir(), 'sync_extension_state');
+if (!fs.existsSync(STATE_DIR)) { try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch(_) {} }
+const jobsFile = path.join(STATE_DIR, 'jobs.json');
+const tokenFile = path.join(STATE_DIR, 'auth_token');
 function getOrCreateToken(){
   try{
     if (fs.existsSync(tokenFile)){
@@ -54,6 +55,19 @@ function saveJobs(){
   return;
 }
 loadJobs();
+// Helper to make a temp-readable copy when macOS places file in TemporaryItems (EPERM)
+const COPY_DIR = path.join(os.tmpdir(), 'sync_extension_cache');
+function toReadableLocalPath(p){
+  try{
+    if (!p || typeof p !== 'string') return '';
+    const abs = path.resolve(p);
+    if (abs.indexOf('/TemporaryItems/') === -1) return abs;
+    try { if (!fs.existsSync(COPY_DIR)) fs.mkdirSync(COPY_DIR, { recursive: true }); } catch(_){ }
+    const dest = path.join(COPY_DIR, path.basename(abs));
+    try { fs.copyFileSync(abs, dest); return dest; } catch(_){ return abs; }
+  }catch(_){ return String(p||''); }
+}
+
 // Public endpoints (no auth): health and token fetch
 app.get('/health', (req,res)=> res.json({ status:'ok', ts: Date.now() }));
 // Friendly root
@@ -75,12 +89,21 @@ app.get('/waveform/file', async (req, res) => {
     const p = String(req.query.path||'');
     if (!p || !path.isAbsolute(p)) return res.status(400).json({ error:'invalid path' });
     let real = '';
-    try { real = fs.realpathSync(p); } catch(_){ return res.status(404).json({ error:'not found' }); }
+    try { real = fs.realpathSync(p); } catch(_){ real = p; }
+    const wasTemp = real.indexOf('/TemporaryItems/') !== -1;
+    real = toReadableLocalPath(real);
     if (!fs.existsSync(real)) return res.status(404).json({ error:'not found' });
     const stat = fs.statSync(real);
     if (!stat.isFile()) return res.status(400).json({ error:'not a file' });
     res.setHeader('Content-Type', 'application/octet-stream');
-    fs.createReadStream(real).pipe(res);
+    const s = fs.createReadStream(real);
+    s.pipe(res);
+    res.on('close', ()=>{
+      try {
+        // If we created a copy under COPY_DIR for TemporaryItems, delete it after serving
+        if (wasTemp && real.indexOf(COPY_DIR) === 0) { fs.unlink(real, ()=>{}); }
+      } catch(_){ }
+    });
   }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
 
@@ -98,7 +121,8 @@ function requireAuth(req, res, next){
 
 // Apply auth to all routes below this line, but keep /logs public
 app.use((req,res,next)=>{
-  if (req.path === '/logs') return next();
+  // Keep logs and health/token public for panel bootstrap
+  if (req.path === '/logs' || req.path === '/health' || req.path === '/auth/token') return next();
   return requireAuth(req,res,next);
 });
 const SUPA_URL = process.env.SUPABASE_URL || '';
@@ -107,6 +131,15 @@ const SUPA_BUCKET = process.env.SUPABASE_BUCKET || '';
 const SUPA_PREFIX = 'sync. extension/';
 const DOCS_DEFAULT_DIR = path.join(os.homedir(), 'Documents', 'sync. outputs');
 const TEMP_DEFAULT_DIR = path.join(os.tmpdir(), 'sync_extension_outputs');
+
+// Simple settings persistence for the panel (to help AE retain keys between reloads)
+let PANEL_SETTINGS = null;
+app.get('/settings', (req,res)=>{
+  res.json({ ok:true, settings: PANEL_SETTINGS });
+});
+app.post('/settings', (req,res)=>{
+  try{ PANEL_SETTINGS = (req.body && req.body.settings) ? req.body.settings : null; res.json({ ok:true }); }catch(e){ res.status(400).json({ error:String(e?.message||e) }); }
+});
 
 function guessMime(p){
   const ext = String(p||'').toLowerCase().split('.').pop();
