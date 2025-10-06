@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="11.0" ExtensionBundleId="com.sync.extension.ppro" ExtensionBundleVersion="0.3.0" ExtensionBundleName="sync. extension - Premiere Pro">
+  <ExtensionList>
+    <Extension Id="com.sync.extension.ppro.panel" Version="0.3.1"/>
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <Host Name="PPRO" Version="[24.0,99.9]"/>
+    </HostList>
+    <LocaleList>
+      <Locale Code="All"/>
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="12.0"/>
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.sync.extension.ppro.panel" Version="0.3.1">
+      <HostList>
+        <Host Name="PPRO" Version="[24.0,99.9]"/>
+      </HostList>
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <CEFCommandLine>
+            <Parameter>--allow-file-access-from-files</Parameter>
+            <Parameter>--allow-insecure-localhost</Parameter>
+            <Parameter>--disable-features=BlockInsecurePrivateNetworkRequests,OutOfBlinkCors</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>sync. for Premiere</Menu>
+          <Geometry>
+            <Size>
+              <Height>700</Height>
+              <Width>480</Width>
+            </Size>
+            <MinSize>
+              <Height>400</Height>
+              <Width>400</Width>
+            </MinSize>
+            <MaxSize>
+              <Height>2000</Height>
+              <Width>2000</Width>
+            </MaxSize>
+          </Geometry>
+          <Icons>
+            <Icon Type="Normal">./icons/white_icon.png</Icon>
+            <Icon Type="RollOver">./icons/white_icon.png</Icon>
+            <Icon Type="Disabled">./icons/white_icon.png</Icon>
+            <Icon Type="DarkNormal">./icons/white_icon.png</Icon>
+            <Icon Type="DarkRollOver">./icons/white_icon.png</Icon>
+            <Icon Type="DarkDisabled">./icons/white_icon.png</Icon>
+          </Icons>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>
+
+

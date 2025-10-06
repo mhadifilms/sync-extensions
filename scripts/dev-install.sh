@@ -1,13 +1,51 @@
-EXT_ID="com.sync.extension.panel"
-SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$EXT_ID"
+AE_EXT_ID="com.sync.extension.ae.panel"
+PPRO_EXT_ID="com.sync.extension.ppro.panel"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+AE_SRC_DIR="$ROOT_DIR/extensions/ae-extension"
+PPRO_SRC_DIR="$ROOT_DIR/extensions/premiere-extension"
+AE_DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$AE_EXT_ID"
+PPRO_DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$PPRO_EXT_ID"
 
-echo "Installing to: $DEST_DIR"
-mkdir -p "$DEST_DIR"
+# Remove legacy single-bundle extension to avoid confusion
+LEGACY_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.panel"
+if [ -d "$LEGACY_DIR" ]; then
+  echo "Removing legacy extension: $LEGACY_DIR"
+  rm -rf "$LEGACY_DIR"
+fi
+
+echo "Installing AE to: $AE_DEST_DIR"
+mkdir -p "$AE_DEST_DIR"
+# Copy shared app files
 rsync -a --delete \
   --exclude ".git/" \
   --exclude "dist/" \
-  "$SRC_DIR/" "$DEST_DIR/"
+  --exclude "extensions/" \
+  --exclude "scripts/" \
+  --exclude "CSXS/" \
+  "$ROOT_DIR/" "$AE_DEST_DIR/"
+# Overwrite host-detection with AE-specific
+mkdir -p "$AE_DEST_DIR/ui"
+cp -f "$AE_SRC_DIR/ui/host-detection.js" "$AE_DEST_DIR/ui/host-detection.js"
+# Use AE manifest
+mkdir -p "$AE_DEST_DIR/CSXS"
+cp -f "$AE_SRC_DIR/CSXS/manifest.xml" "$AE_DEST_DIR/CSXS/manifest.xml"
+
+echo "Installing Premiere to: $PPRO_DEST_DIR"
+mkdir -p "$PPRO_DEST_DIR"
+# Copy shared app files
+rsync -a --delete \
+  --exclude ".git/" \
+  --exclude "dist/" \
+  --exclude "extensions/" \
+  --exclude "scripts/" \
+  --exclude "CSXS/" \
+  "$ROOT_DIR/" "$PPRO_DEST_DIR/"
+# Overwrite host-detection with PPro-specific
+mkdir -p "$PPRO_DEST_DIR/ui"
+cp -f "$PPRO_SRC_DIR/ui/host-detection.js" "$PPRO_DEST_DIR/ui/host-detection.js"
+# Use PPro manifest
+mkdir -p "$PPRO_DEST_DIR/CSXS"
+cp -f "$PPRO_SRC_DIR/CSXS/manifest.xml" "$PPRO_DEST_DIR/CSXS/manifest.xml"
 
 echo "Enable PlayerDebugMode (if not already)"
 # Cover a range of CEP versions used by modern Adobe apps
@@ -27,5 +65,5 @@ else
   fi
 fi
 
-echo "Installed. Open Window > Extensions > sync. extension in Premiere or After Effects"
+echo "Installed. Open Window > Extensions > 'sync. for After Effects' in AE and 'sync. for Premiere' in Premiere"
 

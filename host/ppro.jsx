@@ -334,11 +334,29 @@ function PPRO_importFileToBin(payloadJson) {
       }
       if (found) { targetBin = found; }
     }
-    var results = project.importFiles([fsPath], true, targetBin, false);
-    if (results && results.length > 0) {
+    var results = null;
+    try { results = project.importFiles([fsPath], true, targetBin, false); } catch(e) { results = null; }
+    // Some Premiere versions do not return an array even when import succeeds; verify by scanning target bin
+    if (!results || !results.length) {
+      try {
+        var name = '';
+        try { var f = new File(fsPath); name = f && f.name ? f.name : ''; } catch(_){ }
+        for (var k = targetBin.children.numItems - 1; k >= 0; k--) {
+          var c = targetBin.children[k];
+          try {
+            if (c && typeof c.getMediaPath === 'function') {
+              var mp = c.getMediaPath();
+              if (mp && mp === fsPath) { return _respond({ ok:true, reused:true }); }
+            }
+            if (c && name && c.name === name) { return _respond({ ok:true, byName:true }); }
+          } catch(_){ }
+        }
+      } catch(_){ }
+    } else {
+      // Array returned and non-empty
       return _respond({ ok:true });
     }
-    return _respond({ ok:false, error:'Import failed' });
+    return _respond({ ok:false, error:'Import verification failed' });
   } catch (e) {
     return _respond({ ok:false, error:String(e) });
   }
