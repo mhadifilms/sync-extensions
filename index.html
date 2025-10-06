@@ -222,8 +222,15 @@
           <input type="text" class="input-field" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)">
         </div>
         
-        <div class="settings-group">
-          <div style="color:#7a7a7a; font-size:11px; user-select:text;">version v0.2.4</div>
+        <div class="settings-group" id="updateSection">
+          <label class="settings-label">extension</label>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div id="versionDisplay" style="color:#7a7a7a; font-size:11px; user-select:text;">version …</div>
+            <button class="btn btn-outline" id="checkUpdateBtn" onclick="checkForUpdate()">check updates</button>
+            <button class="btn" id="applyUpdateBtn" style="display:none;" onclick="applyUpdate()">update</button>
+            <a id="releaseNotesLink" href="#" target="_blank" rel="noreferrer" style="display:none; font-size:11px;">release notes</a>
+          </div>
+          <div id="updateStatus" style="color:#7a7a7a; font-size:11px; margin-top:6px; display:none;"></div>
         </div>
           </div>
         </div>

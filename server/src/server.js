@@ -7,13 +7,107 @@ import os from 'os';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import { exec as _exec } from 'child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
 const app = express();
 app.disable('x-powered-by');
 const HOST = process.env.HOST || '127.0.0.1';
-const PORT = Number(process.env.PORT || 3000);
+const DEFAULT_PORT = Number(process.env.PORT || 3000);
+const PORT_RANGE = [3000, 3001, 3002, 3003, 3004]; // Try these ports in order
+
+const exec = promisify(_exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const EXT_ROOT = path.resolve(__dirname, '..', '..');
+const MANIFEST_PATH = path.join(EXT_ROOT, 'extensions', 'premiere-extension', 'CSXS', 'manifest.xml');
+const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-premiere';
+const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
+const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+const GH_UA = process.env.GITHUB_USER_AGENT || 'sync-extension-updater/1.0';
+
+function ghHeaders(extra){
+  const h = Object.assign({ 'Accept': 'application/vnd.github+json', 'User-Agent': GH_UA }, extra||{});
+  if (GH_TOKEN) h['Authorization'] = `Bearer ${GH_TOKEN}`;
+  return h;
+}
+
+async function ghFetch(url, opts){
+  return await fetch(url, Object.assign({ headers: ghHeaders() }, opts||{}));
+}
+
+function parseBundleVersion(xmlText){
+  try{
+    const m = /ExtensionBundleVersion\s*=\s*"([^"]+)"/i.exec(String(xmlText||''));
+    if (m && m[1]) return m[1].trim();
+  }catch(_){ }
+  return '';
+}
+
+function normalizeVersion(v){
+  try{ return String(v||'').trim().replace(/^v/i, ''); }catch(_){ return ''; }
+}
+
+function compareSemver(a, b){
+  const pa = normalizeVersion(a).split('.').map(x=>parseInt(x,10)||0);
+  const pb = normalizeVersion(b).split('.').map(x=>parseInt(x,10)||0);
+  for (let i=0; i<Math.max(pa.length, pb.length); i++){
+    const ai = pa[i]||0; const bi = pb[i]||0;
+    if (ai > bi) return 1; if (ai < bi) return -1;
+  }
+  return 0;
+}
+
+async function getCurrentVersion(){
+  try{
+    const xml = fs.readFileSync(MANIFEST_PATH, 'utf8');
+    return parseBundleVersion(xml) || '';
+  }catch(_){ return ''; }
+}
+
+async function getLatestReleaseInfo(){
+  const repo = UPDATES_REPO;
+  const base = `https://api.github.com/repos/${repo}`;
+  // Try releases first (preferred), then fallback to tags if no releases
+  async function tryReleases(){
+    const r = await ghFetch(`${base}/releases/latest`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const tag = j.tag_name || j.name || '';
+    if (!tag) return null;
+    return { tag, version: normalizeVersion(tag), html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`, zip_url: j.zipball_url || `${base}/zipball/${tag}` };
+  }
+  async function tryTags(){
+    const r = await ghFetch(`${base}/tags`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!Array.isArray(j) || !j.length) return null;
+    const tag = j[0].name || j[0].tag_name || '';
+    return { tag, version: normalizeVersion(tag), html_url: `https://github.com/${repo}/releases/tag/${tag}`, zip_url: `${base}/zipball/${tag}` };
+  }
+  async function tryRedirectLatest(){
+    try{
+      const resp = await fetch(`https://github.com/${repo}/releases/latest`, { redirect: 'follow', headers: { 'User-Agent': GH_UA } });
+      if (!resp.ok) return null;
+      const finalUrl = String(resp.url || '');
+      const m = /\/releases\/tag\/([^/?#]+)/.exec(finalUrl);
+      const tag = m && m[1] ? decodeURIComponent(m[1]) : '';
+      if (!tag) return null;
+      return { tag, version: normalizeVersion(tag), html_url: finalUrl, zip_url: `https://codeload.github.com/${repo}/zip/refs/tags/${encodeURIComponent(tag)}` };
+    }catch(_){ return null; }
+  }
+  if (UPDATES_CHANNEL === 'tags') {
+    return await tryTags();
+  }
+  const fromReleases = await tryReleases();
+  if (fromReleases) return fromReleases;
+  const fromTags = await tryTags();
+  if (fromTags) return fromTags;
+  return await tryRedirectLatest();
+}
 
 app.use(express.json({ limit: '50mb' }));
 // Restrict CORS to local panel (file:// → Origin null) and localhost
@@ -107,7 +201,25 @@ app.get('/waveform/file', async (req, res) => {
   }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
 
-// (temporary public logs removed)
+// Updates: version and check (PUBLIC)
+app.get('/update/version', async (_req,res)=>{
+  try{
+    const current = await getCurrentVersion();
+    res.json({ ok:true, version: current });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+app.get('/update/check', async (_req,res)=>{
+  try{
+    const current = await getCurrentVersion();
+    const latest = await getLatestReleaseInfo();
+    if (!latest){
+      return res.json({ ok:true, current, latest: null, tag: null, html_url: `https://github.com/${UPDATES_REPO}/releases`, canUpdate: false, repo: UPDATES_REPO, message: 'no releases/tags found' });
+    }
+    const cmp = (current && latest.version) ? compareSemver(latest.version, current) : 0;
+    res.json({ ok:true, current, latest: latest.version, tag: latest.tag, html_url: latest.html_url, canUpdate: cmp > 0, repo: UPDATES_REPO });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+});
 
 // Auth middleware
 function requireAuth(req, res, next){
@@ -121,8 +233,15 @@ function requireAuth(req, res, next){
 
 // Apply auth to all routes below this line, but keep /logs public
 app.use((req,res,next)=>{
-  // Keep logs and health/token public for panel bootstrap
-  if (req.path === '/logs' || req.path === '/health' || req.path === '/auth/token') return next();
+  // Keep logs, health/token, and any /update/* endpoints public for bootstrap/UI
+  if (
+    req.path === '/logs' ||
+    req.path === '/health' ||
+    req.path === '/auth/token' ||
+    (typeof req.path === 'string' && req.path.indexOf('/update/') === 0)
+  ) {
+    return next();
+  }
   return requireAuth(req,res,next);
 });
 const SUPA_URL = process.env.SUPABASE_URL || '';
@@ -139,6 +258,48 @@ app.get('/settings', (req,res)=>{
 });
 app.post('/settings', (req,res)=>{
   try{ PANEL_SETTINGS = (req.body && req.body.settings) ? req.body.settings : null; res.json({ ok:true }); }catch(e){ res.status(400).json({ error:String(e?.message||e) }); }
+});
+
+// Updates: apply (AUTH)
+app.post('/update/apply', async (req,res)=>{
+  try{
+    const { tag: desiredTag } = req.body || {};
+    const current = await getCurrentVersion();
+    const latest = await getLatestReleaseInfo();
+    if (!latest) return res.status(400).json({ error:'no releases/tags found for updates' });
+    const tag = desiredTag || latest.tag;
+    const latestVersion = normalizeVersion(latest.version || tag || '');
+    if (current && latestVersion && compareSemver(latestVersion, current) <= 0){
+      return res.json({ ok:true, updated:false, message:'Already up to date', current, latest: latestVersion });
+    }
+    
+    // Download and extract update
+    const tempDir = path.join(os.tmpdir(), 'sync_extension_update_' + Date.now());
+    try { fs.mkdirSync(tempDir, { recursive: true }); } catch(_){}
+    
+    const zipPath = path.join(tempDir, 'update.zip');
+    const zipResp = await fetch(latest.zip_url);
+    if (!zipResp.ok) throw new Error('Failed to download update');
+    
+    const zipBuffer = await zipResp.buffer();
+    fs.writeFileSync(zipPath, zipBuffer);
+    
+    // Extract zip (simple approach for GitHub zipball format)
+    await exec(`cd "${tempDir}" && unzip -q "${zipPath}" && mv */sync-premiere* . 2>/dev/null || true`);
+    
+    // Run the install script from the extracted update
+    const updateScript = path.join(tempDir, 'scripts', 'dev-install.sh');
+    if (fs.existsSync(updateScript)) {
+      await exec(`chmod +x "${updateScript}" && "${updateScript}"`);
+    } else {
+      throw new Error('Update script not found in downloaded package');
+    }
+    
+    // Cleanup
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch(_){}
+    
+    res.json({ ok:true, updated:true, message:'Update applied successfully', current, latest: latestVersion });
+  }catch(e){ res.status(500).json({ error:String(e?.message||e) }); }
 });
 
 function guessMime(p){
@@ -550,10 +711,54 @@ function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JS
 app.get('/logs', (_req,res)=>{ res.json({ ok:true, logs: LOGS.slice(-200) }); });
 // Keep only the slog + LOGS; public /logs is declared above
 
-app.listen(PORT, HOST, ()=>{
-  console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
-  console.log(`Jobs file: ${jobsFile}`);
-});
+// Function to check if a port is available
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = require('net').createServer();
+    server.listen(port, HOST, () => {
+      server.once('close', () => resolve(true));
+      server.close();
+    });
+    server.on('error', () => resolve(false));
+  });
+}
+
+// Function to find an available port
+async function findAvailablePort() {
+  // If PORT env var is set, try that first
+  if (process.env.PORT) {
+    const envPort = Number(process.env.PORT);
+    if (await isPortAvailable(envPort)) {
+      return envPort;
+    }
+  }
+  
+  // Try ports in order
+  for (const port of PORT_RANGE) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  
+  throw new Error('No available ports found in range');
+}
+
+// Start server on available port
+async function startServer() {
+  try {
+    const PORT = await findAvailablePort();
+    app.listen(PORT, HOST, () => {
+      console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
+      console.log(`Jobs file: ${jobsFile}`);
+    });
+    return PORT;
+  } catch (error) {
+    console.error('Failed to start server:', error.message);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // override helpers
 function getSupabaseUrl(job){ return (job && job.supabaseUrl) || SUPA_URL; }
