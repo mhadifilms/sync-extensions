@@ -81,7 +81,13 @@
             supabaseUrl: (document.getElementById('supabaseUrl').value||'').trim(),
             supabaseKey: (document.getElementById('supabaseKey').value||'').trim(),
             supabaseBucket: (document.getElementById('supabaseBucket').value||'').trim(),
-            outputDir: outputDir
+            outputDir: outputDir,
+            options: {
+              sync_mode: (document.getElementById('syncMode')||{}).value || 'loop',
+              temperature: parseFloat(document.getElementById('temperature').value),
+              active_speaker_detection: { auto_detect: !!document.getElementById('activeSpeakerOnly').checked },
+              occlusion_detection_enabled: !!document.getElementById('detectObstructions').checked
+            }
           };
           const placeholderId = 'local-' + Date.now();
           const localJob = { id: placeholderId, videoPath: selectedVideo, audioPath: selectedAudio, model: jobData.model, status: 'processing', createdAt: new Date().toISOString(), syncJobId: null, error: null };

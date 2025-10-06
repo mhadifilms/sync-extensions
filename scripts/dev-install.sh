@@ -29,6 +29,9 @@ cp -f "$AE_SRC_DIR/ui/host-detection.js" "$AE_DEST_DIR/ui/host-detection.js"
 # Use AE manifest
 mkdir -p "$AE_DEST_DIR/CSXS"
 cp -f "$AE_SRC_DIR/CSXS/manifest.xml" "$AE_DEST_DIR/CSXS/manifest.xml"
+# Install server dependencies
+echo "Installing server dependencies for AE..."
+cd "$AE_DEST_DIR/server" && npm install --production
 
 echo "Installing Premiere to: $PPRO_DEST_DIR"
 mkdir -p "$PPRO_DEST_DIR"
@@ -46,6 +49,9 @@ cp -f "$PPRO_SRC_DIR/ui/host-detection.js" "$PPRO_DEST_DIR/ui/host-detection.js"
 # Use PPro manifest
 mkdir -p "$PPRO_DEST_DIR/CSXS"
 cp -f "$PPRO_SRC_DIR/CSXS/manifest.xml" "$PPRO_DEST_DIR/CSXS/manifest.xml"
+# Install server dependencies
+echo "Installing server dependencies for Premiere..."
+cd "$PPRO_DEST_DIR/server" && npm install --production
 
 echo "Enable PlayerDebugMode (if not already)"
 # Cover a range of CEP versions used by modern Adobe apps
