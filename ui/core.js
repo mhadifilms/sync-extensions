@@ -184,21 +184,22 @@
         try {
           const k = (typeof kind === 'string' ? kind : 'video');
           if (!cs) cs = new CSInterface();
-          // Ensure host scripts are loaded before invoking
+          // Ensure only current host script is loaded before invoking
           try {
             const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-            await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); $.evalFile(\"${extPath}/host/ppro.jsx\")`, ()=>resolve()));
+            const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+            const hostFile = isAE ? 'ae' : 'ppro';
+            await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}.jsx\")`, ()=>resolve()));
           } catch(_){ }
-          // Prefer AE/PPRO host helpers when available
+          // Prefer host-specific dialog helper
           try {
             const payload = JSON.stringify({ kind: k }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
             return await new Promise(resolve => {
-              cs.evalScript(`AEFT_showFileDialog(\"${payload}\")`, function(r1){
-                try { var j1 = JSON.parse(r1||'{}'); if (j1 && j1.ok && j1.path) { resolve(j1.path); return; } } catch(_){ }
-                cs.evalScript(`PPRO_showFileDialog(\"${payload}\")`, function(r2){
-                  try { var j2 = JSON.parse(r2||'{}'); if (j2 && j2.ok && j2.path) { resolve(j2.path); return; } } catch(_){ }
-                  resolve('');
-                });
+              const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+              const fn = isAE ? 'AEFT_showFileDialog' : 'PPRO_showFileDialog';
+              cs.evalScript(`${fn}(\"${payload}\")`, function(r){
+                try { var j = JSON.parse(r||'{}'); if (j && j.ok && j.path) { resolve(j.path); return; } } catch(_){ }
+                resolve('');
               });
             });
           } catch(_){ return ''; }

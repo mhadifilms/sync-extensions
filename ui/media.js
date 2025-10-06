@@ -382,7 +382,12 @@
         try{
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering video in/out…';
-          try { const btns = document.querySelectorAll('.btn, .lipsync-button'); btns.forEach(b=>{ try{ if (b && b.textContent && b.textContent.toLowerCase().indexOf('in/out')!==-1) b.textContent='loading…'; }catch(_){ } }); } catch(_){ }
+          // Only set loading state on the video in/out button
+          let __videoInOutBtn = null; let __videoInOutBtnOrig = '';
+          try {
+            __videoInOutBtn = document.querySelector('#videoSection .dropzone-buttons button:nth-child(2)');
+            if (__videoInOutBtn) { __videoInOutBtnOrig = __videoInOutBtn.textContent; __videoInOutBtn.textContent = 'loading…'; }
+          } catch(_){ }
           const codec = document.getElementById('renderVideo').value || 'h264';
           let res = null;
           try {
@@ -410,6 +415,7 @@
             updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
+            try { if (__videoInOutBtn) __videoInOutBtn.textContent = __videoInOutBtnOrig || 'in/out points'; } catch(_){ }
           } else {
             let diag = null;
             try {
@@ -432,6 +438,7 @@
               ']';
             }
             if (statusEl) statusEl.textContent = 'video in/out export failed: ' + (res && res.error ? res.error : 'EvalScript error') + (res && res.eprRoot ? (' root=' + res.eprRoot) : '') + (res && res.preset ? (' preset=' + res.preset) : '') + extra;
+            try { if (__videoInOutBtn) __videoInOutBtn.textContent = __videoInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
       }
@@ -440,7 +447,12 @@
         try{
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering audio in/out…';
-          try { const btns = document.querySelectorAll('.btn'); btns.forEach(b=>{ try{ if (b && b.textContent && b.textContent.toLowerCase().indexOf('in/out')!==-1) b.textContent='loading…'; }catch(_){ } }); } catch(_){ }
+          // Only set loading state on the audio in/out button
+          let __audioInOutBtn = null; let __audioInOutBtnOrig = '';
+          try {
+            __audioInOutBtn = document.querySelector('#audioSection .dropzone-buttons button:nth-child(2)');
+            if (__audioInOutBtn) { __audioInOutBtnOrig = __audioInOutBtn.textContent; __audioInOutBtn.textContent = 'loading…'; }
+          } catch(_){ }
           const format = document.getElementById('renderAudio').value || 'wav';
           let res = null;
           try {
@@ -468,6 +480,7 @@
             updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
+            try { if (__audioInOutBtn) __audioInOutBtn.textContent = __audioInOutBtnOrig || 'in/out points'; } catch(_){ }
           } else {
             let diag = null;
             try {
@@ -486,6 +499,7 @@
               ']';
             }
             if (statusEl) statusEl.textContent = 'audio in/out export failed: ' + (res && res.error ? res.error : 'EvalScript error') + extra;
+            try { if (__audioInOutBtn) __audioInOutBtn.textContent = __audioInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
       }

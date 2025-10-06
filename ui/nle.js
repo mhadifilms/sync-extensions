@@ -14,7 +14,12 @@
             return 'PPRO';
           } catch(_) { return 'PPRO'; }
         }
-        function getHostId(){ return detectHostId(); }
+        function getHostId(){
+          try {
+            if (window.__forceHostId === 'AEFT' || window.__forceHostId === 'PPRO') return window.__forceHostId;
+          } catch(_){ }
+          return detectHostId();
+        }
         function prefix(){ return getHostId() === 'AEFT' ? 'AEFT' : 'PPRO'; }
 
         async function ensureHostLoaded(){
@@ -59,6 +64,7 @@
           exportInOutAudio: function(opts){ return call('exportInOutAudio', opts||{}); },
           insertFileAtPlayhead: function(fsPath){ return call('insertFileAtPlayhead', fsPath ? { path: fsPath } : {}); },
           importFileToBin: function(fsPath, binName){ return call('importFileToBin', { path: fsPath, binName: binName||'' }); },
+          revealFile: function(fsPath){ return call('revealFile', fsPath ? { path: fsPath } : {}); },
           diagInOut: function(){ return call('diagInOut', {}); }
         };
       })();

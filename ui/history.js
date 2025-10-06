@@ -1,5 +1,14 @@
-      function updateHistory() {
+      async function updateHistory() {
         const historyList = document.getElementById('historyList');
+        // If backend not running, show hint and try a gentle start
+        try {
+          let healthy = false;
+          try { const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); healthy = !!(r && r.ok); } catch(_){ healthy = false; }
+          if (!healthy) {
+            if (historyList) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">backend not started</div>';
+            try { if (window.nle && typeof window.nle.startBackend === 'function') { await window.nle.startBackend(); } } catch(_){ }
+          }
+        } catch(_){ }
         // Always show last known jobs (persisted)
         const sorted = jobs.slice().sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
         historyList.innerHTML = (sorted.length ? sorted : []).map(job => {
@@ -19,7 +28,7 @@
               <div class=\"history-actions\">\n                \n        </div>
             </div>`;
           return base + done;
-        }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">no generations yet</div>';
+        }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">loading generations...</div>';
       }
 
       // Delegate jid click/Enter-to-copy
@@ -42,11 +51,17 @@
         }
       });
       
-      function revealFile(jobId) {
+      async function revealFile(jobId) {
         const job = jobs.find(j => String(j.id) === String(jobId));
         if (!job || !job.outputPath) return;
-        if (!cs) cs = new CSInterface();
-        cs.evalScript(`PPRO_revealFile("${job.outputPath.replace(/\"/g,'\\\"')}")`, function(r){ console.log('reveal', r); });
+        try {
+          if (window.nle && typeof window.nle.revealFile === 'function') {
+            await window.nle.revealFile(job.outputPath);
+          } else {
+            if (!cs) cs = new CSInterface();
+            cs.evalScript(`PPRO_revealFile("${job.outputPath.replace(/\"/g,'\\\"')}")`, function(r){ console.log('reveal', r); });
+          }
+        } catch(_){ }
       }
       function insertHistory(jobId) { insertJob(jobId); }
 

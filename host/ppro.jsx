@@ -184,8 +184,10 @@ function PPRO_insertAtPlayhead(jobId) {
   }
 }
 
-function PPRO_insertFileAtPlayhead(fsPath) {
+function PPRO_insertFileAtPlayhead(payloadJson) {
   try {
+    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
+    var fsPath = String((p && (p.path||p)) || '');
     var file = new File(fsPath);
     if (!file.exists) return _respond({ ok:false, error:'File not found' });
 
@@ -311,8 +313,11 @@ function PPRO_getProjectDir() {
   }
 }
 
-function PPRO_importFileToBin(fsPath, binName) {
+function PPRO_importFileToBin(payloadJson) {
   try {
+    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
+    var fsPath = String(p.path||'');
+    var binName = String(p.binName||'');
     var project = app.project;
     if (!project) return _respond({ ok:false, error:'No project' });
     var targetBin = project.getInsertionBin();
@@ -339,8 +344,10 @@ function PPRO_importFileToBin(fsPath, binName) {
   }
 }
 
-function PPRO_revealFile(fsPath) {
+function PPRO_revealFile(payloadJson) {
   try {
+    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
+    var fsPath = String((p && (p.path||p)) || '');
     var f = new File(fsPath);
     if (!f.exists) return _respond({ ok:false, error:'File not found' });
     // macOS: reveal in Finder

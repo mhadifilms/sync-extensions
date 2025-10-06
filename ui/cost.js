@@ -60,9 +60,18 @@
             resp = await fetch('http://127.0.0.1:3000/costs', { method: 'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
             data = await resp.json().catch(()=>null);
           } catch (netErr) {
-            // Start backend and retry once
+            // Start backend and retry once (host-aware)
             if (!hasStartedBackendForCost) {
-              try { cs.evalScript('PPRO_startBackend()', function(){ /* no-op */ }); } catch(_){ }
+              try {
+                if (window.nle && typeof window.nle.startBackend === 'function') {
+                  await window.nle.startBackend();
+                } else {
+                  var hostId = (window.nle && window.nle.getHostId) ? window.nle.getHostId() : 'PPRO';
+                  var fn = hostId === 'AEFT' ? 'AEFT_startBackend()' : 'PPRO_startBackend()';
+                  if (!cs) cs = new CSInterface();
+                  cs.evalScript(fn, function(){});
+                }
+              } catch(_){ }
               hasStartedBackendForCost = true;
             }
             await new Promise(r=>setTimeout(r, 1200));
