@@ -116,7 +116,6 @@
       async function checkForUpdate(silent = false){
         const status = document.getElementById('updateStatus'); if (!silent && status) { status.style.display='block'; status.textContent = 'checking for updates…'; }
         const btnApply = document.getElementById('applyUpdateBtn'); if (btnApply) btnApply.style.display = 'none';
-        const notes = document.getElementById('releaseNotesLink'); if (notes) { notes.style.display='none'; notes.href = '#'; }
         try{
           await ensureAuthToken().catch(()=>undefined);
           const r = await api('/update/check').catch(()=>null);
@@ -126,7 +125,6 @@
           const vEl = document.getElementById('versionDisplay');
           if (vEl) vEl.textContent = 'version v' + (j.current || '—');
           if (j.canUpdate){
-            if (notes && j.html_url) { notes.style.display='inline'; notes.href = j.html_url; notes.textContent = 'release notes'; }
             if (btnApply) { btnApply.dataset.tag = j.tag || ''; btnApply.style.display = 'inline-block'; }
             if (status) { status.style.display='block'; status.textContent = 'update available → v' + j.latest; }
           } else {

@@ -285,15 +285,70 @@ app.post('/update/apply', async (req,res)=>{
     const zipBuffer = await zipResp.buffer();
     fs.writeFileSync(zipPath, zipBuffer);
     
-    // Extract zip (simple approach for GitHub zipball format)
-    await exec(`cd "${tempDir}" && unzip -q "${zipPath}" && mv */sync-extensions* . 2>/dev/null || true`);
+    // Extract zip (GitHub zipball format: repo-name-tag/sync-extensions/)
+    await exec(`cd "${tempDir}" && unzip -q "${zipPath}"`);
     
-    // Run the install script from the extracted update
-    const updateScript = path.join(tempDir, 'scripts', 'install.sh');
+    // Find the extracted directory (GitHub zipball creates a folder like repo-name-tag/)
+    const extractedDirs = fs.readdirSync(tempDir).filter(name => {
+      const fullPath = path.join(tempDir, name);
+      return fs.statSync(fullPath).isDirectory() && name !== 'sync-extensions';
+    });
+    
+    if (extractedDirs.length === 0) {
+      throw new Error('No extracted directory found in zipball');
+    }
+    
+    const extractedDir = path.join(tempDir, extractedDirs[0]);
+    
+    // Look for install script in the extracted directory
+    const updateScript = path.join(extractedDir, 'scripts', 'install.sh');
     if (fs.existsSync(updateScript)) {
       await exec(`chmod +x "${updateScript}" && "${updateScript}" --both`);
     } else {
-      throw new Error('Update script not found in downloaded package');
+      // Fallback: manually install the extension files
+      // Copy the extension files to the correct location
+      const aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
+      const pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      
+      // Remove existing extensions
+      try { fs.rmSync(aeDestDir, { recursive: true, force: true }); } catch(_){}
+      try { fs.rmSync(pproDestDir, { recursive: true, force: true }); } catch(_){}
+      
+      // Copy AE extension
+      const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
+      if (fs.existsSync(aeSrcDir)) {
+        fs.mkdirSync(aeDestDir, { recursive: true });
+        await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
+        // Copy shared files
+        await exec(`cp -R "${extractedDir}"/ui "${aeDestDir}/"`);
+        await exec(`cp -R "${extractedDir}"/server "${aeDestDir}/"`);
+        await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
+        await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
+        await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
+        await exec(`cp "${extractedDir}"/epr "${aeDestDir}/" -R`);
+      }
+      
+      // Copy Premiere extension
+      const pproSrcDir = path.join(extractedDir, 'extensions', 'premiere-extension');
+      if (fs.existsSync(pproSrcDir)) {
+        fs.mkdirSync(pproDestDir, { recursive: true });
+        await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
+        // Copy shared files
+        await exec(`cp -R "${extractedDir}"/ui "${pproDestDir}/"`);
+        await exec(`cp -R "${extractedDir}"/server "${pproDestDir}/"`);
+        await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
+        await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
+        await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
+        await exec(`cp "${extractedDir}"/epr "${pproDestDir}/" -R`);
+      }
+      
+      // Install server dependencies
+      if (fs.existsSync(path.join(aeDestDir, 'server'))) {
+        await exec(`cd "${aeDestDir}/server" && npm install --omit=dev`);
+      }
+      if (fs.existsSync(path.join(pproDestDir, 'server'))) {
+        await exec(`cd "${pproDestDir}/server" && npm install --omit=dev`);
+      }
     }
     
     // Cleanup
