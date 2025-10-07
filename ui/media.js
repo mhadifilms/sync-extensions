@@ -320,7 +320,22 @@
             const ext = raw.split('.').pop().toLowerCase();
             const ok = {mov:1,mp4:1,mxf:1,mkv:1,avi:1,m4v:1,mpg:1,mpeg:1}[ext] === 1;
             if (!ok) { try { statusEl.textContent = 'please select a video file'; } catch(_){ } return; }
-            const size = await new Promise(resolve=>{ const safe = String(raw).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';})()`; cs.evalScript(es, function(r){ var n=Number(r||0); resolve(isNaN(n)?0:n); }); });
+            const size = await new Promise(resolve=>{ 
+              try {
+                const safe = String(raw||'').replace(/\\/g,'\\\\').replace(/\"/g,'\\\"').replace(/'/g,"\\'");
+                const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';}})()`;
+                cs.evalScript(es, function(r){ 
+                  try {
+                    var n=Number(r||0); 
+                    resolve(isNaN(n)?0:n); 
+                  } catch(e) {
+                    resolve(0);
+                  }
+                });
+              } catch(e) {
+                resolve(0);
+              }
+            });
             if (size > 1024*1024*1024) { try { statusEl.textContent = 'video exceeds 1GB (not allowed)'; } catch(_){ } return; }
             selectedVideo = raw;
             updateLipsyncButton();
@@ -354,7 +369,22 @@
             const ext = raw.split('.').pop().toLowerCase();
             const ok = {wav:1,mp3:1,aac:1,aif:1,aiff:1,m4a:1}[ext] === 1;
             if (!ok) { try { statusEl.textContent = 'please select an audio file'; } catch(_){ } return; }
-            const size = await new Promise(resolve=>{ const safe = String(raw).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';})()`; cs.evalScript(es, function(r){ var n=Number(r||0); resolve(isNaN(n)?0:n); }); });
+            const size = await new Promise(resolve=>{ 
+              try {
+                const safe = String(raw||'').replace(/\\/g,'\\\\').replace(/\"/g,'\\\"').replace(/'/g,"\\'");
+                const es = `(function(){try{var f=new File("${safe}");if(f&&f.exists){return String(f.length||0);}return '0';}catch(e){return '0';}})()`;
+                cs.evalScript(es, function(r){ 
+                  try {
+                    var n=Number(r||0); 
+                    resolve(isNaN(n)?0:n); 
+                  } catch(e) {
+                    resolve(0);
+                  }
+                });
+              } catch(e) {
+                resolve(0);
+              }
+            });
             if (size > 1024*1024*1024) { try { statusEl.textContent = 'audio exceeds 1GB (not allowed)'; } catch(_){ } return; }
             selectedAudio = raw;
             updateLipsyncButton();
