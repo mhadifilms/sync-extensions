@@ -17,8 +17,8 @@ dotenv.config();
 const app = express();
 app.disable('x-powered-by');
 const HOST = process.env.HOST || '127.0.0.1';
-const DEFAULT_PORT = Number(process.env.PORT || 3000);
-const PORT_RANGE = [3000, 3001, 3002, 3003, 3004]; // Try these ports in order
+const DEFAULT_PORT = 3000;
+const PORT_RANGE = [3000]; // Hardcode to 3000 for panel
 
 const exec = promisify(_exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -724,39 +724,43 @@ function isPortAvailable(port) {
   });
 }
 
-// Function to find an available port
+// Function to find an available port (pinned to 3000)
 async function findAvailablePort() {
-  // If PORT env var is set, try that first
-  if (process.env.PORT) {
-    const envPort = Number(process.env.PORT);
-    if (await isPortAvailable(envPort)) {
-      return envPort;
-    }
-  }
-  
-  // Try ports in order
-  for (const port of PORT_RANGE) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  
-  throw new Error('No available ports found in range');
+  return 3000;
 }
 
-// Start server on available port
+// Start server on fixed port 3000 (best‑effort)
 async function startServer() {
+  const PORT = 3000;
+  // If an instance is already healthy on 3000, exit quickly without error
   try {
-    const PORT = await findAvailablePort();
-    app.listen(PORT, HOST, () => {
-      console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
-      console.log(`Jobs file: ${jobsFile}`);
-    });
-    return PORT;
-  } catch (error) {
-    console.error('Failed to start server:', error.message);
-    process.exit(1);
-  }
+    const r = await fetch(`http://${HOST}:${PORT}/health`, { method: 'GET' });
+    if (r && r.ok) {
+      console.log(`Existing Sync Extension server detected on http://${HOST}:${PORT}`);
+      return PORT;
+    }
+  } catch(_) { /* ignore */ }
+  const srv = app.listen(PORT, HOST, () => {
+    console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
+    console.log(`Jobs file: ${jobsFile}`);
+  });
+  srv.on('error', async (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      try {
+        const r = await fetch(`http://${HOST}:${PORT}/health`, { method: 'GET' });
+        if (r && r.ok) {
+          console.log(`Port ${PORT} in use by healthy server; continuing`);
+          return;
+        }
+      } catch(_) {}
+      console.error(`Port ${PORT} in use and health check failed`);
+      process.exit(1);
+    } else {
+      console.error('Server error', err && err.message ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+  return PORT;
 }
 
 startServer();

@@ -19,15 +19,8 @@
         const statusEl = document.getElementById('statusMessage');
         statusEl.textContent = 'starting backend...';
         
-        // Start backend server (host-agnostic)
-        try { await (window.nle && window.nle.startBackend ? window.nle.startBackend() : Promise.resolve({ ok:true })); } catch(_){ }
+        // Backend is already started on panel load; skip starting again to avoid AE instability
         if (!cs) cs = new CSInterface();
-        // Also invoke host-specific start for robustness
-        try {
-          var hostId = (window.nle && window.nle.getHostId) ? window.nle.getHostId() : 'PPRO';
-          var fn = hostId === 'AEFT' ? 'AEFT_startBackend()' : 'PPRO_startBackend()';
-          cs.evalScript(fn, function(result){ try { console.log('Backend start result:', result); } catch(_){ } });
-        } catch(_){ }
         ;(async function(){
           if (myToken !== runToken) return;
           statusEl.textContent = 'waiting for backend health...';

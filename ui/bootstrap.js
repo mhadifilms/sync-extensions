@@ -13,23 +13,15 @@
             }
           }
           
-          // Helper function to find which port the server is running on
+          // Helper function to find which port the server is running on (fixed to 3000)
           async function findServerPort() {
-            const ports = [3000, 3001, 3002, 3003, 3004];
-            for (const port of ports) {
-              if (await checkHealth(port)) {
-                return port;
-              }
-            }
-            return null;
+            return (await checkHealth(3000)) ? 3000 : null;
           }
           
-          // Gentle backend warmup: ping health (won't start server), then request token (server auto-started by actions)
+          // Gentle backend warmup: ping health, then request token (server auto-started by actions)
           try {
             const serverPort = await findServerPort();
-            if (serverPort) {
-              fetch(`http://127.0.0.1:${serverPort}/health`, { cache:'no-store' }).catch(function(){});
-            }
+            if (serverPort) { fetch(`http://127.0.0.1:${serverPort}/health`, { cache:'no-store' }).catch(function(){}); }
           } catch(_){ }
           try { if (typeof ensureAuthToken === 'function') await ensureAuthToken(); } catch(_){ }
           
@@ -53,9 +45,9 @@
                 }
               } catch(e){ }
               
-              // Wait up to ~5s for health on any port
+              // Wait up to ~10s for health on fixed port (3000)
               let tries = 0;
-              while (tries < 20 && !healthy) {
+              while (tries < 40 && !healthy) {
                 serverPort = await findServerPort();
                 if (serverPort) {
                   healthy = true;
