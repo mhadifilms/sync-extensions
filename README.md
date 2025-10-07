@@ -1,6 +1,6 @@
 # sync. extension for Adobe Premiere Pro & After Effects
 
-Beautiful, minimal Premiere Pro and After Effects panel for lipsyncing using the sync. API, with a local helper server. Open‑source and easy to install for developers and editors.
+A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with a local helper server.
 
 ## Features
 
@@ -48,9 +48,25 @@ Beautiful, minimal Premiere Pro and After Effects panel for lipsyncing using the
 - `icons/` — panel icons
 - `scripts/` — helper scripts (dev install, package ZXP)
 
-## Quick Start
+## Installation
 
-### macOS Installation
+### Recommended: Install from GitHub Release (no git required)
+
+1. Download the zip for your app from the latest release:
+   - `sync-extension-ae-vX.Y.Z.zip` (After Effects)
+   - `sync-extension-premiere-vX.Y.Z.zip` (Premiere Pro)
+2. Unzip. Inside you'll see a folder like `com.sync.extension.ae.panel` or `com.sync.extension.ppro.panel`.
+3. Move that folder into your CEP extensions directory:
+   - macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
+   - Windows (User): `%APPDATA%\Adobe\CEP\extensions\`
+   - Windows (All users): `%ProgramData%\Adobe\CEP\extensions\`
+4. Restart Adobe and open: Window → Extensions → "sync. for After Effects" or "sync. for Premiere".
+
+Notes:
+- If the panel doesn’t appear, ensure CEP PlayerDebugMode is enabled. Easiest fix: run the installer once (see below) which enables it automatically, then restart Adobe.
+- AE ProRes workflows on macOS may require `ffmpeg` (the installer will try via Homebrew if available).
+
+### macOS Installation (from source)
 ```bash
 git clone https://github.com/mhadifilms/sync-premiere.git
 cd sync-premiere
@@ -63,7 +79,7 @@ chmod +x scripts/install.sh scripts/remove.sh
 - `./scripts/install.sh --premiere` - Install Premiere Pro only  
 - `./scripts/install.sh --both` - Install both (default if no flags)
 
-### Windows Installation
+### Windows Installation (from source)
 ```powershell
 git clone https://github.com/mhadifilms/sync-premiere.git
 cd sync-premiere
@@ -95,25 +111,10 @@ Then launch **Premiere Pro** or **After Effects** → Window → Extensions → 
 
 **Note**: The install scripts automatically enable PlayerDebugMode for unsigned extensions (CSXS 10-14).
 
-### Install from GitHub Release (no git required)
-
-Download the zip for your app from the latest release:
-
-- `sync-extension-ae-vX.Y.Z.zip` (After Effects)
-- `sync-extension-premiere-vX.Y.Z.zip` (Premiere Pro)
-
-Unzip and copy the folder into the CEP extensions directory:
-
-- macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
-- Windows (User): `%APPDATA%\Adobe\CEP\extensions\`
-- Windows (All users): `%ProgramData%\Adobe\CEP\extensions\`
-
-Alternatively, run the installer scripts from the repo without cloning:
+Alternatively, if you have the repo but still want a one‑liner install to enable PlayerDebugMode and place files correctly:
 
 - macOS: `./scripts/install.sh --ae` or `--premiere`
 - Windows: `powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -App ae|premiere`
-
-Restart Adobe and open Window → Extensions → sync.
 
 ## Local Server
 The panel communicates with a local Node.js server on port 3000. The server is bundled in `server/` and starts automatically when the extension loads.

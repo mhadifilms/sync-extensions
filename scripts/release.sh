@@ -48,6 +48,8 @@ bundle_one(){
   local host_dir="$1" # ae-extension or premiere-extension
   local ext_id="$2"   # com.sync.extension.ae.panel or com.sync.extension.ppro.panel
   local label="$3"    # AE or PPro label for filename
+  local lc_label
+  lc_label=$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')
 
   local tmp
   tmp="$(mktemp -d)"
@@ -89,19 +91,19 @@ sync. extension ($label) v$VERSION
 Install (macOS):
   - Unzip and copy the folder "$ext_id" to:
     ~/Library/Application Support/Adobe/CEP/extensions/
-  - Or run: ./scripts/install.sh --${label,,}
+  - Or run: ./scripts/install.sh --$lc_label
 
 Install (Windows):
   - Unzip and copy the folder "$ext_id" to:
-    %APPDATA%\Adobe\CEP\extensions\  (for current user)
-    or %ProgramData%\Adobe\CEP\extensions\ (for all users)
-  - Or run: powershell -ExecutionPolicy Bypass -File scripts\\install.ps1 -App ${label,,}
+    %APPDATA%\\Adobe\\CEP\\extensions\\  (for current user)
+    or %ProgramData%\\Adobe\\CEP\\extensions\\ (for all users)
+  - Or run: powershell -ExecutionPolicy Bypass -File scripts\\install.ps1 -App $lc_label
 
 After install, restart Adobe app and open Window → Extensions → sync.
 EOT
 
   # Create zip
-  local out="$PKG_DIR/sync-extension-${label,,}-v$VERSION.zip"
+  local out="$PKG_DIR/sync-extension-$lc_label-v$VERSION.zip"
   (cd "$tmp" && zip -qr "$out" "$ext_id" README.txt)
   echo "  Created $out"
 }
