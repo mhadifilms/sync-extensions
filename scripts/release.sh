@@ -59,12 +59,11 @@ bundle_one(){
   local dest="$tmp/$ext_id"
   mkdir -p "$dest"
 
-  # Copy core project files (mirror install.sh rsync exclusions)
+  # Copy core project files (include scripts for release ZIPs)
   rsync -a --delete \
     --exclude ".git/" \
     --exclude "dist/" \
     --exclude "extensions/" \
-    --exclude "scripts/" \
     --exclude "CSXS/" \
     "$REPO_DIR/" "$dest/"
 
@@ -100,6 +99,10 @@ Install (Windows):
   - Or run: powershell -ExecutionPolicy Bypass -File scripts\\install.ps1 -App $lc_label
 
 After install, restart Adobe app and open Window → Extensions → sync.
+
+Note: If the extension doesn't appear, enable PlayerDebugMode:
+  macOS: defaults write com.adobe.CSXS.11 PlayerDebugMode 1
+  Windows: Set registry key HKEY_CURRENT_USER\\Software\\Adobe\\CSXS.11\\PlayerDebugMode = 1
 EOT
 
   # Create zip

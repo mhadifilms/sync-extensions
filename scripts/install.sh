@@ -82,8 +82,45 @@ if $AE; then
   # Install server dependencies
   echo "Installing server dependencies for AE..."
   cd "$AE_DEST_DIR/server"
+  
+  # Check if Node.js is available
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "⚠️  Node.js/npm not found. Attempting to install Node.js..."
+    
+    # Try to install Node.js via Homebrew
+    if command -v brew >/dev/null 2>&1; then
+      echo "Installing Node.js via Homebrew..."
+      if brew install node; then
+        echo "✅ Node.js installed successfully"
+        # Reload shell environment
+        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      else
+        echo "❌ Failed to install Node.js via Homebrew"
+        echo ""
+        echo "Please install Node.js manually:"
+        echo "1. Visit https://nodejs.org/"
+        echo "2. Download and install the LTS version"
+        echo "3. Restart your terminal and run this script again"
+        echo ""
+        echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
+        echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
+        exit 1
+      fi
+    else
+      echo "❌ Homebrew not found. Please install Node.js manually:"
+      echo "1. Visit https://nodejs.org/"
+      echo "2. Download and install the LTS version"
+      echo "3. Restart your terminal and run this script again"
+      echo ""
+      echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
+      echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
+      exit 1
+    fi
+  fi
+  
   if ! npm install --omit=dev; then
     echo "ERROR: Failed to install AE server dependencies"
+    echo "Please check your Node.js installation and try again"
     exit 1
   fi
   
@@ -133,8 +170,45 @@ if $PR; then
   # Install server dependencies
   echo "Installing server dependencies for Premiere..."
   cd "$PPRO_DEST_DIR/server"
+  
+  # Check if Node.js is available
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "⚠️  Node.js/npm not found. Attempting to install Node.js..."
+    
+    # Try to install Node.js via Homebrew
+    if command -v brew >/dev/null 2>&1; then
+      echo "Installing Node.js via Homebrew..."
+      if brew install node; then
+        echo "✅ Node.js installed successfully"
+        # Reload shell environment
+        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+      else
+        echo "❌ Failed to install Node.js via Homebrew"
+        echo ""
+        echo "Please install Node.js manually:"
+        echo "1. Visit https://nodejs.org/"
+        echo "2. Download and install the LTS version"
+        echo "3. Restart your terminal and run this script again"
+        echo ""
+        echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
+        echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
+        exit 1
+      fi
+    else
+      echo "❌ Homebrew not found. Please install Node.js manually:"
+      echo "1. Visit https://nodejs.org/"
+      echo "2. Download and install the LTS version"
+      echo "3. Restart your terminal and run this script again"
+      echo ""
+      echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
+      echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
+      exit 1
+    fi
+  fi
+  
   if ! npm install --omit=dev; then
     echo "ERROR: Failed to install Premiere server dependencies"
+    echo "Please check your Node.js installation and try again"
     exit 1
   fi
   
