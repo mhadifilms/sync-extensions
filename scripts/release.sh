@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Release script for sync-premiere extension
+# Release script for sync-extensions extension
 # Usage: ./scripts/release.sh [version] [message]
 # Example: ./scripts/release.sh 0.4.0 "Added new features"
 
@@ -144,7 +144,7 @@ if command -v gh >/dev/null 2>&1; then
 else
   echo "GitHub CLI not found. Please upload zips manually:"
   echo "  $PKG_DIR"
-  echo "Create release: https://github.com/mhadifilms/sync-premiere/releases/new?tag=v$VERSION"
+  echo "Create release: https://github.com/mhadifilms/sync-extensions/releases/new?tag=v$VERSION"
 fi
 
 echo "Release $VERSION completed!"

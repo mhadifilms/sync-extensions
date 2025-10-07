@@ -25,7 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXT_ROOT = path.resolve(__dirname, '..', '..');
 const MANIFEST_PATH = path.join(EXT_ROOT, 'CSXS', 'manifest.xml');
-const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-premiere';
+const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-extensions';
 const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
 const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 const GH_UA = process.env.GITHUB_USER_AGENT || 'sync-extension-updater/1.0';
@@ -286,7 +286,7 @@ app.post('/update/apply', async (req,res)=>{
     fs.writeFileSync(zipPath, zipBuffer);
     
     // Extract zip (simple approach for GitHub zipball format)
-    await exec(`cd "${tempDir}" && unzip -q "${zipPath}" && mv */sync-premiere* . 2>/dev/null || true`);
+    await exec(`cd "${tempDir}" && unzip -q "${zipPath}" && mv */sync-extensions* . 2>/dev/null || true`);
     
     // Run the install script from the extracted update
     const updateScript = path.join(tempDir, 'scripts', 'install.sh');

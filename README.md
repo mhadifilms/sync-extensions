@@ -68,8 +68,8 @@ Notes:
 
 ### macOS Installation (from source)
 ```bash
-git clone https://github.com/mhadifilms/sync-premiere.git
-cd sync-premiere
+git clone https://github.com/mhadifilms/sync-extensions.git
+cd sync-extensions
 chmod +x scripts/install.sh scripts/remove.sh
 ./scripts/install.sh
 ```
@@ -81,8 +81,8 @@ chmod +x scripts/install.sh scripts/remove.sh
 
 ### Windows Installation (from source)
 ```powershell
-git clone https://github.com/mhadifilms/sync-premiere.git
-cd sync-premiere
+git clone https://github.com/mhadifilms/sync-extensions.git
+cd sync-extensions
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 ```
 
