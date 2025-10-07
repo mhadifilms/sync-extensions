@@ -53,7 +53,7 @@ bundle_one(){
 
   local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT INT TERM
+  trap 'rm -rf "$tmp"' RETURN
 
   # Destination extension root in bundle
   local dest="$tmp/$ext_id"
