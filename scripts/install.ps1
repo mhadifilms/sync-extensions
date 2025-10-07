@@ -130,9 +130,23 @@ if (-not $App) {
 
 function Enable-PlayerDebugMode {
   Write-Host "Enabling PlayerDebugMode for unsigned extensions..." -ForegroundColor Yellow
+  
+  $enabledVersions = @()
   foreach ($v in 10,11,12,13,14) {
-    New-Item -Path "HKCU:\Software\Adobe\CSXS.$v" -ErrorAction SilentlyContinue | Out-Null
-    Set-ItemProperty -Path "HKCU:\Software\Adobe\CSXS.$v" -Name PlayerDebugMode -Type DWord -Value 1 -ErrorAction SilentlyContinue
+    try {
+      New-Item -Path "HKCU:\Software\Adobe\CSXS.$v" -ErrorAction SilentlyContinue | Out-Null
+      Set-ItemProperty -Path "HKCU:\Software\Adobe\CSXS.$v" -Name PlayerDebugMode -Type DWord -Value 1 -ErrorAction SilentlyContinue
+      $enabledVersions += $v
+    } catch {
+      Write-Host "Warning: Could not enable PlayerDebugMode for CSXS.$v" -ForegroundColor Yellow
+    }
+  }
+  
+  if ($enabledVersions.Count -gt 0) {
+    Write-Host "✅ PlayerDebugMode enabled for CSXS versions: $($enabledVersions -join ', ')" -ForegroundColor Green
+  } else {
+    Write-Host "❌ Failed to enable PlayerDebugMode" -ForegroundColor Red
+    Write-Host "Please run PowerShell as Administrator and try again" -ForegroundColor Yellow
   }
 }
 
@@ -297,17 +311,67 @@ switch ($App) {
 Write-Host ""
 Write-Host "✅ Installation complete!" -ForegroundColor Green
 Write-Host ""
-Write-Host "To use:"
+
+# Verify installation
+Write-Host "Verifying installation..." -ForegroundColor Cyan
+$installSuccess = $true
+
 switch ($App) {
-  'ae' { Write-Host "• After Effects: Window > Extensions > 'sync. for After Effects'" }
-  'premiere' { Write-Host "• Premiere Pro: Window > Extensions > 'sync. for Premiere'" }
+  'ae' { 
+    $aeDir = Join-Path $destBase 'com.sync.extension.ae.panel'
+    if (Test-Path $aeDir) {
+      Write-Host "✅ AE extension installed: $aeDir" -ForegroundColor Green
+    } else {
+      Write-Host "❌ AE extension not found" -ForegroundColor Red
+      $installSuccess = $false
+    }
+  }
+  'premiere' { 
+    $pproDir = Join-Path $destBase 'com.sync.extension.ppro.panel'
+    if (Test-Path $pproDir) {
+      Write-Host "✅ Premiere extension installed: $pproDir" -ForegroundColor Green
+    } else {
+      Write-Host "❌ Premiere extension not found" -ForegroundColor Red
+      $installSuccess = $false
+    }
+  }
   'both' { 
-    Write-Host "• After Effects: Window > Extensions > 'sync. for After Effects'"
-    Write-Host "• Premiere Pro: Window > Extensions > 'sync. for Premiere'"
+    $aeDir = Join-Path $destBase 'com.sync.extension.ae.panel'
+    $pproDir = Join-Path $destBase 'com.sync.extension.ppro.panel'
+    if (Test-Path $aeDir) {
+      Write-Host "✅ AE extension installed: $aeDir" -ForegroundColor Green
+    } else {
+      Write-Host "❌ AE extension not found" -ForegroundColor Red
+      $installSuccess = $false
+    }
+    if (Test-Path $pproDir) {
+      Write-Host "✅ Premiere extension installed: $pproDir" -ForegroundColor Green
+    } else {
+      Write-Host "❌ Premiere extension not found" -ForegroundColor Red
+      $installSuccess = $false
+    }
   }
 }
+
 Write-Host ""
-Write-Host "Note: Restart Adobe applications to see the extensions."
+if ($installSuccess) {
+  Write-Host "🎉 Installation successful!" -ForegroundColor Green
+  Write-Host ""
+  Write-Host "Next steps:" -ForegroundColor Cyan
+  Write-Host "1. Close Adobe applications completely"
+  Write-Host "2. Wait 10 seconds"
+  Write-Host "3. Launch Adobe application"
+  Write-Host "4. Go to Window > Extensions > 'sync. for [App]'"
+  Write-Host ""
+  Write-Host "If extension doesn't appear:" -ForegroundColor Yellow
+  Write-Host "• Make sure PlayerDebugMode is enabled (done automatically)"
+  Write-Host "• Restart Adobe application"
+  Write-Host "• Check that Node.js is installed and working"
+} else {
+  Write-Host "❌ Installation failed!" -ForegroundColor Red
+  Write-Host "Please run this script as Administrator and try again" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "Tip: Re-run with parameters:"
 Write-Host "  powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Scope user|system -App ae|premiere|both"

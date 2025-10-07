@@ -123,6 +123,9 @@ TROUBLESHOOTING:
 - Windows: Script will auto-install Node.js via winget, or download from https://nodejs.org
 - Windows PowerShell error: Run PowerShell as Administrator:
   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+- Windows extension not showing: Check installation location:
+  %APPDATA%\Adobe\CEP\extensions\com.sync.extension.ppro.panel
+  Enable PlayerDebugMode: reg add "HKEY_CURRENT_USER\Software\Adobe\CSXS.12" /v PlayerDebugMode /t REG_DWORD /d 1 /f
 
 REQUIREMENTS:
 - Adobe $label 2024 or later
