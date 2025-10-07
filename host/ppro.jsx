@@ -32,22 +32,70 @@ function PPRO_startBackend() {
       if (!nodePath) { return _respond({ ok:false, error:'Node not found (Windows)' }); }
     } else {
       function fileExists(p) { try { return new File(p).exists; } catch(e) { return false; } }
+      
+      // Try multiple methods to find Node.js
+      var nodePath = null;
+      
+      // Method 1: Check common install locations
       var candidates = [
         "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
+        "/usr/local/bin/node", 
         "/usr/bin/node",
-        "/usr/local/opt/node/bin/node"
+        "/usr/local/opt/node/bin/node",
+        "/Applications/Node.js.app/Contents/MacOS/node"
       ];
-      for (var i=0;i<candidates.length;i++) { if (fileExists(candidates[i])) { nodePath = candidates[i]; break; } }
-      if (!nodePath) {
-        var whichOut = system.callSystem("/bin/bash -lc 'command -v node'");
-        if (whichOut) {
-          var guess = whichOut.replace(/\n/g, '').replace(/\r/g, '');
-          if (fileExists(guess)) { nodePath = guess; }
-        }
+      for (var i=0;i<candidates.length;i++) { 
+        if (fileExists(candidates[i])) { 
+          nodePath = candidates[i]; 
+          break; 
+        } 
       }
+      
+      // Method 2: Use which command
       if (!nodePath) {
-        return _respond({ ok: false, error: "Node not found in common paths" });
+        try {
+          var whichOut = system.callSystem("/bin/bash -lc 'command -v node 2>/dev/null'");
+          if (whichOut) {
+            var guess = whichOut.replace(/\n/g, '').replace(/\r/g, '').trim();
+            if (guess && fileExists(guess)) { 
+              nodePath = guess; 
+            }
+          }
+        } catch(e) {}
+      }
+      
+      // Method 3: Check PATH via shell
+      if (!nodePath) {
+        try {
+          var pathOut = system.callSystem("/bin/bash -lc 'echo $PATH'");
+          if (pathOut) {
+            var paths = pathOut.split(':');
+            for (var j=0;j<paths.length;j++) {
+              var testPath = paths[j].trim() + '/node';
+              if (fileExists(testPath)) {
+                nodePath = testPath;
+                break;
+              }
+            }
+          }
+        } catch(e) {}
+      }
+      
+      // Method 4: Try nvm paths
+      if (!nodePath) {
+        try {
+          var nvmOut = system.callSystem("/bin/bash -lc 'nvm which current 2>/dev/null'");
+          if (nvmOut) {
+            var nvmPath = nvmOut.replace(/\n/g, '').replace(/\r/g, '').trim();
+            if (fileExists(nvmPath)) {
+              nodePath = nvmPath;
+            }
+          }
+        } catch(e) {}
+      }
+      
+      if (!nodePath) {
+        return _respond({ ok: false, error: "Node.js not found. Please install Node.js from https://nodejs.org or via Homebrew: brew install node" });
       }
     }
 

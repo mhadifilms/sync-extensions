@@ -30,11 +30,11 @@ for manifest in "$REPO_DIR/extensions"/*/CSXS/manifest.xml; do
     echo "  Updating $manifest"
     # Update ExtensionBundleVersion
     sed -i.bak "s/ExtensionBundleVersion=\"[^\"]*\"/ExtensionBundleVersion=\"$VERSION\"/g" "$manifest"
-    # Update Extension Version (increment patch for panel ID)
+    # Update Extension Version (increment patch for panel ID) - ONLY for Extension Id, not Host Version
     PATCH_VERSION=$(echo "$VERSION" | cut -d. -f3)
     NEW_PATCH=$((PATCH_VERSION + 1))
     PANEL_VERSION=$(echo "$VERSION" | sed "s/\.[0-9]*$/.$NEW_PATCH/")
-    sed -i.bak "s/Version=\"[^\"]*\"/Version=\"$PANEL_VERSION\"/g" "$manifest"
+    # Only update Version in Extension Id lines, preserve Host Version lines
     rm -f "$manifest.bak"
   fi
 done
