@@ -289,9 +289,9 @@ app.post('/update/apply', async (req,res)=>{
     await exec(`cd "${tempDir}" && unzip -q "${zipPath}" && mv */sync-premiere* . 2>/dev/null || true`);
     
     // Run the install script from the extracted update
-    const updateScript = path.join(tempDir, 'scripts', 'dev-install.sh');
+    const updateScript = path.join(tempDir, 'scripts', 'install.sh');
     if (fs.existsSync(updateScript)) {
-      await exec(`chmod +x "${updateScript}" && "${updateScript}"`);
+      await exec(`chmod +x "${updateScript}" && "${updateScript}" --both`);
     } else {
       throw new Error('Update script not found in downloaded package');
     }

@@ -54,21 +54,46 @@ Beautiful, minimal Premiere Pro and After Effects panel for lipsyncing using the
 ```bash
 git clone https://github.com/mhadifilms/sync-premiere.git
 cd sync-premiere
-chmod +x scripts/dev-install.sh
-./scripts/dev-install.sh
+chmod +x scripts/install.sh scripts/remove.sh
+./scripts/install.sh
 ```
 
+**Options:**
+- `./scripts/install.sh --ae` - Install After Effects only
+- `./scripts/install.sh --premiere` - Install Premiere Pro only  
+- `./scripts/install.sh --both` - Install both (default if no flags)
+
 ### Windows Installation
-```cmd
+```powershell
 git clone https://github.com/mhadifilms/sync-premiere.git
 cd sync-premiere
-# Copy extension files to: %APPDATA%\Adobe\CEP\extensions\
-# Enable PlayerDebugMode via registry or CEP utility
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1
+```
+
+**Options:**
+- `scripts/install.ps1 -App ae` - Install After Effects only
+- `scripts/install.ps1 -App premiere` - Install Premiere Pro only
+- `scripts/install.ps1 -App both` - Install both (default)
+- `scripts/install.ps1 -Scope system` - Install for all users (requires admin)
+
+### Removal
+**macOS:**
+```bash
+./scripts/remove.sh --ae        # Remove After Effects only
+./scripts/remove.sh --premiere  # Remove Premiere Pro only
+./scripts/remove.sh --both      # Remove both
+```
+
+**Windows:**
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/remove.ps1 -App ae
+powershell -ExecutionPolicy Bypass -File scripts/remove.ps1 -App premiere
+powershell -ExecutionPolicy Bypass -File scripts/remove.ps1 -App both
 ```
 
 Then launch **Premiere Pro** or **After Effects** → Window → Extensions → "sync. for Premiere" or "sync. for After Effects".
 
-**Note**: The install script automatically enables PlayerDebugMode for unsigned extensions (CSXS 10-14).
+**Note**: The install scripts automatically enable PlayerDebugMode for unsigned extensions (CSXS 10-14).
 
 ## Local Server
 The panel communicates with a local Node.js server on port 3000. The server is bundled in `server/` and starts automatically when the extension loads.
