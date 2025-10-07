@@ -91,7 +91,7 @@
           try {
             try { if (currentFetchController) currentFetchController.abort(); } catch(_){ }
             currentFetchController = new AbortController();
-            const resp = await fetch('http://localhost:3000/jobs', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(jobData), signal: currentFetchController.signal });
+            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(jobData), signal: currentFetchController.signal });
             const text = await resp.text();
             let data = {};
             try { data = JSON.parse(text || '{}'); } catch(_) { data = { error: text }; }
@@ -120,7 +120,7 @@
 
       function pollJobStatus(jobId) {
         const interval = setInterval(() => {
-          fetch(`http://localhost:3000/jobs/${jobId}`, { headers: authHeaders() })
+          fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() })
           .then(response => response.json())
           .then(data => {
             if (data.status === 'completed') {
@@ -237,13 +237,13 @@
         let savedPath = '';
         const reset = markWorking('save-'+jobId, 'saving…');
         try {
-          const resp = await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ location, targetDir, apiKey }) });
+          const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}/save`, { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ location, targetDir, apiKey }) });
           const data = await resp.json().catch(()=>null);
           if (resp.ok && data && data.outputPath) { savedPath = data.outputPath; }
           else if (!resp.ok) { markError('save-'+jobId, 'error'); reset(); return; }
         } catch(_){ markError('save-'+jobId, 'error'); reset(); return; }
         if (!savedPath) {
-          try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`, { headers: authHeaders() }); const j = await res.json(); if (j && j.outputPath) { savedPath = j.outputPath; } } catch(_){ }
+          try { const res = await fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() }); const j = await res.json(); if (j && j.outputPath) { savedPath = j.outputPath; } } catch(_){ }
         }
         // Wait briefly for file to exist on disk if path looks local
         try {
@@ -356,13 +356,13 @@
         const mainInsertWasDisabled = mainInsertBtn ? mainInsertBtn.disabled : false;
         if (mainInsertBtn) { mainInsertBtn.disabled = true; mainInsertBtn.textContent = 'inserting…'; }
         try {
-          const resp = await fetch(`http://localhost:3000/jobs/${jobId}/save`, { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ location, targetDir, apiKey }) });
+          const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}/save`, { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ location, targetDir, apiKey }) });
           const data = await resp.json().catch(()=>null);
           if (resp.ok && data && data.outputPath) { savedPath = data.outputPath; }
           else if (!resp.ok) { markError('insert-'+jobId, 'error'); reset(); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
         } catch(_){ markError('insert-'+jobId, 'error'); reset(); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
         if (!savedPath) {
-          try { const res = await fetch(`http://localhost:3000/jobs/${jobId}`, { headers: authHeaders() }); const j = await res.json(); if (j && j.outputPath) { savedPath = j.outputPath; } } catch(_){ }
+          try { const res = await fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() }); const j = await res.json(); if (j && j.outputPath) { savedPath = j.outputPath; } } catch(_){ }
         }
         reset();
         if (!savedPath) { markError('insert-'+jobId, 'not ready'); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
@@ -454,7 +454,7 @@
             return;
           }
           await ensureAuthToken();
-          const gen = await fetch('http://127.0.0.1:3000/generations?'+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });
+          const gen = await fetch(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });
           if (Array.isArray(gen)) {
             jobs = gen.map(function(g){
               var arr = (g && g.input && g.input.slice) ? g.input.slice() : [];

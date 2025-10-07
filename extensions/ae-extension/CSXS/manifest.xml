@@ -5,19 +5,19 @@
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
-      <Host Name="AEFT" Version="0.4.1"/>
+      <Host Name="AEFT" Version="[24.0,99.9]"/>
     </HostList>
     <LocaleList>
       <Locale Code="All"/>
     </LocaleList>
     <RequiredRuntimeList>
-      <RequiredRuntime Name="CSXS" Version="0.4.1"/>
+      <RequiredRuntime Name="CSXS" Version="12.0"/>
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
     <Extension Id="com.sync.extension.ae.panel" Version="0.4.1">
       <HostList>
-        <Host Name="AEFT" Version="0.4.1"/>
+        <Host Name="AEFT" Version="[24.0,99.9]"/>
       </HostList>
       <DispatchInfo>
         <Resources>

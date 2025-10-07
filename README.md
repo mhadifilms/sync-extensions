@@ -54,39 +54,51 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 
 ## Installation
 
-### Recommended: Install from GitHub Release (no git required)
+### Quick Install (Recommended)
 
-1. Download the zip for your app from the latest release:
-   - `sync-extension-ae-vX.Y.Z.zip` (After Effects)
-   - `sync-extension-premiere-vX.Y.Z.zip` (Premiere Pro)
-2. Unzip. Inside you'll see a folder like `com.sync.extension.ae.panel` or `com.sync.extension.ppro.panel`.
-3. Choose one of these installation methods:
+**macOS:**
+```bash
+# Download and extract the ZIP, then run:
+cd com.sync.extension.premiere.panel  # or .ae.panel for After Effects
+./scripts/install.sh --premiere
+```
 
-**Option A: Manual Installation**
-- Move that folder into your CEP extensions directory:
-  - macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
-  - Windows (User): `%APPDATA%\Adobe\CEP\extensions\`
-  - Windows (All users): `%ProgramData%\Adobe\CEP\extensions\`
-- Enable PlayerDebugMode:
-  - macOS: `defaults write com.adobe.CSXS.11 PlayerDebugMode 1`
-  - Windows: Set registry key `HKEY_CURRENT_USER\Software\Adobe\CSXS.11\PlayerDebugMode = 1`
+**Windows:**
+```powershell
+# Download and extract the ZIP, then run:
+cd com.sync.extension.premiere.panel  # or .ae.panel for After Effects
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -App premiere
+```
 
-**Option B: Automated Installation (macOS)**
-- Requires Homebrew: `brew install node` (if not already installed)
-- Run: `./scripts/install.sh --ae` or `./scripts/install.sh --premiere`
-
-**Option C: Automated Installation (Windows)**
-- Run: `powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -App ae|premiere`
-
-4. Restart Adobe and open: Window → Extensions → "sync. for After Effects" or "sync. for Premiere".
+**Manual Install (if scripts fail):**
+1. Download ZIP from [releases](https://github.com/mhadifilms/sync-extensions/releases)
+2. Extract and move `com.sync.extension.premiere.panel` to:
+   - macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
+   - Windows: `%APPDATA%\Adobe\CEP\extensions\`
+3. Enable debug mode:
+   - macOS: `defaults write com.adobe.CSXS.11 PlayerDebugMode 1`
+   - Windows: Set registry `HKEY_CURRENT_USER\Software\Adobe\CSXS.11\PlayerDebugMode = 1`
+4. Restart Premiere Pro → Window → Extensions → "sync. for Premiere"
 
 ## Local Server
 The panel communicates with a local Node.js server on port 3000. The server is bundled in `server/` and starts automatically when the extension loads.
 
 **Auto-start**: Server launches automatically via `PPRO_startBackend` or `AEFT_startBackend` functions  
-**Manual start** (optional):
+**Manual start** (if auto-start fails):
 ```bash
-cd server
+# Navigate to extension folder
+cd ~/Library/Application\ Support/Adobe/CEP/extensions/com.sync.extension.ppro.panel/server
+
+# Install dependencies (if needed)
+npm install --omit=dev
+
+# Start server manually
+npm start
+```
+
+**For After Effects:**
+```bash
+cd ~/Library/Application\ Support/Adobe/CEP/extensions/com.sync.extension.ae.panel/server
 npm install --omit=dev
 npm start
 ```

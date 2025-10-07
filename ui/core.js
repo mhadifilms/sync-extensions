@@ -236,7 +236,7 @@
       async function waitForHealth(maxAttempts = 20, delayMs = 250, expectedToken) {
         for (let i = 0; i < maxAttempts; i++) {
           try {
-            const resp = await fetch('http://localhost:3000/health', { cache: 'no-store' });
+            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/health`, { cache: 'no-store' });
             if (resp.ok) return true;
           } catch (e) {
             // ignore until attempts exhausted
