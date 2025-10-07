@@ -30,6 +30,18 @@
             } catch(_){ }
             return _orig.call(this, code, cb);
           };
+
+          // Best-effort: auto-start backend shortly after panel load.
+          // Safe because the server will no-op if already healthy on port 3000.
+          try {
+            setTimeout(function(){
+              try {
+                var cs2 = new CSInterface();
+                _orig.call(cs2, "$.evalFile('" + cs2.getSystemPath(CSInterface.SystemPath.EXTENSION) + "/host/ae.jsx')", function(){});
+                _orig.call(cs2, 'AEFT_startBackend()', function(){ /* ignore */ });
+              } catch(_){ }
+            }, 300);
+          } catch(_){ }
         } catch(_){ }
       })();
 

@@ -30,6 +30,8 @@
             var h = getHostId();
             var file = h === 'AEFT' ? '/host/ae.jsx' : '/host/ppro.jsx';
             cs.evalScript("$.evalFile('" + extPath + file + "')", function(){});
+            // AE only: proactively start backend on load; existing server on 3000 is respected by server.js
+            try { if (h === 'AEFT') { cs.evalScript('AEFT_startBackend()', function(){}); } } catch(_){ }
           } catch(_){ }
         }
 
