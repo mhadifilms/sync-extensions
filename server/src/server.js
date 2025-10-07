@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { exec as _exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
+import { createServer } from 'net';
 
 dotenv.config();
 
@@ -23,7 +24,7 @@ const exec = promisify(_exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXT_ROOT = path.resolve(__dirname, '..', '..');
-const MANIFEST_PATH = path.join(EXT_ROOT, 'extensions', 'premiere-extension', 'CSXS', 'manifest.xml');
+const MANIFEST_PATH = path.join(EXT_ROOT, 'CSXS', 'manifest.xml');
 const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-premiere';
 const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
 const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
@@ -714,7 +715,7 @@ app.get('/logs', (_req,res)=>{ res.json({ ok:true, logs: LOGS.slice(-200) }); })
 // Function to check if a port is available
 function isPortAvailable(port) {
   return new Promise((resolve) => {
-    const server = require('net').createServer();
+    const server = createServer();
     server.listen(port, HOST, () => {
       server.once('close', () => resolve(true));
       server.close();
