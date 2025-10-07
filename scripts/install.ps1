@@ -7,6 +7,99 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 
+function Test-NodeJS {
+  # Check common Node.js installation paths
+  $nodePaths = @(
+    "node",  # PATH lookup
+    "C:\Program Files\nodejs\node.exe",
+    "C:\Program Files (x86)\nodejs\node.exe",
+    "$env:APPDATA\npm\node.exe",
+    "$env:LOCALAPPDATA\Programs\nodejs\node.exe"
+  )
+  
+  foreach ($nodePath in $nodePaths) {
+    try {
+      if ($nodePath -eq "node") {
+        # Try PATH lookup
+        $nodeVersion = & node --version 2>$null
+        $npmVersion = & npm --version 2>$null
+        if ($LASTEXITCODE -eq 0 -and $nodeVersion -and $npmVersion) {
+          return $true
+        }
+      } else {
+        # Try specific path
+        if (Test-Path $nodePath) {
+          $nodeVersion = & $nodePath --version 2>$null
+          if ($LASTEXITCODE -eq 0 -and $nodeVersion) {
+            # Also check for npm in the same directory
+            $npmPath = Join-Path (Split-Path $nodePath) "npm.cmd"
+            if (Test-Path $npmPath) {
+              $npmVersion = & $npmPath --version 2>$null
+              if ($LASTEXITCODE -eq 0 -and $npmVersion) {
+                return $true
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      # Continue to next path
+    }
+  }
+  
+  return $false
+}
+
+function Install-NodeJS {
+  Write-Host ""
+  Write-Host "❌ Node.js not found!" -ForegroundColor Red
+  Write-Host ""
+  Write-Host "Node.js is required for the extension to work." -ForegroundColor Yellow
+  Write-Host ""
+  
+  # Try to install Node.js automatically with winget
+  Write-Host "Attempting to install Node.js automatically..." -ForegroundColor Cyan
+  
+  try {
+    # Check if winget is available
+    $wingetVersion = winget --version 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "Installing Node.js LTS with winget..." -ForegroundColor Green
+      winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
+      
+      if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "✅ Node.js installed successfully!" -ForegroundColor Green
+        Write-Host "Please restart PowerShell and run this script again." -ForegroundColor Yellow
+        Write-Host ""
+        Read-Host "Press Enter to exit"
+        exit 0
+      } else {
+        Write-Host "❌ winget installation failed" -ForegroundColor Red
+      }
+    } else {
+      Write-Host "❌ winget not available" -ForegroundColor Red
+    }
+  } catch {
+    Write-Host "❌ winget installation failed: $($_.Exception.Message)" -ForegroundColor Red
+  }
+  
+  Write-Host ""
+  Write-Host "Manual installation required:" -ForegroundColor Cyan
+  Write-Host "1. Download from https://nodejs.org (choose LTS version)"
+  Write-Host "2. Run the installer"
+  Write-Host "3. Restart PowerShell"
+  Write-Host "4. Run this script again"
+  Write-Host ""
+  Read-Host "Press Enter to exit"
+  exit 1
+}
+
+# Check for Node.js before proceeding
+if (-not (Test-NodeJS)) {
+  Install-NodeJS
+}
+
 if (-not $Scope) {
   Write-Host "Install scope?" -ForegroundColor Cyan
   Write-Host "  1) User (no admin) [default]"
@@ -80,7 +173,38 @@ function Install-AE {
     Write-Host "Installing server dependencies..." -ForegroundColor Yellow
     Push-Location $serverDir
     try {
-      npm install --omit=dev
+      # Try npm from PATH first, then common locations
+      $npmPaths = @(
+        "npm",
+        "C:\Program Files\nodejs\npm.cmd",
+        "C:\Program Files (x86)\nodejs\npm.cmd",
+        "$env:APPDATA\npm\npm.cmd",
+        "$env:LOCALAPPDATA\Programs\nodejs\npm.cmd"
+      )
+      
+      $npmInstalled = $false
+      foreach ($npmPath in $npmPaths) {
+        try {
+          if ($npmPath -eq "npm") {
+            & npm install --omit=dev
+          } else {
+            if (Test-Path $npmPath) {
+              & $npmPath install --omit=dev
+            }
+          }
+          if ($LASTEXITCODE -eq 0) {
+            $npmInstalled = $true
+            break
+          }
+        } catch {
+          # Continue to next path
+        }
+      }
+      
+      if (-not $npmInstalled) {
+        Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
+        Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
+      }
     } finally {
       Pop-Location
     }
@@ -124,7 +248,38 @@ function Install-Premiere {
     Write-Host "Installing server dependencies..." -ForegroundColor Yellow
     Push-Location $serverDir
     try {
-      npm install --omit=dev
+      # Try npm from PATH first, then common locations
+      $npmPaths = @(
+        "npm",
+        "C:\Program Files\nodejs\npm.cmd",
+        "C:\Program Files (x86)\nodejs\npm.cmd",
+        "$env:APPDATA\npm\npm.cmd",
+        "$env:LOCALAPPDATA\Programs\nodejs\npm.cmd"
+      )
+      
+      $npmInstalled = $false
+      foreach ($npmPath in $npmPaths) {
+        try {
+          if ($npmPath -eq "npm") {
+            & npm install --omit=dev
+          } else {
+            if (Test-Path $npmPath) {
+              & $npmPath install --omit=dev
+            }
+          }
+          if ($LASTEXITCODE -eq 0) {
+            $npmInstalled = $true
+            break
+          }
+        } catch {
+          # Continue to next path
+        }
+      }
+      
+      if (-not $npmInstalled) {
+        Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
+        Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
+      }
     } finally {
       Pop-Location
     }

@@ -325,7 +325,7 @@ app.post('/update/apply', async (req,res)=>{
         await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
         await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
         await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
-        await exec(`cp "${extractedDir}"/epr "${aeDestDir}/" -R`);
+        // EPR files are Premiere-only, skip for AE
       }
       
       // Copy Premiere extension
@@ -339,7 +339,7 @@ app.post('/update/apply', async (req,res)=>{
         await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
         await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
         await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
-        await exec(`cp "${extractedDir}"/epr "${pproDestDir}/" -R`);
+        await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${pproDestDir}/" -R`);
       }
       
       // Install server dependencies

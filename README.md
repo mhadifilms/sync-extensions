@@ -47,7 +47,7 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 - `index.html` — panel UI and logic
 - `host/ppro.jsx` — ExtendScript bridge to Premiere (exports, import/insert, dialogs)
 - `lib/CSInterface.js` — CEP host bridge
-- `epr/` — Adobe Media Encoder export presets used for In/Out renders
+- `extensions/premiere-extension/epr/` — Adobe Media Encoder export presets used for In/Out renders (Premiere only)
 - `server/` — local Node helper (jobs, costs, file operations)
 - `icons/` — panel icons
 - `scripts/` — helper scripts (dev install, package ZXP)
@@ -133,7 +133,7 @@ npm start
 
 ### Media Issues
 - **ProRes preview shows black** → Chromium won't decode ProRes; preview uses H.264.
-- **Export preset missing** → Check files in `epr/` match names in the UI.
+- **Export preset missing** → Check files in `extensions/premiere-extension/epr/` match names in the UI.
 - **ffmpeg not found** → Install via Homebrew (macOS) or download from ffmpeg.org
 
 ### System Issues

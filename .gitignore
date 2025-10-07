@@ -4,3 +4,4 @@ server/node_modules/
 .env
 .vscode/
 *.log
+.DS_Store
