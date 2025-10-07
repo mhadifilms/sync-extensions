@@ -56,15 +56,23 @@ function Install-AE {
   # Create directory structure
   New-Item -ItemType Directory -Path $destDir -Force | Out-Null
   
-  # Copy shared files
-  $sharedDir = Join-Path $repoRoot 'shared'
-  if (Test-Path $sharedDir) {
-    robocopy $sharedDir $destDir /E /NFL /NDL /NJH /NJS | Out-Null
-  }
+  # Copy core project files (mirror macOS rsync behavior)
+  # Exclude: .git, dist, extensions, scripts, CSXS
+  $excludeDirs = @(
+    (Join-Path $repoRoot '.git'),
+    (Join-Path $repoRoot 'dist'),
+    (Join-Path $repoRoot 'extensions'),
+    (Join-Path $repoRoot 'scripts'),
+    (Join-Path $repoRoot 'CSXS')
+  )
+  robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs | Out-Null
   
-  # Copy AE-specific files
+  # Overlay AE-specific files (host-detection + manifest)
   $aeExtDir = Join-Path $repoRoot 'extensions\ae-extension'
-  robocopy $aeExtDir $destDir /E /NFL /NDL /NJH /NJS | Out-Null
+  if (Test-Path (Join-Path $aeExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force | Out-Null }
+  if (Test-Path (Join-Path $aeExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $aeExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
+  New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force | Out-Null
+  if (Test-Path (Join-Path $aeExtDir 'CSXS\manifest.xml')) { Copy-Item (Join-Path $aeExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force }
   
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
@@ -92,15 +100,23 @@ function Install-Premiere {
   # Create directory structure
   New-Item -ItemType Directory -Path $destDir -Force | Out-Null
   
-  # Copy shared files
-  $sharedDir = Join-Path $repoRoot 'shared'
-  if (Test-Path $sharedDir) {
-    robocopy $sharedDir $destDir /E /NFL /NDL /NJH /NJS | Out-Null
-  }
+  # Copy core project files (mirror macOS rsync behavior)
+  # Exclude: .git, dist, extensions, scripts, CSXS
+  $excludeDirs = @(
+    (Join-Path $repoRoot '.git'),
+    (Join-Path $repoRoot 'dist'),
+    (Join-Path $repoRoot 'extensions'),
+    (Join-Path $repoRoot 'scripts'),
+    (Join-Path $repoRoot 'CSXS')
+  )
+  robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs | Out-Null
   
-  # Copy Premiere-specific files
+  # Overlay Premiere-specific files (host-detection + manifest)
   $pproExtDir = Join-Path $repoRoot 'extensions\premiere-extension'
-  robocopy $pproExtDir $destDir /E /NFL /NDL /NJH /NJS | Out-Null
+  if (Test-Path (Join-Path $pproExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force | Out-Null }
+  if (Test-Path (Join-Path $pproExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $pproExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
+  New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force | Out-Null
+  if (Test-Path (Join-Path $pproExtDir 'CSXS\manifest.xml')) { Copy-Item (Join-Path $pproExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force }
   
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'

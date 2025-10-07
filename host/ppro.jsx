@@ -7,40 +7,66 @@ function PPRO_startBackend() {
       return _respond({ ok: false, error: "Server file not found: " + serverPath });
     }
 
-    // Kill any existing server processes to ensure we run updated code
-    try {
-      system.callSystem("/bin/bash -lc 'pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5'");
-    } catch(e) {}
+    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
 
-    // Resolve node path robustly (macOS)
-    function fileExists(p) { try { return new File(p).exists; } catch(e) { return false; } }
-    var candidates = [
-      "/opt/homebrew/bin/node",
-      "/usr/local/bin/node",
-      "/usr/bin/node",
-      "/usr/local/opt/node/bin/node"
-    ];
+    // Kill any existing server processes to ensure we run updated code (macOS only)
+    if (!isWindows) {
+      try {
+        system.callSystem("/bin/bash -lc 'pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5'");
+      } catch(e) {}
+    }
+
+    // Resolve node path robustly per-OS
     var nodePath = null;
-    for (var i=0;i<candidates.length;i++) { if (fileExists(candidates[i])) { nodePath = candidates[i]; break; } }
-    if (!nodePath) {
-      var whichOut = system.callSystem("/bin/bash -lc 'command -v node'");
-      if (whichOut) {
-        var guess = whichOut.replace(/\n/g, '').replace(/\r/g, '');
-        if (fileExists(guess)) { nodePath = guess; }
+    if (isWindows) {
+      try {
+        var whereOut = system.callSystem('cmd.exe /c where node');
+        if (whereOut) {
+          var lines = String(whereOut).replace(/\r/g,'').split("\n");
+          for (var wi=0; wi<lines.length; wi++) {
+            var cand = lines[wi] && lines[wi].trim();
+            if (cand && new File(cand).exists) { nodePath = cand; break; }
+          }
+        }
+      } catch(_){}
+      if (!nodePath) { return _respond({ ok:false, error:'Node not found (Windows)' }); }
+    } else {
+      function fileExists(p) { try { return new File(p).exists; } catch(e) { return false; } }
+      var candidates = [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+        "/usr/local/opt/node/bin/node"
+      ];
+      for (var i=0;i<candidates.length;i++) { if (fileExists(candidates[i])) { nodePath = candidates[i]; break; } }
+      if (!nodePath) {
+        var whichOut = system.callSystem("/bin/bash -lc 'command -v node'");
+        if (whichOut) {
+          var guess = whichOut.replace(/\n/g, '').replace(/\r/g, '');
+          if (fileExists(guess)) { nodePath = guess; }
+        }
+      }
+      if (!nodePath) {
+        return _respond({ ok: false, error: "Node not found in common paths" });
       }
     }
-    if (!nodePath) {
-      return _respond({ ok: false, error: "Node not found in common paths" });
-    }
 
-    // Launch server in background with nohup (safely quoted)
-    var cdPath = _shq(extPath + "/server");
-    var nodeQ = _shq(nodePath);
-    var serverQ = _shq(serverPath);
-    var bash = "cd " + cdPath + " && nohup " + nodeQ + " " + serverQ + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
-    var launchCmd = "/bin/bash -lc " + _shq(bash);
-    var out = system.callSystem(launchCmd);
-    return _respond({ ok: true, message: "launched", details: out });
+    if (isWindows) {
+      // Launch server detached on Windows
+      var srvDirWin = extPath + "\\server";
+      var cmd = 'cmd.exe /c start "sync-extension-server" /b cmd /c "cd /d ' + srvDirWin.replace(/"/g,'\"') + ' && ' + nodePath.replace(/"/g,'\"') + ' src\\server.js > NUL 2>&1"';
+      var outW = system.callSystem(cmd);
+      return _respond({ ok:true, message:'launched', details: outW });
+    } else {
+      // Launch server in background with nohup (safely quoted)
+      var cdPath = _shq(extPath + "/server");
+      var nodeQ = _shq(nodePath);
+      var serverQ = _shq(serverPath);
+      var bash = "cd " + cdPath + " && nohup " + nodeQ + " " + serverQ + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
+      var launchCmd = "/bin/bash -lc " + _shq(bash);
+      var out = system.callSystem(launchCmd);
+      return _respond({ ok: true, message: "launched", details: out });
+    }
   } catch(e) {
     return _respond({ ok: false, error: String(e) });
   }
@@ -152,8 +178,15 @@ function _hostLog(msg){
     var s = String(msg||'');
     // Use curl to send JSON to local server; ignore output
     var payload = '{"msg": ' + JSON.stringify(s) + '}';
-    var cmd = "/bin/bash -lc " + _shq("(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/hostlog || curl -s -m 1 \"http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "\") >/dev/null 2>&1");
-    system.callSystem(cmd);
+    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+    if (isWindows) {
+      var url = "http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/\"/g,'\\"');
+      var wcmd = 'cmd.exe /c curl -s -m 1 ' + '"' + url.replace(/"/g,'\\"') + '"' + ' >NUL 2>&1';
+      system.callSystem(wcmd);
+    } else {
+      var cmd = "/bin/bash -lc " + _shq("(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/hostlog || curl -s -m 1 \"http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "\") >/dev/null 2>&1");
+      system.callSystem(cmd);
+    }
   }catch(e){ /* ignore */ }
 }
 
@@ -368,11 +401,18 @@ function PPRO_revealFile(payloadJson) {
     var fsPath = String((p && (p.path||p)) || '');
     var f = new File(fsPath);
     if (!f.exists) return _respond({ ok:false, error:'File not found' });
-    // macOS: reveal in Finder
-    var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/"/g, "\\\"");
-    var cmd = "/usr/bin/osascript -e 'tell application " + '"Finder"' + " to reveal POSIX file \"" + esc + "\"' -e 'tell application " + '"Finder"' + " to activate'";
-    system.callSystem(cmd);
-    return _respond({ ok:true });
+    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+    if (isWindows) {
+      var cmd = 'cmd.exe /c explorer.exe /select,"' + String(f.fsName||'').replace(/"/g,'\"') + '"';
+      system.callSystem(cmd);
+      return _respond({ ok:true });
+    } else {
+      // macOS: reveal in Finder
+      var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/"/g, "\\\"");
+      var cmd2 = "/usr/bin/osascript -e 'tell application " + '"Finder"' + " to reveal POSIX file \"" + esc + "\"' -e 'tell application " + '"Finder"' + " to activate'";
+      system.callSystem(cmd2);
+      return _respond({ ok:true });
+    }
   } catch (e) {
     return _respond({ ok:false, error:String(e) });
   }

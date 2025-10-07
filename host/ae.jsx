@@ -104,35 +104,59 @@ function AEFT_startBackend() {
     var extPath = _extensionRoot();
     if (!extPath) return _respond({ ok: false, error: 'No extension root' });
 
-    // Kill any existing server processes
-    try {
-      system.callSystem("/bin/bash -lc " + _shq("pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5"));
-    } catch (e) {}
-
-    // Resolve node path (macOS typical locations)
-    function exists(p) { try { return new File(p).exists; } catch (e) { return false; } }
-    var candidates = [
-      "/opt/homebrew/bin/node",
-      "/usr/local/bin/node",
-      "/usr/bin/node",
-      "/usr/local/opt/node/bin/node"
-    ];
-    var nodePath = null;
-    for (var i = 0; i < candidates.length; i++) { if (exists(candidates[i])) { nodePath = candidates[i]; break; } }
-    if (!nodePath) {
-      var whichOut = system.callSystem("/bin/bash -lc 'command -v node'");
-      if (whichOut) {
-        var guess = String(whichOut).replace(/\n/g, '').replace(/\r/g, '');
-        if (exists(guess)) { nodePath = guess; }
-      }
+    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+    // Kill any existing server processes (macOS only)
+    if (!isWindows) {
+      try {
+        system.callSystem("/bin/bash -lc " + _shq("pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5"));
+      } catch (e) {}
     }
-    if (!nodePath) { return _respond({ ok: false, error: 'Node not found' }); }
+
+    // Resolve node path per-OS
+    var nodePath = null;
+    if (isWindows) {
+      try {
+        var whereOut = system.callSystem('cmd.exe /c where node');
+        if (whereOut) {
+          var lines = String(whereOut).replace(/\r/g,'').split("\n");
+          for (var wi=0; wi<lines.length; wi++) {
+            var cand = lines[wi] && lines[wi].trim();
+            if (cand && new File(cand).exists) { nodePath = cand; break; }
+          }
+        }
+      } catch(_){}
+      if (!nodePath) { return _respond({ ok:false, error:'Node not found (Windows)' }); }
+    } else {
+      function exists(p) { try { return new File(p).exists; } catch (e) { return false; } }
+      var candidates = [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+        "/usr/local/opt/node/bin/node"
+      ];
+      for (var i = 0; i < candidates.length; i++) { if (exists(candidates[i])) { nodePath = candidates[i]; break; } }
+      if (!nodePath) {
+        var whichOut = system.callSystem("/bin/bash -lc 'command -v node'");
+        if (whichOut) {
+          var guess = String(whichOut).replace(/\n/g, '').replace(/\r/g, '');
+          if (exists(guess)) { nodePath = guess; }
+        }
+      }
+      if (!nodePath) { return _respond({ ok: false, error: 'Node not found' }); }
+    }
 
     // Launch server
-    var bash = "cd " + _shq(extPath + "/server") + " && nohup " + _shq(nodePath) + " " + _shq(extPath + "/server/src/server.js") + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
-    var launchCmd = "/bin/bash -lc " + _shq(bash);
-    var out = system.callSystem(launchCmd);
-    return _respond({ ok: true, message: 'launched', details: out });
+    if (isWindows) {
+      var srvDir = extPath + "\\server";
+      var cmd = 'cmd.exe /c start "sync-extension-server" /b cmd /c "cd /d ' + srvDir.replace(/"/g,'\\"') + ' && ' + nodePath.replace(/"/g,'\\"') + ' src\\server.js > NUL 2>&1"';
+      var outW = system.callSystem(cmd);
+      return _respond({ ok:true, message:'launched', details: outW });
+    } else {
+      var bash = "cd " + _shq(extPath + "/server") + " && nohup " + _shq(nodePath) + " " + _shq(extPath + "/server/src/server.js") + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
+      var launchCmd = "/bin/bash -lc " + _shq(bash);
+      var out = system.callSystem(launchCmd);
+      return _respond({ ok: true, message: 'launched', details: out });
+    }
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
   }

@@ -95,6 +95,26 @@ Then launch **Premiere Pro** or **After Effects** → Window → Extensions → 
 
 **Note**: The install scripts automatically enable PlayerDebugMode for unsigned extensions (CSXS 10-14).
 
+### Install from GitHub Release (no git required)
+
+Download the zip for your app from the latest release:
+
+- `sync-extension-ae-vX.Y.Z.zip` (After Effects)
+- `sync-extension-premiere-vX.Y.Z.zip` (Premiere Pro)
+
+Unzip and copy the folder into the CEP extensions directory:
+
+- macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
+- Windows (User): `%APPDATA%\Adobe\CEP\extensions\`
+- Windows (All users): `%ProgramData%\Adobe\CEP\extensions\`
+
+Alternatively, run the installer scripts from the repo without cloning:
+
+- macOS: `./scripts/install.sh --ae` or `--premiere`
+- Windows: `powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -App ae|premiere`
+
+Restart Adobe and open Window → Extensions → sync.
+
 ## Local Server
 The panel communicates with a local Node.js server on port 3000. The server is bundled in `server/` and starts automatically when the extension loads.
 
