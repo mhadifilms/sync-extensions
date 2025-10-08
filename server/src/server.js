@@ -303,7 +303,26 @@ app.post('/update/apply', async (req,res)=>{
     // Look for install script in the extracted directory
     const updateScript = path.join(extractedDir, 'scripts', 'install.sh');
     if (fs.existsSync(updateScript)) {
-      await exec(`chmod +x "${updateScript}" && "${updateScript}" --both`);
+      // Detect which extensions are currently installed
+      const aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
+      const pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      
+      let installArgs = '';
+      const aeInstalled = fs.existsSync(aeDestDir);
+      const pproInstalled = fs.existsSync(pproDestDir);
+      
+      if (aeInstalled && pproInstalled) {
+        installArgs = '--both';
+      } else if (aeInstalled) {
+        installArgs = '--ae';
+      } else if (pproInstalled) {
+        installArgs = '--premiere';
+      } else {
+        // Default to both if neither is detected (shouldn't happen)
+        installArgs = '--both';
+      }
+      
+      await exec(`chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`);
     } else {
       // Fallback: manually install the extension files
       // Copy the extension files to the correct location

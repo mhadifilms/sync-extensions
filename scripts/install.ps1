@@ -191,13 +191,16 @@ function Install-AE {
   New-Item -ItemType Directory -Path $destDir -Force | Out-Null
   
   # Copy core project files (mirror macOS rsync behavior)
-  # Exclude: .git, dist, extensions, scripts, CSXS
+  # Exclude: .git, dist, extensions, scripts, CSXS, node_modules, .DS_Store, *.log, .env, .vscode
   $excludeDirs = @(
     (Join-Path $repoRoot '.git'),
     (Join-Path $repoRoot 'dist'),
     (Join-Path $repoRoot 'extensions'),
     (Join-Path $repoRoot 'scripts'),
-    (Join-Path $repoRoot 'CSXS')
+    (Join-Path $repoRoot 'CSXS'),
+    (Join-Path $repoRoot 'node_modules'),
+    (Join-Path $repoRoot 'server\node_modules'),
+    (Join-Path $repoRoot '.vscode')
   )
   robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs | Out-Null
   
@@ -302,13 +305,16 @@ function Install-Premiere {
   New-Item -ItemType Directory -Path $destDir -Force | Out-Null
   
   # Copy core project files (mirror macOS rsync behavior)
-  # Exclude: .git, dist, extensions, scripts, CSXS
+  # Exclude: .git, dist, extensions, scripts, CSXS, node_modules, .DS_Store, *.log, .env, .vscode
   $excludeDirs = @(
     (Join-Path $repoRoot '.git'),
     (Join-Path $repoRoot 'dist'),
     (Join-Path $repoRoot 'extensions'),
     (Join-Path $repoRoot 'scripts'),
-    (Join-Path $repoRoot 'CSXS')
+    (Join-Path $repoRoot 'CSXS'),
+    (Join-Path $repoRoot 'node_modules'),
+    (Join-Path $repoRoot 'server\node_modules'),
+    (Join-Path $repoRoot '.vscode')
   )
   robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs | Out-Null
   
@@ -322,6 +328,12 @@ function Install-Premiere {
     Write-Host "✅ Copied manifest.xml to CSXS directory" -ForegroundColor Green
   } else {
     Write-Host "❌ Manifest not found at: $pproExtDir\CSXS\manifest.xml" -ForegroundColor Red
+  }
+  
+  # Copy EPR files for Premiere
+  if (Test-Path (Join-Path $pproExtDir 'epr')) {
+    Copy-Item (Join-Path $pproExtDir 'epr') (Join-Path $destDir 'epr') -Recurse -Force
+    Write-Host "✅ Copied EPR files for Premiere" -ForegroundColor Green
   }
   
   # Unblock downloaded files (Mark-of-the-Web)

@@ -52,9 +52,9 @@ if [ -d "$ROOT_DIR/extensions" ]; then
   AE_SRC_DIR="$ROOT_DIR/extensions/ae-extension"
   PPRO_SRC_DIR="$ROOT_DIR/extensions/premiere-extension"
 else
-  # Running from release zip - files are already in the right place
-  AE_SRC_DIR="$ROOT_DIR"
-  PPRO_SRC_DIR="$ROOT_DIR"
+  # Running from release zip - use extensions directory
+  AE_SRC_DIR="$ROOT_DIR/extensions/ae-extension"
+  PPRO_SRC_DIR="$ROOT_DIR/extensions/premiere-extension"
 fi
 
 AE_DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$AE_EXT_ID"
@@ -79,17 +79,21 @@ if $AE; then
     --exclude "extensions/" \
     --exclude "scripts/" \
     --exclude "CSXS/" \
+    --exclude "node_modules/" \
+    --exclude "server/node_modules/" \
+    --exclude ".DS_Store" \
+    --exclude "*.log" \
+    --exclude ".env" \
+    --exclude ".vscode/" \
     "$ROOT_DIR/" "$AE_DEST_DIR/"
   
-  # Overwrite host-detection with AE-specific (if running from repo)
-  if [ -d "$ROOT_DIR/extensions" ]; then
-    mkdir -p "$AE_DEST_DIR/ui"
-    cp -f "$AE_SRC_DIR/ui/host-detection.js" "$AE_DEST_DIR/ui/host-detection.js"
-    
-    # Use AE manifest
-    mkdir -p "$AE_DEST_DIR/CSXS"
-    cp -f "$AE_SRC_DIR/CSXS/manifest.xml" "$AE_DEST_DIR/CSXS/manifest.xml"
-  fi
+  # Overwrite host-detection with AE-specific
+  mkdir -p "$AE_DEST_DIR/ui"
+  cp -f "$AE_SRC_DIR/ui/host-detection.js" "$AE_DEST_DIR/ui/host-detection.js"
+  
+  # Use AE manifest
+  mkdir -p "$AE_DEST_DIR/CSXS"
+  cp -f "$AE_SRC_DIR/CSXS/manifest.xml" "$AE_DEST_DIR/CSXS/manifest.xml"
   
   # Install server dependencies
   echo "Installing server dependencies for AE..."
@@ -169,16 +173,25 @@ if $PR; then
     --exclude "extensions/" \
     --exclude "scripts/" \
     --exclude "CSXS/" \
+    --exclude "node_modules/" \
+    --exclude "server/node_modules/" \
+    --exclude ".DS_Store" \
+    --exclude "*.log" \
+    --exclude ".env" \
+    --exclude ".vscode/" \
     "$ROOT_DIR/" "$PPRO_DEST_DIR/"
   
-  # Overwrite host-detection with PPro-specific (if running from repo)
-  if [ -d "$ROOT_DIR/extensions" ]; then
-    mkdir -p "$PPRO_DEST_DIR/ui"
-    cp -f "$PPRO_SRC_DIR/ui/host-detection.js" "$PPRO_DEST_DIR/ui/host-detection.js"
-    
-    # Use PPro manifest
-    mkdir -p "$PPRO_DEST_DIR/CSXS"
-    cp -f "$PPRO_SRC_DIR/CSXS/manifest.xml" "$PPRO_DEST_DIR/CSXS/manifest.xml"
+  # Overwrite host-detection with PPro-specific
+  mkdir -p "$PPRO_DEST_DIR/ui"
+  cp -f "$PPRO_SRC_DIR/ui/host-detection.js" "$PPRO_DEST_DIR/ui/host-detection.js"
+  
+  # Use PPro manifest
+  mkdir -p "$PPRO_DEST_DIR/CSXS"
+  cp -f "$PPRO_SRC_DIR/CSXS/manifest.xml" "$PPRO_DEST_DIR/CSXS/manifest.xml"
+  
+  # Copy EPR files for Premiere
+  if [ -d "$PPRO_SRC_DIR/epr" ]; then
+    cp -R "$PPRO_SRC_DIR/epr" "$PPRO_DEST_DIR/"
   fi
   
   # Install server dependencies
