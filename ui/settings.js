@@ -144,7 +144,7 @@
           if (!r.ok) throw new Error(j && j.error ? j.error : 'update failed');
           if (status) status.textContent = 'update applied successfully — restart Adobe app to complete';
           if (btn) btn.style.display = 'none';
-          setTimeout(() => { refreshCurrentVersion(); checkForUpdate(true); }, 1000);
+          setTimeout(() => { refreshCurrentVersion(); }, 1000);
         }catch(e){ if (status) status.textContent = 'update failed: ' + String(e && e.message || e); }
       }
 

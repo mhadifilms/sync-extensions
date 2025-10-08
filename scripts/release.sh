@@ -25,6 +25,15 @@ echo "Releasing version $VERSION..."
 
 # Update manifest files
 echo "Updating manifest files..."
+# Update root manifest
+ROOT_MANIFEST="$REPO_DIR/CSXS/manifest.xml"
+if [ -f "$ROOT_MANIFEST" ]; then
+  echo "  Updating $ROOT_MANIFEST"
+  sed -i.bak "s/ExtensionBundleVersion=\"[^\"]*\"/ExtensionBundleVersion=\"$VERSION\"/g" "$ROOT_MANIFEST"
+  rm -f "$ROOT_MANIFEST.bak"
+fi
+
+# Update extension manifests
 for manifest in "$REPO_DIR/extensions"/*/CSXS/manifest.xml; do
   if [ -f "$manifest" ]; then
     echo "  Updating $manifest"
