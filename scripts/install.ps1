@@ -7,6 +7,30 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 
+# GNU-style flag normalization to support --app/--scope usage
+# Example: .\install.ps1 --app premiere --scope user
+try {
+  for ($i = 0; $i -lt $args.Count; $i++) {
+    switch -Regex ($args[$i]) {
+      '^--app$' {
+        if ($i + 1 -lt $args.Count -and -not [string]::IsNullOrWhiteSpace($args[$i+1])) {
+          $AppCandidate = ($args[$i+1]).ToLowerInvariant()
+          if ($AppCandidate -in @('ae','aftereffects','after-effects')) { $App = 'ae' }
+          elseif ($AppCandidate -in @('premiere','ppro','premierepro')) { $App = 'premiere' }
+          elseif ($AppCandidate -in @('both','all')) { $App = 'both' }
+        }
+      }
+      '^--scope$' {
+        if ($i + 1 -lt $args.Count -and -not [string]::IsNullOrWhiteSpace($args[$i+1])) {
+          $ScopeCandidate = ($args[$i+1]).ToLowerInvariant()
+          if ($ScopeCandidate -in @('user','currentuser')) { $Scope = 'user' }
+          elseif ($ScopeCandidate -in @('system','allusers')) { $Scope = 'system' }
+        }
+      }
+    }
+  }
+} catch {}
+
 function Test-NodeJS {
   # Check common Node.js installation paths
   $nodePaths = @(
@@ -109,7 +133,10 @@ if (-not $Scope) {
 }
 
 if ($Scope -eq 'system') {
-  $destBase = Join-Path $env:ProgramData 'Adobe\CEP\extensions'
+  # System-wide CEP extensions directory (correct path on Windows 64-bit)
+  $commonFilesX86 = ${env:ProgramFiles(x86)}
+  if (-not $commonFilesX86) { $commonFilesX86 = $env:ProgramFiles }
+  $destBase = Join-Path $commonFilesX86 'Common Files\Adobe\CEP\extensions'
 } else {
   $destBase = Join-Path $env:APPDATA 'Adobe\CEP\extensions'
 }
@@ -179,7 +206,15 @@ function Install-AE {
   if (Test-Path (Join-Path $aeExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force | Out-Null }
   if (Test-Path (Join-Path $aeExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $aeExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
   New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force | Out-Null
-  if (Test-Path (Join-Path $aeExtDir 'CSXS\manifest.xml')) { Copy-Item (Join-Path $aeExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force }
+  if (Test-Path (Join-Path $aeExtDir 'CSXS\manifest.xml')) { 
+    Copy-Item (Join-Path $aeExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force
+    Write-Host "✅ Copied manifest.xml to CSXS directory" -ForegroundColor Green
+  } else {
+    Write-Host "❌ Manifest not found at: $aeExtDir\CSXS\manifest.xml" -ForegroundColor Red
+  }
+  
+  # Unblock downloaded files (Mark-of-the-Web)
+  try { Get-ChildItem -Path $destDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue } catch {}
   
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
@@ -200,15 +235,43 @@ function Install-AE {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
+            # Try standard install first
             & npm install --omit=dev
+            if ($LASTEXITCODE -eq 0) {
+              $npmInstalled = $true
+              break
+            }
+            # If that fails, try with flags for Windows compatibility
+            Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
+            & npm install --no-optional --ignore-scripts
+            if ($LASTEXITCODE -eq 0) {
+              # Detect Windows architecture and set appropriate flags
+              $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+              Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
+              & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+              $npmInstalled = $true
+              break
+            }
           } else {
             if (Test-Path $npmPath) {
+              # Try standard install first
               & $npmPath install --omit=dev
+              if ($LASTEXITCODE -eq 0) {
+                $npmInstalled = $true
+                break
+              }
+              # If that fails, try with flags for Windows compatibility
+              Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
+              & $npmPath install --no-optional --ignore-scripts
+              if ($LASTEXITCODE -eq 0) {
+                # Detect Windows architecture and set appropriate flags
+                $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+                Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
+                & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+                $npmInstalled = $true
+                break
+              }
             }
-          }
-          if ($LASTEXITCODE -eq 0) {
-            $npmInstalled = $true
-            break
           }
         } catch {
           # Continue to next path
@@ -254,7 +317,15 @@ function Install-Premiere {
   if (Test-Path (Join-Path $pproExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force | Out-Null }
   if (Test-Path (Join-Path $pproExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $pproExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
   New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force | Out-Null
-  if (Test-Path (Join-Path $pproExtDir 'CSXS\manifest.xml')) { Copy-Item (Join-Path $pproExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force }
+  if (Test-Path (Join-Path $pproExtDir 'CSXS\manifest.xml')) { 
+    Copy-Item (Join-Path $pproExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force
+    Write-Host "✅ Copied manifest.xml to CSXS directory" -ForegroundColor Green
+  } else {
+    Write-Host "❌ Manifest not found at: $pproExtDir\CSXS\manifest.xml" -ForegroundColor Red
+  }
+  
+  # Unblock downloaded files (Mark-of-the-Web)
+  try { Get-ChildItem -Path $destDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue } catch {}
   
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
@@ -275,15 +346,43 @@ function Install-Premiere {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
+            # Try standard install first
             & npm install --omit=dev
+            if ($LASTEXITCODE -eq 0) {
+              $npmInstalled = $true
+              break
+            }
+            # If that fails, try with flags for Windows compatibility
+            Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
+            & npm install --no-optional --ignore-scripts
+            if ($LASTEXITCODE -eq 0) {
+              # Detect Windows architecture and set appropriate flags
+              $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+              Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
+              & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+              $npmInstalled = $true
+              break
+            }
           } else {
             if (Test-Path $npmPath) {
+              # Try standard install first
               & $npmPath install --omit=dev
+              if ($LASTEXITCODE -eq 0) {
+                $npmInstalled = $true
+                break
+              }
+              # If that fails, try with flags for Windows compatibility
+              Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
+              & $npmPath install --no-optional --ignore-scripts
+              if ($LASTEXITCODE -eq 0) {
+                # Detect Windows architecture and set appropriate flags
+                $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+                Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
+                & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+                $npmInstalled = $true
+                break
+              }
             }
-          }
-          if ($LASTEXITCODE -eq 0) {
-            $npmInstalled = $true
-            break
           }
         } catch {
           # Continue to next path
@@ -319,8 +418,15 @@ $installSuccess = $true
 switch ($App) {
   'ae' { 
     $aeDir = Join-Path $destBase 'com.sync.extension.ae.panel'
+    $aeManifest = Join-Path $aeDir 'CSXS\manifest.xml'
     if (Test-Path $aeDir) {
       Write-Host "✅ AE extension installed: $aeDir" -ForegroundColor Green
+      if (Test-Path $aeManifest) {
+        Write-Host "✅ AE manifest.xml found" -ForegroundColor Green
+      } else {
+        Write-Host "❌ AE manifest.xml missing" -ForegroundColor Red
+        $installSuccess = $false
+      }
     } else {
       Write-Host "❌ AE extension not found" -ForegroundColor Red
       $installSuccess = $false
@@ -328,8 +434,15 @@ switch ($App) {
   }
   'premiere' { 
     $pproDir = Join-Path $destBase 'com.sync.extension.ppro.panel'
+    $pproManifest = Join-Path $pproDir 'CSXS\manifest.xml'
     if (Test-Path $pproDir) {
       Write-Host "✅ Premiere extension installed: $pproDir" -ForegroundColor Green
+      if (Test-Path $pproManifest) {
+        Write-Host "✅ Premiere manifest.xml found" -ForegroundColor Green
+      } else {
+        Write-Host "❌ Premiere manifest.xml missing" -ForegroundColor Red
+        $installSuccess = $false
+      }
     } else {
       Write-Host "❌ Premiere extension not found" -ForegroundColor Red
       $installSuccess = $false
@@ -338,14 +451,30 @@ switch ($App) {
   'both' { 
     $aeDir = Join-Path $destBase 'com.sync.extension.ae.panel'
     $pproDir = Join-Path $destBase 'com.sync.extension.ppro.panel'
+    $aeManifest = Join-Path $aeDir 'CSXS\manifest.xml'
+    $pproManifest = Join-Path $pproDir 'CSXS\manifest.xml'
+    
     if (Test-Path $aeDir) {
       Write-Host "✅ AE extension installed: $aeDir" -ForegroundColor Green
+      if (Test-Path $aeManifest) {
+        Write-Host "✅ AE manifest.xml found" -ForegroundColor Green
+      } else {
+        Write-Host "❌ AE manifest.xml missing" -ForegroundColor Red
+        $installSuccess = $false
+      }
     } else {
       Write-Host "❌ AE extension not found" -ForegroundColor Red
       $installSuccess = $false
     }
+    
     if (Test-Path $pproDir) {
       Write-Host "✅ Premiere extension installed: $pproDir" -ForegroundColor Green
+      if (Test-Path $pproManifest) {
+        Write-Host "✅ Premiere manifest.xml found" -ForegroundColor Green
+      } else {
+        Write-Host "❌ Premiere manifest.xml missing" -ForegroundColor Red
+        $installSuccess = $false
+      }
     } else {
       Write-Host "❌ Premiere extension not found" -ForegroundColor Red
       $installSuccess = $false
@@ -367,9 +496,11 @@ if ($installSuccess) {
   Write-Host "• Make sure PlayerDebugMode is enabled (done automatically)"
   Write-Host "• Restart Adobe application"
   Write-Host "• Check that Node.js is installed and working"
+  Write-Host "• Try system-wide install: re-run with -Scope system" -ForegroundColor Yellow
 } else {
   Write-Host "❌ Installation failed!" -ForegroundColor Red
   Write-Host "Please run this script as Administrator and try again" -ForegroundColor Yellow
+  Write-Host "Or try system-wide install: powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Scope system -App premiere" -ForegroundColor Yellow
 }
 
 Write-Host ""
