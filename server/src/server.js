@@ -286,7 +286,15 @@ app.post('/update/apply', async (req,res)=>{
     fs.writeFileSync(zipPath, zipBuffer);
     
     // Extract zip (GitHub zipball format: repo-name-tag/sync-extensions/)
-    await exec(`cd "${tempDir}" && unzip -q "${zipPath}"`);
+    const isWindows = process.platform === 'win32';
+    
+    if (isWindows) {
+      // Windows: Use PowerShell to extract zip
+      await exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tempDir}' -Force"`);
+    } else {
+      // macOS/Linux: Use unzip
+      await exec(`cd "${tempDir}" && unzip -q "${zipPath}"`);
+    }
     
     // Find the extracted directory (GitHub zipball creates a folder like repo-name-tag/)
     const extractedDirs = fs.readdirSync(tempDir).filter(name => {
@@ -301,11 +309,18 @@ app.post('/update/apply', async (req,res)=>{
     const extractedDir = path.join(tempDir, extractedDirs[0]);
     
     // Look for install script in the extracted directory
-    const updateScript = path.join(extractedDir, 'scripts', 'install.sh');
+    const updateScript = path.join(extractedDir, 'scripts', isWindows ? 'install.ps1' : 'install.sh');
     if (fs.existsSync(updateScript)) {
       // Detect which extensions are currently installed
-      const aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
-      const pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      let aeDestDir, pproDestDir;
+      
+      if (isWindows) {
+        aeDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
+        pproDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      } else {
+        aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
+        pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      }
       
       let installArgs = '';
       const aeInstalled = fs.existsSync(aeDestDir);
@@ -322,12 +337,25 @@ app.post('/update/apply', async (req,res)=>{
         installArgs = '--both';
       }
       
-      await exec(`chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`);
+      if (isWindows) {
+        // Windows: Use PowerShell
+        await exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${updateScript}" ${installArgs}`);
+      } else {
+        // macOS/Linux: Use shell script
+        await exec(`chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`);
+      }
     } else {
       // Fallback: manually install the extension files
       // Copy the extension files to the correct location
-      const aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
-      const pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      let aeDestDir, pproDestDir;
+      
+      if (isWindows) {
+        aeDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
+        pproDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      } else {
+        aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
+        pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+      }
       
       // Remove existing extensions
       try { fs.rmSync(aeDestDir, { recursive: true, force: true }); } catch(_){}
@@ -337,13 +365,24 @@ app.post('/update/apply', async (req,res)=>{
       const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
       if (fs.existsSync(aeSrcDir)) {
         fs.mkdirSync(aeDestDir, { recursive: true });
-        await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
-        // Copy shared files
-        await exec(`cp -R "${extractedDir}"/ui "${aeDestDir}/"`);
-        await exec(`cp -R "${extractedDir}"/server "${aeDestDir}/"`);
-        await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
-        await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
-        await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
+        
+        if (isWindows) {
+          // Windows: Use robocopy
+          await exec(`robocopy "${aeSrcDir}" "${aeDestDir}" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/ui" "${aeDestDir}/ui" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/server" "${aeDestDir}/server" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/icons" "${aeDestDir}/icons" /E /NFL /NDL /NJH /NJS`);
+          await exec(`copy "${extractedDir}/index.html" "${aeDestDir}/"`);
+          await exec(`robocopy "${extractedDir}/lib" "${aeDestDir}/lib" /E /NFL /NDL /NJH /NJS`);
+        } else {
+          // macOS/Linux: Use cp
+          await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
+          await exec(`cp -R "${extractedDir}"/ui "${aeDestDir}/"`);
+          await exec(`cp -R "${extractedDir}"/server "${aeDestDir}/"`);
+          await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
+          await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
+          await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
+        }
         // EPR files are Premiere-only, skip for AE
       }
       
@@ -351,22 +390,42 @@ app.post('/update/apply', async (req,res)=>{
       const pproSrcDir = path.join(extractedDir, 'extensions', 'premiere-extension');
       if (fs.existsSync(pproSrcDir)) {
         fs.mkdirSync(pproDestDir, { recursive: true });
-        await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
-        // Copy shared files
-        await exec(`cp -R "${extractedDir}"/ui "${pproDestDir}/"`);
-        await exec(`cp -R "${extractedDir}"/server "${pproDestDir}/"`);
-        await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
-        await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
-        await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
-        await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${pproDestDir}/" -R`);
+        
+        if (isWindows) {
+          // Windows: Use robocopy
+          await exec(`robocopy "${pproSrcDir}" "${pproDestDir}" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/ui" "${pproDestDir}/ui" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/server" "${pproDestDir}/server" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/icons" "${pproDestDir}/icons" /E /NFL /NDL /NJH /NJS`);
+          await exec(`copy "${extractedDir}/index.html" "${pproDestDir}/"`);
+          await exec(`robocopy "${extractedDir}/lib" "${pproDestDir}/lib" /E /NFL /NDL /NJH /NJS`);
+          await exec(`robocopy "${extractedDir}/extensions/premiere-extension/epr" "${pproDestDir}/epr" /E /NFL /NDL /NJH /NJS`);
+        } else {
+          // macOS/Linux: Use cp
+          await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
+          await exec(`cp -R "${extractedDir}"/ui "${pproDestDir}/"`);
+          await exec(`cp -R "${extractedDir}"/server "${pproDestDir}/"`);
+          await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
+          await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
+          await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
+          await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${pproDestDir}/" -R`);
+        }
       }
       
       // Install server dependencies
       if (fs.existsSync(path.join(aeDestDir, 'server'))) {
-        await exec(`cd "${aeDestDir}/server" && npm install --omit=dev`);
+        if (isWindows) {
+          await exec(`cd /d "${aeDestDir}/server" && npm install --omit=dev`);
+        } else {
+          await exec(`cd "${aeDestDir}/server" && npm install --omit=dev`);
+        }
       }
       if (fs.existsSync(path.join(pproDestDir, 'server'))) {
-        await exec(`cd "${pproDestDir}/server" && npm install --omit=dev`);
+        if (isWindows) {
+          await exec(`cd /d "${pproDestDir}/server" && npm install --omit=dev`);
+        } else {
+          await exec(`cd "${pproDestDir}/server" && npm install --omit=dev`);
+        }
       }
     }
     
