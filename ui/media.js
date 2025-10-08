@@ -426,9 +426,11 @@
             try {
               if (!cs) cs = new CSInterface();
               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\")`, ()=>resolve()));
+              const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx';
+              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
               const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              res = await new Promise(resolve => { cs.evalScript(`AEFT_exportInOutVideo(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
+              const exportFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
+              res = await new Promise(resolve => { cs.evalScript(`${exportFunc}(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
               triedAE = true;
             } catch(_){ }
             if (!res || !res.ok) {
@@ -452,8 +454,9 @@
               const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
               if (isAE) {
                 if (!cs) cs = new CSInterface();
-                try { const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\")`, ()=>resolve())); } catch(_){ }
-                diag = await new Promise(resolve=>{ cs.evalScript('AEFT_diagInOut()', r=>{ try{ resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:true, host:'AEFT' }); } }); });
+                try { const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx'; await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve())); } catch(_){ }
+                const diagFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_diagInOut' : 'PPRO_diagInOut';
+                diag = await new Promise(resolve=>{ cs.evalScript(`${diagFunc}()`, r=>{ try{ resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:true, host:window.nle && window.nle.getHostId && window.nle.getHostId() || 'PPRO' }); } }); });
               } else if (window.nle && typeof window.nle.diagInOut === 'function') diag = await window.nle.diagInOut();
               else diag = await evalExtendScript('PPRO_diagInOut', {});
             } catch(_){ }
@@ -491,9 +494,11 @@
             try {
               if (!cs) cs = new CSInterface();
               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\")`, ()=>resolve()));
+              const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx';
+              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
               const arg = JSON.stringify({ format }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              res = await new Promise(resolve => { cs.evalScript(`AEFT_exportInOutAudio(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
+              const audioExportFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_exportInOutAudio' : 'PPRO_exportInOutAudio';
+              res = await new Promise(resolve => { cs.evalScript(`${audioExportFunc}(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
               triedAE = true;
             } catch(_){ }
             if (!res || !res.ok) {

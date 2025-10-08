@@ -151,6 +151,55 @@
       // Initialize version display on load
       setTimeout(refreshCurrentVersion, 1000);
 
+      // Debug functions
+      function testHostScripts() {
+        const debugEl = document.getElementById('debugStatus');
+        if (!debugEl) return;
+        
+        debugEl.textContent = 'Testing host scripts...\n';
+        
+        try {
+          if (!window.CSInterface) {
+            debugEl.textContent += 'ERROR: CSInterface not available\n';
+            return;
+          }
+          
+          const cs = new CSInterface();
+          const hostId = window.nle && window.nle.getHostId ? window.nle.getHostId() : 'Unknown';
+          
+          debugEl.textContent += `Host detected: ${hostId}\n`;
+          
+          // Test the appropriate host script
+          const testFunc = hostId === 'AEFT' ? 'AEFT_testLog()' : 'PPRO_testLog()';
+          
+          cs.evalScript(testFunc, function(result) {
+            try {
+              const parsed = JSON.parse(result || '{}');
+              if (parsed.ok) {
+                debugEl.textContent += `SUCCESS: ${testFunc} executed\n`;
+                debugEl.textContent += `Response: ${parsed.message}\n`;
+              } else {
+                debugEl.textContent += `ERROR: ${testFunc} failed\n`;
+                debugEl.textContent += `Error: ${parsed.error || 'Unknown error'}\n`;
+              }
+            } catch(e) {
+              debugEl.textContent += `ERROR: Failed to parse result: ${result}\n`;
+              debugEl.textContent += `Exception: ${e.message}\n`;
+            }
+          });
+          
+        } catch(e) {
+          debugEl.textContent += `ERROR: ${e.message}\n`;
+        }
+      }
+      
+      function clearDebugLogs() {
+        const debugEl = document.getElementById('debugStatus');
+        if (debugEl) {
+          debugEl.textContent = 'Debug logs cleared.\n';
+        }
+      }
+
       // listeners
       document.addEventListener('change', saveSettings);
       document.getElementById('apiKey').addEventListener('input', saveSettings);

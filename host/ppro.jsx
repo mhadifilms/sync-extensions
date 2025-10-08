@@ -1,124 +1,19 @@
-function PPRO_startBackend() {
+// Safe system caller across environments
+function _callSystem(cmd) {
   try {
-    var extPath = _extensionRoot();
-    var serverPath = extPath + "/server/src/server.js";
-    var serverFile = new File(serverPath);
-    if (!serverFile.exists) {
-      return _respond({ ok: false, error: "Server file not found: " + serverPath });
+    if (typeof System !== 'undefined' && System.callSystem) {
+      return System.callSystem(cmd);
     }
-
-    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
-
-    // Kill any existing server processes to ensure we run updated code (macOS only)
-    if (!isWindows) {
-      try {
-        system.callSystem("/bin/bash -lc 'pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5'");
-      } catch(e) {}
+  } catch(e) { /* fallthrough */ }
+  try {
+    if (typeof system !== 'undefined' && system.callSystem) {
+      return system.callSystem(cmd);
     }
-
-    // Resolve node path robustly per-OS
-    var nodePath = null;
-    if (isWindows) {
-      try {
-        var whereOut = system.callSystem('cmd.exe /c where node');
-        if (whereOut) {
-          var lines = String(whereOut).replace(/\r/g,'').split("\n");
-          for (var wi=0; wi<lines.length; wi++) {
-            var cand = lines[wi] && lines[wi].trim();
-            if (cand && new File(cand).exists) { nodePath = cand; break; }
-          }
-        }
-      } catch(_){}
-      if (!nodePath) { return _respond({ ok:false, error:'Node not found (Windows)' }); }
-    } else {
-      function fileExists(p) { try { return new File(p).exists; } catch(e) { return false; } }
-      
-      // Try multiple methods to find Node.js
-      var nodePath = null;
-      
-      // Method 1: Check common install locations
-      var candidates = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node", 
-        "/usr/bin/node",
-        "/usr/local/opt/node/bin/node",
-        "/Applications/Node.js.app/Contents/MacOS/node"
-      ];
-      for (var i=0;i<candidates.length;i++) { 
-        if (fileExists(candidates[i])) { 
-          nodePath = candidates[i]; 
-          break; 
-        } 
-      }
-      
-      // Method 2: Use which command
-      if (!nodePath) {
-        try {
-          var whichOut = system.callSystem("/bin/bash -lc 'command -v node 2>/dev/null'");
-          if (whichOut) {
-            var guess = whichOut.replace(/\n/g, '').replace(/\r/g, '').trim();
-            if (guess && fileExists(guess)) { 
-              nodePath = guess; 
-            }
-          }
-        } catch(e) {}
-      }
-      
-      // Method 3: Check PATH via shell
-      if (!nodePath) {
-        try {
-          var pathOut = system.callSystem("/bin/bash -lc 'echo $PATH'");
-          if (pathOut) {
-            var paths = pathOut.split(':');
-            for (var j=0;j<paths.length;j++) {
-              var testPath = paths[j].trim() + '/node';
-              if (fileExists(testPath)) {
-                nodePath = testPath;
-                break;
-              }
-            }
-          }
-        } catch(e) {}
-      }
-      
-      // Method 4: Try nvm paths
-      if (!nodePath) {
-        try {
-          var nvmOut = system.callSystem("/bin/bash -lc 'nvm which current 2>/dev/null'");
-          if (nvmOut) {
-            var nvmPath = nvmOut.replace(/\n/g, '').replace(/\r/g, '').trim();
-            if (fileExists(nvmPath)) {
-              nodePath = nvmPath;
-            }
-          }
-        } catch(e) {}
-      }
-      
-      if (!nodePath) {
-        return _respond({ ok: false, error: "Node.js not found. Please install Node.js from https://nodejs.org or via Homebrew: brew install node" });
-      }
-    }
-
-    if (isWindows) {
-      // Launch server detached on Windows
-      var srvDirWin = extPath + "\\server";
-      var cmd = 'cmd.exe /c start "sync-extension-server" /b cmd /c "cd /d ' + srvDirWin.replace(/"/g,'\"') + ' && ' + nodePath.replace(/"/g,'\"') + ' src\\server.js > NUL 2>&1"';
-      var outW = system.callSystem(cmd);
-      return _respond({ ok:true, message:'launched', details: outW });
-    } else {
-      // Launch server in background with nohup (safely quoted)
-      var cdPath = _shq(extPath + "/server");
-      var nodeQ = _shq(nodePath);
-      var serverQ = _shq(serverPath);
-      var bash = "cd " + cdPath + " && nohup " + nodeQ + " " + serverQ + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
-      var launchCmd = "/bin/bash -lc " + _shq(bash);
-      var out = system.callSystem(launchCmd);
-      return _respond({ ok: true, message: "launched", details: out });
-    }
-  } catch(e) {
-    return _respond({ ok: false, error: String(e) });
-  }
+  } catch(e2) { /* ignore */ }
+  return '';
 }
+
+// Auto-start is now handled by ui/nle.js
 
 var __showDialogBusy = false;
 
@@ -127,7 +22,7 @@ try {
   if (typeof JSON === 'undefined') { JSON = {}; }
   if (typeof JSON.stringify !== 'function') {
     JSON.stringify = function(value){
-      function escStr(s){ return String(s).replace(/[\\\"\n\r\t\b\f]/g, function(ch){
+      function escStr(s){ return String(s).replace(/[\\"\n\r\t\b\f]/g, function(ch){
         if (ch === '"') return '\\"';
         if (ch === '\\') return '\\\\';
         if (ch === '\n') return '\\n';
@@ -230,10 +125,10 @@ function _hostLog(msg){
     if (isWindows) {
       var url = "http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/\"/g,'\\"');
       var wcmd = 'cmd.exe /c curl -s -m 1 ' + '"' + url.replace(/"/g,'\\"') + '"' + ' >NUL 2>&1';
-      system.callSystem(wcmd);
+      System.callSystem(wcmd);
     } else {
       var cmd = "/bin/bash -lc " + _shq("(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/hostlog || curl -s -m 1 \"http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "\") >/dev/null 2>&1");
-      system.callSystem(cmd);
+      System.callSystem(cmd);
     }
   }catch(e){ /* ignore */ }
 }
@@ -243,6 +138,16 @@ function PPRO_insertAtPlayhead(jobId) {
     var extPath = _extensionRoot();
     var outputPath = extPath + "/outputs/" + jobId + "_output.mp4";
     var outputFile = new File(outputPath);
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ppro_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] PPRO_insertAtPlayhead called with jobId: " + jobId);
+      logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
+      logFile.writeln("[" + new Date().toString() + "] File exists: " + outputFile.exists);
+      logFile.close();
+    } catch(e) {}
     
     if (outputFile.exists) {
       var project = app.project;
@@ -270,6 +175,18 @@ function PPRO_insertFileAtPlayhead(payloadJson) {
     var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
     var fsPath = String((p && (p.path||p)) || '');
     var file = new File(fsPath);
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ppro_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] PPRO_insertFileAtPlayhead called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
+      logFile.writeln("[" + new Date().toString() + "] Parsed path: " + fsPath);
+      logFile.writeln("[" + new Date().toString() + "] File exists: " + file.exists);
+      logFile.close();
+    } catch(e) {}
+    
     if (!file.exists) return _respond({ ok:false, error:'File not found' });
 
     var project = app.project;
@@ -357,6 +274,16 @@ function PPRO_importIntoBin(jobId) {
     var outputPath = extPath + "/outputs/" + jobId + "_output.mp4";
     var outputFile = new File(outputPath);
     
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ppro_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] PPRO_importIntoBin called with jobId: " + jobId);
+      logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
+      logFile.writeln("[" + new Date().toString() + "] File exists: " + outputFile.exists);
+      logFile.close();
+    } catch(e) {}
+    
     if (outputFile.exists) {
       var project = app.project;
       if (project) {
@@ -399,6 +326,18 @@ function PPRO_importFileToBin(payloadJson) {
     var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
     var fsPath = String(p.path||'');
     var binName = String(p.binName||'');
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ppro_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] PPRO_importFileToBin called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
+      logFile.writeln("[" + new Date().toString() + "] Parsed path: " + fsPath);
+      logFile.writeln("[" + new Date().toString() + "] Bin name: " + binName);
+      logFile.close();
+    } catch(e) {}
+    
     var project = app.project;
     if (!project) return _respond({ ok:false, error:'No project' });
     var targetBin = project.getInsertionBin();
@@ -452,13 +391,13 @@ function PPRO_revealFile(payloadJson) {
     var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
     if (isWindows) {
       var cmd = 'cmd.exe /c explorer.exe /select,"' + String(f.fsName||'').replace(/"/g,'\"') + '"';
-      system.callSystem(cmd);
+      System.callSystem(cmd);
       return _respond({ ok:true });
     } else {
       // macOS: reveal in Finder
-      var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/"/g, "\\\"");
+      var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/"/g, "\\"");
       var cmd2 = "/usr/bin/osascript -e 'tell application " + '"Finder"' + " to reveal POSIX file \"" + esc + "\"' -e 'tell application " + '"Finder"' + " to activate'";
-      system.callSystem(cmd2);
+      System.callSystem(cmd2);
       return _respond({ ok:true });
     }
   } catch (e) {
@@ -691,7 +630,17 @@ function _pickAudioPresetPath(format){
 
 function PPRO_exportInOutVideo(payloadJson){
   try{
-    var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){}
+    var p={}; try{ p=JSON.parse(payloadJson||' cloak'); }catch(e){}
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ppro_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] PPRO_exportInOutVideo called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
+      logFile.close();
+    } catch(e) {}
+    
     var seq=app.project.activeSequence; if(!seq) return _respond({ ok:false, error:'No active sequence' });
     var codec=String(p.codec||'h264');
     var presetPath = _pickVideoPresetPath(codec);
@@ -713,6 +662,16 @@ function PPRO_exportInOutVideo(payloadJson){
 function PPRO_exportInOutAudio(payloadJson){
   try{
     var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){}
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ppro_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] PPRO_exportInOutAudio called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
+      logFile.close();
+    } catch(e) {}
+    
     var seq=app.project.activeSequence; if(!seq) return _respond({ ok:false, error:'No active sequence' });
     var format=String(p.format||'wav');
     var presetPath = _pickAudioPresetPath(format);
@@ -772,4 +731,41 @@ function _normPath(p){
 // Safely single-quote a string for bash -lc
 function _shq(s){
   try { return "'" + String(s||'').replace(/'/g, "'\\''") + "'"; } catch(e){ return "''"; }
+}
+
+function PPRO_stopBackend() {
+  try {
+    var isWindows = false; 
+    try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+
+    if (isWindows) {
+      // Windows: kill processes on port 3000
+      try {
+        System.callSystem('cmd.exe /c "for /f \"tokens=5\" %a in (\'netstat -aon ^| findstr :3000\') do taskkill /f /pid %a"');
+      } catch(e) {}
+    } else {
+      // macOS: kill processes on port 3000
+      try {
+        System.callSystem("/bin/bash -lc 'lsof -tiTCP:3000 | xargs -r kill -9 || true'");
+      } catch(e) {}
+    }
+    
+    return _respond({ ok: true, message: "Backend stopped" });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
+}
+
+// Diagnostic: confirm environment
+function PPRO_diag(){
+  try{
+    var info = {
+      ok:true,
+      systemType: String(typeof system),
+      hasStart: false, // Auto-start is now handled by ui/nle.js
+      fileName: String($.fileName||''),
+      os: String($.os||'')
+    };
+    return _respond(info);
+  }catch(e){ return _respond({ ok:false, error:String(e) }); }
 }

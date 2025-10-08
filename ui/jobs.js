@@ -287,7 +287,9 @@
                 logToFile('[AE Save] File path: ' + fp);
                 
                 // Try the exact same approach as working version
-                cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); AEFT_importFileToBin(\"${fp}\")`, function(r){
+                const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx';
+                const importFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_importFileToBin' : 'PPRO_importFileToBin';
+                cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${importFunc}(\"${fp}\")`, function(r){
                   logToFile('[AE Save] Raw response: ' + String(r));
                   let ok = false; let out = null;
                   try { 
@@ -390,7 +392,9 @@
               logToFile('[AE Insert] File path: ' + fp);
               
               // Try the exact same approach as working version
-              cs.evalScript(`$.evalFile(\"${extPath}/host/ae.jsx\"); AEFT_insertFileAtPlayhead(\"${fp}\")`, function(r){
+              const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx';
+              const insertFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_insertFileAtPlayhead' : 'PPRO_insertFileAtPlayhead';
+              cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${insertFunc}(\"${fp}\")`, function(r){
                 logToFile('[AE Insert] Raw response: ' + String(r));
                 let out = null;
                 try { 

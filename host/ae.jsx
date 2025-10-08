@@ -99,118 +99,7 @@ function _ffmpegPath(){
   return '';
 }
 
-function AEFT_startBackend() {
-  try {
-    var extPath = _extensionRoot();
-    if (!extPath) return _respond({ ok: false, error: 'No extension root' });
-
-    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
-    // Kill any existing server processes (macOS only)
-    if (!isWindows) {
-      try {
-        system.callSystem("/bin/bash -lc " + _shq("pkill -f \"/server/src/server.js\" || true; lsof -tiTCP:3000 | xargs -r kill -9 || true; sleep 0.5"));
-      } catch (e) {}
-    }
-
-    // Resolve node path per-OS
-    var nodePath = null;
-    if (isWindows) {
-      try {
-        var whereOut = system.callSystem('cmd.exe /c where node');
-        if (whereOut) {
-          var lines = String(whereOut).replace(/\r/g,'').split("\n");
-          for (var wi=0; wi<lines.length; wi++) {
-            var cand = lines[wi] && lines[wi].trim();
-            if (cand && new File(cand).exists) { nodePath = cand; break; }
-          }
-        }
-      } catch(_){}
-      if (!nodePath) { return _respond({ ok:false, error:'Node not found (Windows)' }); }
-    } else {
-      function exists(p) { try { return new File(p).exists; } catch (e) { return false; } }
-      
-      // Try multiple methods to find Node.js
-      var nodePath = null;
-      
-      // Method 1: Check common install locations
-      var candidates = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node", 
-        "/usr/bin/node",
-        "/usr/local/opt/node/bin/node",
-        "/Applications/Node.js.app/Contents/MacOS/node"
-      ];
-      for (var i=0;i<candidates.length;i++) { 
-        if (exists(candidates[i])) { 
-          nodePath = candidates[i]; 
-          break; 
-        } 
-      }
-      
-      // Method 2: Use which command
-      if (!nodePath) {
-        try {
-          var whichOut = system.callSystem("/bin/bash -lc 'command -v node 2>/dev/null'");
-          if (whichOut) {
-            var guess = whichOut.replace(/\n/g, '').replace(/\r/g, '').trim();
-            if (guess && exists(guess)) { 
-              nodePath = guess; 
-            }
-          }
-        } catch(e) {}
-      }
-      
-      // Method 3: Check PATH via shell
-      if (!nodePath) {
-        try {
-          var pathOut = system.callSystem("/bin/bash -lc 'echo $PATH'");
-          if (pathOut) {
-            var paths = pathOut.split(':');
-            for (var j=0;j<paths.length;j++) {
-              var testPath = paths[j].trim() + '/node';
-              if (exists(testPath)) {
-                nodePath = testPath;
-                break;
-              }
-            }
-          }
-        } catch(e) {}
-      }
-      
-      // Method 4: Try nvm paths
-      if (!nodePath) {
-        try {
-          var nvmOut = system.callSystem("/bin/bash -lc 'nvm which current 2>/dev/null'");
-          if (nvmOut) {
-            var nvmPath = nvmOut.replace(/\n/g, '').replace(/\r/g, '').trim();
-            if (exists(nvmPath)) {
-              nodePath = nvmPath;
-            }
-          }
-        } catch(e) {}
-      }
-      
-      if (!nodePath) {
-        return _respond({ ok: false, error: "Node.js not found. Please install Node.js from https://nodejs.org or via Homebrew: brew install node" });
-      }
-    }
-
-    // Launch server
-    if (isWindows) {
-      var srvDir = extPath + "\\server";
-      var cmd = 'cmd.exe /c start "sync-extension-server" /b cmd /c "cd /d ' + srvDir.replace(/"/g,'\\"') + ' && ' + nodePath.replace(/"/g,'\\"') + ' src\\server.js > NUL 2>&1"';
-      var outW = system.callSystem(cmd);
-      return _respond({ ok:true, message:'launched', details: outW });
-    } else {
-      var bash = "cd " + _shq(extPath + "/server") + " && nohup " + _shq(nodePath) + " " + _shq(extPath + "/server/src/server.js") + " > /tmp/sync_extension_server.log 2>&1 & echo OK";
-      var launchCmd = "/bin/bash -lc " + _shq(bash);
-      var out = system.callSystem(launchCmd);
-      return _respond({ ok: true, message: 'launched', details: out });
-    }
-  } catch (e) {
-    return _respond({ ok: false, error: String(e) });
-  }
-}
+// Auto-start is now handled by ui/nle.js
 
 function AEFT_getProjectDir() {
   try {
@@ -267,6 +156,16 @@ function AEFT_showFileDialog(payloadJson) {
 function AEFT_exportInOutVideo(payloadJson) {
   try {
     var p = {}; try { p = JSON.parse(payloadJson || '{}'); } catch (e) {}
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ae_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutVideo called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
+      logFile.close();
+    } catch(e) {}
+    
     var comp = (app && app.project) ? app.project.activeItem : null;
     if (!comp || !(comp instanceof CompItem)) {
       return _respond({ ok: false, error: 'No active composition' });
@@ -332,6 +231,16 @@ function AEFT_exportInOutVideo(payloadJson) {
 function AEFT_exportInOutAudio(payloadJson) {
   try {
     var p = {}; try { p = JSON.parse(payloadJson || '{}'); } catch (e) {}
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ae_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutAudio called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
+      logFile.close();
+    } catch(e) {}
+    
     var comp = (app && app.project) ? app.project.activeItem : null;
     if (!comp || !(comp instanceof CompItem)) {
       return _respond({ ok: false, error: 'No active composition' });
@@ -377,6 +286,121 @@ function AEFT_exportInOutAudio(payloadJson) {
   }
 }
 
+function AEFT_insertAtPlayhead(jobId) {
+  try {
+    var extPath = _extensionRoot();
+    var outputPath = extPath + "/outputs/" + jobId + "_output.mp4";
+    var outputFile = new File(outputPath);
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ae_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_insertAtPlayhead called with jobId: " + jobId);
+      logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
+      logFile.writeln("[" + new Date().toString() + "] File exists: " + outputFile.exists);
+      logFile.close();
+    } catch(e) {}
+    
+    if (!outputFile.exists) {
+      return _respond({ ok: false, error: "Output file not found: " + outputPath });
+    }
+    
+    // Use the same robust approach as the working version
+    _waitForFileReady(outputFile, 20000);
+    try {
+      app.beginUndoGroup('sync. import');
+      
+      // Find existing or import the file with ImportOptions
+      var imported = null;
+      try {
+        var items = app.project.items; 
+        var n = items ? items.length : 0;
+        for (var i=1;i<=n;i++){
+          var it = items[i];
+          try { 
+            if (it && it instanceof FootageItem && it.file && it.file.fsName === outputFile.fsName) { 
+              imported = it; 
+              break; 
+            } 
+          } catch(_){ }
+        }
+      } catch(_){ }
+      
+      if (!imported) {
+        var io = new ImportOptions(outputFile);
+        try { 
+          if (io && io.canImportAs && io.canImportAs(ImportAsType.FOOTAGE)) { 
+            io.importAs = ImportAsType.FOOTAGE; 
+          } 
+        } catch(_){ }
+        imported = (app.project && app.project.importFile) ? app.project.importFile(io) : null;
+      }
+      
+      if (!imported) { 
+        try { app.endUndoGroup(); } catch(_){} 
+        return _respond({ ok: false, error: 'Import failed' }); 
+      }
+      
+      // Ensure/locate "sync. outputs" folder in project bin and move item there
+      var outputsFolder = null;
+      try {
+        var items = app.project.items;
+        var n = items ? items.length : 0;
+        for (var i = 1; i <= n; i++) {
+          var it = items[i];
+          if (it && (it instanceof FolderItem) && String(it.name) === 'sync. outputs') { 
+            outputsFolder = it; 
+            break; 
+          }
+        }
+        if (!outputsFolder) { 
+          outputsFolder = app.project.items.addFolder('sync. outputs'); 
+        }
+      } catch(_){ }
+      
+      try { 
+        if (outputsFolder && imported && imported.parentFolder !== outputsFolder) { 
+          imported.parentFolder = outputsFolder; 
+        } 
+      } catch(_){ }
+      
+      // Insert as a new layer in the active comp at playhead
+      var comp = app.project.activeItem;
+      if (!comp || !(comp instanceof CompItem)) { 
+        try { app.endUndoGroup(); } catch(_){ } 
+        return _respond({ ok:false, error:'No active composition' }); 
+      }
+      
+      var before = 0; 
+      try { before = comp.layers ? comp.layers.length : 0; } catch(_){ }
+      var layer = null;
+      try { layer = comp.layers.add(imported); } catch(eAdd) { layer = null; }
+      
+      if (!layer) { 
+        try { app.endUndoGroup(); } catch(_){ } 
+        return _respond({ ok:false, error:'Layer add failed' }); 
+      }
+      
+      try { layer.startTime = comp.time; } catch(_){ }
+      var after = 0; 
+      try { after = comp.layers ? comp.layers.length : 0; } catch(_){ }
+      try { app.endUndoGroup(); } catch(_){ }
+      
+      if (after > before) { 
+        return _respond({ ok:true, mode:'insert', layerName: (layer && layer.name) || '' }); 
+      }
+      return _respond({ ok:false, error:'Insert verification failed' });
+      
+    } catch (e) {
+      try { app.endUndoGroup(); } catch (_) {}
+      return _respond({ ok: false, error: String(e) });
+    }
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
+}
+
 function AEFT_insertFileAtPlayhead(payloadOrJson) {
   try {
     var p = {};
@@ -390,6 +414,18 @@ function AEFT_insertFileAtPlayhead(payloadOrJson) {
     if (!path) { path = String(payloadOrJson || ''); }
     if (!path) return _respond({ ok: false, error: 'No path' });
     var f = new File(path);
+    
+    // Log to temp file for debugging
+    try {
+      var logFile = new File("/tmp/sync_ae_debug.log");
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_insertFileAtPlayhead called");
+      logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadOrJson));
+      logFile.writeln("[" + new Date().toString() + "] Parsed path: " + path);
+      logFile.writeln("[" + new Date().toString() + "] File exists: " + f.exists);
+      logFile.close();
+    } catch(e) {}
+    
     if (!f.exists) return _respond({ ok: false, error: 'File not found' });
     // Ensure file is fully written
     _waitForFileReady(f, 20000);
@@ -680,6 +716,29 @@ function AEFT_revealFile(payloadJson) {
     }
   } catch (e) {
     return _respond({ ok:false, error:String(e) });
+  }
+}
+
+function AEFT_stopBackend() {
+  try {
+    var isWindows = false; 
+    try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+
+    if (isWindows) {
+      // Windows: kill processes on port 3000
+      try {
+        system.callSystem('cmd.exe /c "for /f \"tokens=5\" %a in (\'netstat -aon ^| findstr :3000\') do taskkill /f /pid %a"');
+      } catch(e) {}
+    } else {
+      // macOS: kill processes on port 3000
+      try {
+        system.callSystem("/bin/bash -lc 'lsof -tiTCP:3000 | xargs -r kill -9 || true'");
+      } catch(e) {}
+    }
+    
+    return _respond({ ok: true, message: "Backend stopped" });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
   }
 }
 
