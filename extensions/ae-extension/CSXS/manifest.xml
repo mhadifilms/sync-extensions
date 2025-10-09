@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.sync.extension.ae" ExtensionBundleVersion="0.5.6" ExtensionBundleName="sync. extension - After Effects">
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.sync.extension.ae" ExtensionBundleVersion="0.5.7" ExtensionBundleName="sync. extension - After Effects">
   <ExtensionList>
-    <Extension Id="com.sync.extension.ae.panel" Version="0.5.7"/>
+    <Extension Id="com.sync.extension.ae.panel" Version="0.5.8"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
-      <Host Name="AEFT" Version="0.5.6"/>
+      <Host Name="AEFT" Version="0.5.7"/>
     </HostList>
     <LocaleList>
       <Locale Code="All"/>
     </LocaleList>
     <RequiredRuntimeList>
-      <RequiredRuntime Name="CSXS" Version="0.5.6"/>
+      <RequiredRuntime Name="CSXS" Version="0.5.7"/>
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="com.sync.extension.ae.panel" Version="0.5.7">
+    <Extension Id="com.sync.extension.ae.panel" Version="0.5.8">
       <HostList>
-        <Host Name="AEFT" Version="0.5.6"/>
+        <Host Name="AEFT" Version="0.5.7"/>
       </HostList>
       <DispatchInfo>
         <Resources>
