@@ -79,6 +79,22 @@ async function getLatestReleaseInfo(){
     const j = await r.json();
     const tag = j.tag_name || j.name || '';
     if (!tag) return null;
+    
+    // Look for platform-specific release asset instead of zipball
+    const isWindows = process.platform === 'win32';
+    const assetName = isWindows ? `sync-extensions-windows-${tag}.zip` : `sync-extensions-mac-${tag}.zip`;
+    const asset = j.assets?.find(a => a.name === assetName);
+    
+    if (asset) {
+      return { 
+        tag, 
+        version: normalizeVersion(tag), 
+        html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`, 
+        zip_url: asset.browser_download_url 
+      };
+    }
+    
+    // Fallback to zipball if no platform-specific asset found
     return { tag, version: normalizeVersion(tag), html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`, zip_url: j.zipball_url || `${base}/zipball/${tag}` };
   }
   async function tryTags(){
@@ -285,28 +301,85 @@ app.post('/update/apply', async (req,res)=>{
     const zipBuffer = await zipResp.buffer();
     fs.writeFileSync(zipPath, zipBuffer);
     
-    // Extract zip (GitHub zipball format: repo-name-tag/sync-extensions/)
+    // Extract zip (could be release asset with sync-extensions/ or zipball with repo-name-tag/)
     const isWindows = process.platform === 'win32';
     
     if (isWindows) {
       // Windows: Use PowerShell to extract zip
-      await exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tempDir}' -Force"`);
+      const extractCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tempDir}' -Force"`;
+      console.log('Windows extract command:', extractCmd);
+      try {
+        await exec(extractCmd);
+        console.log('PowerShell extraction completed');
+      } catch(e) {
+        console.log('PowerShell extraction failed:', e.message);
+        throw new Error('Failed to extract zip with PowerShell: ' + e.message);
+      }
     } else {
       // macOS/Linux: Use unzip
-      await exec(`cd "${tempDir}" && unzip -q "${zipPath}"`);
+      const extractCmd = `cd "${tempDir}" && unzip -q "${zipPath}"`;
+      console.log('Unix extract command:', extractCmd);
+      try {
+        await exec(extractCmd);
+        console.log('Unix extraction completed');
+      } catch(e) {
+        console.log('Unix extraction failed:', e.message);
+        throw new Error('Failed to extract zip with unzip: ' + e.message);
+      }
     }
     
-    // Find the extracted directory (GitHub zipball creates a folder like repo-name-tag/)
-    const extractedDirs = fs.readdirSync(tempDir).filter(name => {
+    // Find the extracted directory (release asset: sync-extensions/ or zipball: repo-name-tag/)
+    const allItems = fs.readdirSync(tempDir);
+    console.log('Extracted items:', allItems);
+    
+    const extractedDirs = allItems.filter(name => {
       const fullPath = path.join(tempDir, name);
-      return fs.statSync(fullPath).isDirectory() && name !== 'sync-extensions';
+      try {
+        return fs.statSync(fullPath).isDirectory();
+      } catch(e) {
+        console.log('Error checking item:', name, e.message);
+        return false;
+      }
     });
     
-    if (extractedDirs.length === 0) {
-      throw new Error('No extracted directory found in zipball');
-    }
+    console.log('Extracted directories:', extractedDirs);
     
-    const extractedDir = path.join(tempDir, extractedDirs[0]);
+    let extractedDir;
+    
+    // Prefer sync-extensions directory (from release asset) over GitHub zipball format
+    if (extractedDirs.includes('sync-extensions')) {
+      extractedDir = path.join(tempDir, 'sync-extensions');
+      console.log('Using sync-extensions directory from release asset');
+    } else if (extractedDirs.length > 0) {
+      // Fallback to GitHub zipball format (repo-name-tag/)
+      extractedDir = path.join(tempDir, extractedDirs[0]);
+      console.log('Using GitHub zipball directory:', extractedDirs[0]);
+    } else {
+      // Try to find any directory that might contain the source code
+      const possibleDirs = allItems.filter(name => {
+        const fullPath = path.join(tempDir, name);
+        try {
+          if (fs.statSync(fullPath).isDirectory()) {
+            // Check if this directory contains source files
+            const contents = fs.readdirSync(fullPath);
+            return contents.includes('package.json') || contents.includes('scripts') || contents.includes('extensions');
+          }
+        } catch(e) {
+          return false;
+        }
+        return false;
+      });
+      
+      console.log('Possible source directories:', possibleDirs);
+      
+      if (possibleDirs.length === 0) {
+        throw new Error('No extracted directory found in zipball. Contents: ' + allItems.join(', '));
+      }
+      
+      extractedDir = path.join(tempDir, possibleDirs[0]);
+      console.log('Using fallback directory:', possibleDirs[0]);
+    }
+    console.log('Using extracted directory:', extractedDir);
     
     // Look for install script in the extracted directory
     const updateScript = path.join(extractedDir, 'scripts', isWindows ? 'install.ps1' : 'install.sh');
@@ -337,15 +410,36 @@ app.post('/update/apply', async (req,res)=>{
         installArgs = '--both';
       }
       
-      if (isWindows) {
-        // Windows: Use PowerShell
-        await exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${updateScript}" ${installArgs}`);
-      } else {
-        // macOS/Linux: Use shell script
-        await exec(`chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`);
+      console.log('Running install script for update...');
+      console.log('Install args:', installArgs);
+      console.log('Update script path:', updateScript);
+      console.log('Current working directory:', process.cwd());
+      console.log('Extracted directory:', extractedDir);
+      
+      try {
+        if (isWindows) {
+          // Windows: Use PowerShell
+          const installCmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${updateScript}" ${installArgs}`;
+          console.log('Windows install command:', installCmd);
+          await exec(installCmd);
+        } else {
+          // macOS/Linux: Use shell script
+          const installCmd = `cd "${extractedDir}" && chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`;
+          console.log('Unix install command:', installCmd);
+          await exec(installCmd);
+        }
+        
+        console.log('Install script completed successfully');
+      } catch(installError) {
+        console.log('Install script failed:', installError.message);
+        console.log('Falling back to manual file copying...');
+        
+        // Fall back to manual installation
+        throw installError; // This will trigger the fallback logic below
       }
     } else {
       // Fallback: manually install the extension files
+      console.log('Using manual file copying fallback...');
       // Copy the extension files to the correct location
       let aeDestDir, pproDestDir;
       

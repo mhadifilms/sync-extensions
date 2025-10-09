@@ -1,14 +1,18 @@
 param(
-  [ValidateSet('user','system')][string]$Scope = '',
   [ValidateSet('ae','premiere','both')][string]$App = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
+# Execution policy bypass instructions
+Write-Host "sync. Extension Installer" -ForegroundColor Cyan
+Write-Host "=========================" -ForegroundColor Cyan
+Write-Host ""
+
 $repoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 
-# GNU-style flag normalization to support --app/--scope usage
-# Example: .\install.ps1 --app premiere --scope user
+# GNU-style flag normalization to support --app usage
+# Example: .\install.ps1 --app premiere
 try {
   for ($i = 0; $i -lt $args.Count; $i++) {
     switch -Regex ($args[$i]) {
@@ -18,13 +22,6 @@ try {
           if ($AppCandidate -in @('ae','aftereffects','after-effects')) { $App = 'ae' }
           elseif ($AppCandidate -in @('premiere','ppro','premierepro')) { $App = 'premiere' }
           elseif ($AppCandidate -in @('both','all')) { $App = 'both' }
-        }
-      }
-      '^--scope$' {
-        if ($i + 1 -lt $args.Count -and -not [string]::IsNullOrWhiteSpace($args[$i+1])) {
-          $ScopeCandidate = ($args[$i+1]).ToLowerInvariant()
-          if ($ScopeCandidate -in @('user','currentuser')) { $Scope = 'user' }
-          elseif ($ScopeCandidate -in @('system','allusers')) { $Scope = 'system' }
         }
       }
     }
@@ -124,22 +121,11 @@ if (-not (Test-NodeJS)) {
   Install-NodeJS
 }
 
-if (-not $Scope) {
-  Write-Host "Install scope?" -ForegroundColor Cyan
-  Write-Host "  1) User (no admin) [default]"
-  Write-Host "  2) System (all users, admin)"
-  $choice = Read-Host 'Choose [1/2]'
-  if ($choice -eq '2') { $Scope = 'system' } else { $Scope = 'user' }
-}
+# Always use user scope (no admin required)
+$Scope = 'user'
 
-if ($Scope -eq 'system') {
-  # System-wide CEP extensions directory (correct path on Windows 64-bit)
-  $commonFilesX86 = ${env:ProgramFiles(x86)}
-  if (-not $commonFilesX86) { $commonFilesX86 = $env:ProgramFiles }
-  $destBase = Join-Path $commonFilesX86 'Common Files\Adobe\CEP\extensions'
-} else {
-  $destBase = Join-Path $env:APPDATA 'Adobe\CEP\extensions'
-}
+# User-specific CEP extensions directory (no admin required)
+$destBase = Join-Path $env:APPDATA 'Adobe\CEP\extensions'
 
 if (-not $App) {
   Write-Host "Install which app?" -ForegroundColor Cyan
@@ -238,15 +224,15 @@ function Install-AE {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
-            # Try standard install first
-            & npm install --omit=dev
+            # Try standard install first (silent)
+            & npm install --omit=dev --silent 2>$null
             if ($LASTEXITCODE -eq 0) {
               $npmInstalled = $true
               break
             }
             # If that fails, try with flags for Windows compatibility
             Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-            & npm install --no-optional --ignore-scripts
+            & npm install --no-optional --ignore-scripts --silent 2>$null
             if ($LASTEXITCODE -eq 0) {
               # Detect Windows architecture and set appropriate flags
               $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
@@ -257,15 +243,15 @@ function Install-AE {
             }
           } else {
             if (Test-Path $npmPath) {
-              # Try standard install first
-              & $npmPath install --omit=dev
+              # Try standard install first (silent)
+              & $npmPath install --omit=dev --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 $npmInstalled = $true
                 break
               }
               # If that fails, try with flags for Windows compatibility
               Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-              & $npmPath install --no-optional --ignore-scripts
+              & $npmPath install --no-optional --ignore-scripts --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
@@ -358,15 +344,15 @@ function Install-Premiere {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
-            # Try standard install first
-            & npm install --omit=dev
+            # Try standard install first (silent)
+            & npm install --omit=dev --silent 2>$null
             if ($LASTEXITCODE -eq 0) {
               $npmInstalled = $true
               break
             }
             # If that fails, try with flags for Windows compatibility
             Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-            & npm install --no-optional --ignore-scripts
+            & npm install --no-optional --ignore-scripts --silent 2>$null
             if ($LASTEXITCODE -eq 0) {
               # Detect Windows architecture and set appropriate flags
               $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
@@ -377,15 +363,15 @@ function Install-Premiere {
             }
           } else {
             if (Test-Path $npmPath) {
-              # Try standard install first
-              & $npmPath install --omit=dev
+              # Try standard install first (silent)
+              & $npmPath install --omit=dev --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 $npmInstalled = $true
                 break
               }
               # If that fails, try with flags for Windows compatibility
               Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-              & $npmPath install --no-optional --ignore-scripts
+              & $npmPath install --no-optional --ignore-scripts --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
@@ -508,13 +494,13 @@ if ($installSuccess) {
   Write-Host "• Make sure PlayerDebugMode is enabled (done automatically)"
   Write-Host "• Restart Adobe application"
   Write-Host "• Check that Node.js is installed and working"
-  Write-Host "• Try system-wide install: re-run with -Scope system" -ForegroundColor Yellow
+  Write-Host "• Check installation location: %APPDATA%\\Adobe\\CEP\\extensions\\" -ForegroundColor Yellow
 } else {
   Write-Host "❌ Installation failed!" -ForegroundColor Red
   Write-Host "Please run this script as Administrator and try again" -ForegroundColor Yellow
-  Write-Host "Or try system-wide install: powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Scope system -App premiere" -ForegroundColor Yellow
+  Write-Host "Check the error messages above for specific issues" -ForegroundColor Yellow
 }
 
 Write-Host ""
 Write-Host "Tip: Re-run with parameters:"
-Write-Host "  powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Scope user|system -App ae|premiere|both"
+Write-Host "  powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -App ae|premiere|both"

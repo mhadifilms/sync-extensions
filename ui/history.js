@@ -1,34 +1,59 @@
       async function updateHistory() {
         const historyList = document.getElementById('historyList');
-        // If backend not running, show hint and try a gentle start
+        if (!historyList) return;
+        
+        // Check API key first
+        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+        if (!apiKey) {
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no api key found</div>';
+          return;
+        }
+        
+        // Check server health
         try {
           let healthy = false;
-          try { const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); healthy = !!(r && r.ok); } catch(_){ healthy = false; }
-          if (!healthy) {
-            if (historyList) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">backend not started</div>';
-            try { if (window.nle && typeof window.nle.startBackend === 'function') { await window.nle.startBackend(); } } catch(_){ }
+          try { 
+            const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); 
+            healthy = !!(r && r.ok); 
+          } catch(_){ 
+            healthy = false; 
           }
-        } catch(_){ }
+          
+          if (!healthy) {
+            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+            try { if (window.nle && typeof window.nle.startBackend === 'function') { await window.nle.startBackend(); } } catch(_){ }
+            return;
+          }
+        } catch(_){ 
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+          return;
+        }
+        
+        // Show loading state while fetching
+        historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
+        
         // Always show last known jobs (persisted)
         const sorted = jobs.slice().sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
-        historyList.innerHTML = (sorted.length ? sorted : []).map(job => {
-          const started = job.createdAt ? new Date(job.createdAt).toLocaleString() : '';
-          const vName = niceName(job.videoPath, 'video');
-          const aName = niceName(job.audioPath, 'audio');
-          const base = `
-            <div class="history-item">
-              <div class="history-status ${job.status}">${job.status}</div>
-              <div style=\"font-size:12px;color:#888;\">${(job.syncJobId || job.id) ? '<span class=\\"jid\\" data-id=\\"'+(job.syncJobId || job.id)+'\\" tabindex=\\"0\\" role=\\"button\\" title=\\"click to copy\\" style=\\"cursor:pointer;\\">job id '+(job.syncJobId || job.id)+'</span>' : ''} • ${job.model || ''} • ${started}</div>
-              <div>${vName}${aName ? ' + '+aName : ''}</div>
-              ${job.error ? `<div style=\"font-size:12px;color:#f87171;margin-top:6px;\">${job.error}</div>` : ''}
-          `;
-          const done = job.status === 'completed' ? `
-              <div class=\"history-actions\">\n                <button class=\"history-button\" id=\"save-${job.id}\" onclick=\"saveJob('${job.id}')\">save</button>\n                <button class=\"history-button\" id=\"insert-${job.id}\" onclick=\"insertJob('${job.id}')\">insert</button>\n        </div>
-            </div>` : `
-              <div class=\"history-actions\">\n                \n        </div>
-            </div>`;
-          return base + done;
-        }).join('') || '<div style="color: #666; text-align: center; padding: 20px;">loading generations...</div>';
+        if (sorted.length > 0) {
+          historyList.innerHTML = sorted.map(job => {
+            const started = job.createdAt ? new Date(job.createdAt).toLocaleString() : '';
+            const vName = niceName(job.videoPath, 'video');
+            const aName = niceName(job.audioPath, 'audio');
+            const base = `
+              <div class="history-item">
+                <div class="history-status ${job.status}">${job.status}</div>
+                <div style=\"font-size:12px;color:#888;\">${(job.syncJobId || job.id) ? '<span class=\\"jid\\" data-id=\\"'+(job.syncJobId || job.id)+'\\" tabindex=\\"0\\" role=\\"button\\" title=\\"click to copy\\" style=\\"cursor:pointer;\\">job id '+(job.syncJobId || job.id)+'</span>' : ''} • ${job.model || ''} • ${started}</div>
+                <div>${vName}${aName ? ' + '+aName : ''}</div>
+                ${job.error ? `<div style=\"font-size:12px;color:#f87171;margin-top:6px;\">${job.error}</div>` : ''}
+            `;
+            const done = job.status === 'completed' ? `
+                <div class=\"history-actions\">\n                  <button class=\"history-button\" id=\"save-${job.id}\" onclick=\"saveJob('${job.id}')\">save</button>\n                  <button class=\"history-button\" id=\"insert-${job.id}\" onclick=\"insertJob('${job.id}')\">insert</button>\n          </div>
+              </div>` : `
+                <div class=\"history-actions\">\n                  \n          </div>
+              </div>`;
+            return base + done;
+          }).join('');
+        }
       }
 
       // Delegate jid click/Enter-to-copy

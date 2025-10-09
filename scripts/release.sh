@@ -43,10 +43,30 @@ for manifest in "$REPO_DIR/extensions"/*/CSXS/manifest.xml; do
     PATCH_VERSION=$(echo "$VERSION" | cut -d. -f3)
     NEW_PATCH=$((PATCH_VERSION + 1))
     PANEL_VERSION=$(echo "$VERSION" | sed "s/\.[0-9]*$/.$NEW_PATCH/")
-    # Only update Version in Extension Id lines, preserve Host Version lines
+    # Update Version in Extension Id lines only, preserve Host Version lines
+    sed -i.bak "s/\(<Extension Id=\"[^\"]*\" Version=\"\)[^\"]*\(.*\)/\1$PANEL_VERSION\2/g" "$manifest"
+    # Update Host Version for AE (keep Premiere host version as [24.0,99.9])
+    if [[ "$manifest" == *"ae-extension"* ]]; then
+      sed -i.bak "s/\(<Host Name=\"AEFT\" Version=\"\)[^\"]*\(.*\)/\1$VERSION\2/g" "$manifest"
+    fi
+    # Update CSXS RequiredRuntime Version for AE (keep Premiere as 12.0)
+    if [[ "$manifest" == *"ae-extension"* ]]; then
+      sed -i.bak "s/\(<RequiredRuntime Name=\"CSXS\" Version=\"\)[^\"]*\(.*\)/\1$VERSION\2/g" "$manifest"
+    fi
     rm -f "$manifest.bak"
   fi
 done
+
+# Update root manifest Extension Id versions
+if [ -f "$ROOT_MANIFEST" ]; then
+  echo "  Updating root manifest Extension Id versions"
+  PATCH_VERSION=$(echo "$VERSION" | cut -d. -f3)
+  NEW_PATCH=$((PATCH_VERSION + 1))
+  PANEL_VERSION=$(echo "$VERSION" | sed "s/\.[0-9]*$/.$NEW_PATCH/")
+  # Update Version in Extension Id lines only, preserve Host Version lines
+  sed -i.bak "s/\(<Extension Id=\"[^\"]*\" Version=\"\)[^\"]*\(.*\)/\1$PANEL_VERSION\2/g" "$ROOT_MANIFEST"
+  rm -f "$ROOT_MANIFEST.bak"
+fi
 
 # Build distributable packages (zips) for Mac and Windows
 echo "Packaging distributables..."
@@ -77,43 +97,56 @@ bundle_os(){
     --exclude ".vscode/" \
     --exclude "README.md" \
     --exclude ".gitignore" \
+    --exclude "scripts/release.sh" \
     "$REPO_DIR/" "$dest/"
 
-  # Write README for bundle
-  cat > "$tmp/README.txt" <<EOT
-sync. extensions v$VERSION ($os_label)
+  # Platform-specific script filtering
+  if [ "$os" = "windows" ]; then
+    # Remove .sh scripts for Windows package
+    rm -f "$dest/scripts/install.sh"
+    rm -f "$dest/scripts/remove.sh"
+  else
+    # Remove .ps1 scripts for macOS package
+    rm -f "$dest/scripts/install.ps1"
+    rm -f "$dest/scripts/remove.ps1"
+  fi
+
+  # Write platform-specific README
+  if [ "$os" = "windows" ]; then
+    cat > "$tmp/README.txt" <<EOT
+sync. extensions v$VERSION (Windows)
 =====================================
 
 QUICK INSTALL (Recommended):
 1. Extract this ZIP file
-2. Run the install script:
-   macOS: ./scripts/install.sh
-   Windows: Right-click PowerShell → "Run as Administrator" → Run:
-           .\\scripts\\install.ps1
-3. Choose which extensions to install (After Effects, Premiere Pro, or both)
-4. Restart Adobe applications
-5. Open Window → Extensions → "sync. for [App]"
+2. Open the extracted "sync-extensions" folder
+3. Right-click PowerShell → "Run as Administrator" → Run:
+   cd scripts
+   powershell -ExecutionPolicy Bypass -File install.ps1
+4. Choose which extensions to install (After Effects, Premiere Pro, or both)
+5. Restart Adobe applications
+6. Open Window → Extensions → "sync. for [App]"
 
 MANUAL INSTALL:
 1. Extract this ZIP file
-2. Copy the extension folders to:
-   macOS: ~/Library/Application Support/Adobe/CEP/extensions/
-   Windows: %APPDATA%\\Adobe\\CEP\\extensions\\ (current user)
-          or %ProgramData%\\Adobe\\CEP\\extensions\\ (all users)
-3. Enable PlayerDebugMode:
-   macOS: defaults write com.adobe.CSXS.12 PlayerDebugMode 1
-   Windows: Set registry key HKEY_CURRENT_USER\\Software\\Adobe\\CSXS.12\\PlayerDebugMode = 1
-4. Restart Adobe applications
-5. Open Window → Extensions → "sync. for [App]"
+2. Open the extracted "sync-extensions" folder
+3. Copy the extension folders to:
+   %APPDATA%\\Adobe\\CEP\\extensions\\ (current user only)
+4. Enable PlayerDebugMode:
+   Set registry key HKEY_CURRENT_USER\\Software\\Adobe\\CSXS.12\\PlayerDebugMode = 1
+5. Restart Adobe applications
+6. Open Window → Extensions → "sync. for [App]"
 
 TROUBLESHOOTING:
 - If extension doesn't appear: Make sure PlayerDebugMode is enabled and restart Adobe app
 - If server doesn't start: Install Node.js from https://nodejs.org
-- macOS: Install Homebrew first, then run: brew install node
-- Windows: Script will auto-install Node.js via winget, or download from https://nodejs.org
-- Windows PowerShell error: Run PowerShell as Administrator:
-  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-- Windows extension not showing: Check installation location:
+- Script will auto-install Node.js via winget, or download from https://nodejs.org
+- PowerShell execution policy error: Use the bypass command above, or:
+  1. Run PowerShell as Administrator
+  2. Run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+  3. Run: cd scripts && powershell -ExecutionPolicy Bypass -File install.ps1
+- Script path error: Make sure you're in the extracted "sync-extensions" folder and run "cd scripts" first
+- Extension not showing: Check installation location:
   %APPDATA%\Adobe\CEP\extensions\com.sync.extension.ppro.panel
   Enable PlayerDebugMode: reg add "HKEY_CURRENT_USER\Software\Adobe\CSXS.12" /v PlayerDebugMode /t REG_DWORD /d 1 /f
 
@@ -125,6 +158,42 @@ REQUIREMENTS:
 
 For more help, visit: https://github.com/mhadifilms/sync-extensions
 EOT
+  else
+    cat > "$tmp/README.txt" <<EOT
+sync. extensions v$VERSION (macOS)
+=====================================
+
+QUICK INSTALL (Recommended):
+1. Extract this ZIP file
+2. Run the install script:
+   ./scripts/install.sh
+3. Choose which extensions to install (After Effects, Premiere Pro, or both)
+4. Restart Adobe applications
+5. Open Window → Extensions → "sync. for [App]"
+
+MANUAL INSTALL:
+1. Extract this ZIP file
+2. Copy the extension folders to:
+   ~/Library/Application Support/Adobe/CEP/extensions/
+3. Enable PlayerDebugMode:
+   defaults write com.adobe.CSXS.12 PlayerDebugMode 1
+4. Restart Adobe applications
+5. Open Window → Extensions → "sync. for [App]"
+
+TROUBLESHOOTING:
+- If extension doesn't appear: Make sure PlayerDebugMode is enabled and restart Adobe app
+- If server doesn't start: Install Node.js from https://nodejs.org
+- Install Homebrew first, then run: brew install node
+
+REQUIREMENTS:
+- Adobe After Effects 2024 or later (optional)
+- Adobe Premiere Pro 2024 or later (optional)
+- Node.js (for local server)
+- Internet connection (for sync functionality)
+
+For more help, visit: https://github.com/mhadifilms/sync-extensions
+EOT
+  fi
 
   # Create zip
   local out="$PKG_DIR/sync-extensions-$os-v$VERSION.zip"

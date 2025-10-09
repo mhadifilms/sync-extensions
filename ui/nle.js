@@ -10,6 +10,20 @@
           process.env.TEMP + '\\sync_nle_autostart.log' : 
           '/tmp/sync_nle_autostart.log';
         
+        // Debug: Log the actual log file path
+        try {
+          if (typeof require !== 'undefined') {
+            var fs = require('fs');
+            fs.writeFileSync(logFilePath, '=== AUTO-START DEBUG LOG ===\n');
+            fs.appendFileSync(logFilePath, 'Log file: ' + logFilePath + '\n');
+            fs.appendFileSync(logFilePath, 'Platform: ' + (process.platform || 'unknown') + '\n');
+            fs.appendFileSync(logFilePath, 'Node.js available: ' + (typeof require !== 'undefined') + '\n');
+            fs.appendFileSync(logFilePath, 'CSInterface available: ' + (typeof window.CSInterface !== 'undefined') + '\n');
+          }
+        } catch(e) {
+          console.log('Initial log setup error:', e.message);
+        }
+        
         function log(message) {
           try {
             if (typeof require !== 'undefined') {
@@ -22,13 +36,7 @@
           }
         }
         
-        // Clear log on startup
-        try {
-          if (typeof require !== 'undefined') {
-            var fs = require('fs');
-            fs.writeFileSync(logFilePath, '');
-          }
-        } catch(e) {}
+        // Log is already initialized above with debug info
         
         log('nle.js loaded');
         
@@ -90,6 +98,7 @@
                   try {
                     var spawn = require('child_process').spawn;
                     var extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION);
+                    updateDebugStatus('Raw extension path: ' + extPath);
                     
                     // Convert file:// URL to filesystem path
                     if (extPath.startsWith('file://')) {
@@ -98,8 +107,40 @@
                     
                     // Decode URL-encoded characters
                     extPath = decodeURIComponent(extPath);
+                    updateDebugStatus('Decoded extension path: ' + extPath);
                     
-                    var serverPath = extPath + '/server/src/server.js';
+                    var serverPath = extPath + (isWindows ? '\\server\\src\\server.js' : '/server/src/server.js');
+                    updateDebugStatus('Server path: ' + serverPath);
+                    
+                    // Check if server file exists
+                    try {
+                      var fs = require('fs');
+                      if (fs.existsSync(serverPath)) {
+                        updateDebugStatus('Server file exists: true');
+                        
+                        // Check if node_modules exists
+                        var nodeModulesPath = extPath + (isWindows ? '\\server\\node_modules' : '/server/node_modules');
+                        if (fs.existsSync(nodeModulesPath)) {
+                          updateDebugStatus('Node modules directory exists: true');
+                          
+                          // Check for critical dependencies
+                          var expressPath = nodeModulesPath + (isWindows ? '\\express' : '/express');
+                          if (fs.existsSync(expressPath)) {
+                            updateDebugStatus('Express dependency found: true');
+                          } else {
+                            updateDebugStatus('Express dependency found: false - server will fail to start');
+                            updateDebugStatus('Run: cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && npm install');
+                          }
+                        } else {
+                          updateDebugStatus('Node modules directory exists: false - server will fail to start');
+                          updateDebugStatus('Run: cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && npm install');
+                        }
+                      } else {
+                        updateDebugStatus('Server file exists: false - this will cause startup failure');
+                      }
+                    } catch(e) {
+                      updateDebugStatus('Error checking server file: ' + e.message);
+                    }
                     
                     // Find actual Node.js executable - try multiple paths
                     var nodePath = null;
@@ -119,6 +160,7 @@
                         'C:\\nodejs\\node.exe',
                         'node.exe'  // Try PATH
                       ];
+                      updateDebugStatus('Windows detected, trying Node.js paths: ' + candidates.join(', '));
                     } else {
                       candidates = [
                         '/opt/homebrew/bin/node',
@@ -140,6 +182,21 @@
                         if (candidate === 'node' || candidate === 'node.exe') {
                           try {
                             var execSync = require('child_process').execSync;
+                            if (isWindows) {
+                              // On Windows, try 'where node' first
+                              try {
+                                var whereResult = execSync('where node', { encoding: 'utf8', timeout: 2000 });
+                                var nodeExePath = whereResult.trim().split('\n')[0];
+                                if (nodeExePath && nodeExePath.length > 0) {
+                                  updateDebugStatus('Found Node.js via where: ' + nodeExePath);
+                                  nodePath = nodeExePath;
+                                  break;
+                                }
+                              } catch(whereError) {
+                                updateDebugStatus('where command failed: ' + whereError.message);
+                              }
+                            }
+                            // Fallback to direct version check
                             execSync(candidate + ' --version', { encoding: 'utf8', timeout: 2000 });
                             nodePath = candidate;
                             updateDebugStatus('Found working Node.js via PATH: ' + candidate);
@@ -172,13 +229,34 @@
                       return;
                     }
                     
+                    // Check if dependencies need to be installed
+                    var nodeModulesPath = extPath + (isWindows ? '\\server\\node_modules' : '/server/node_modules');
+                    var expressPath = nodeModulesPath + (isWindows ? '\\express' : '/express');
+                    
+                    if (!fs.existsSync(nodeModulesPath) || !fs.existsSync(expressPath)) {
+                      updateDebugStatus('Dependencies missing, attempting to install...');
+                      try {
+                        var execSync = require('child_process').execSync;
+                        var installCmd = 'cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && "' + nodePath + '" install --omit=dev';
+                        updateDebugStatus('Running: ' + installCmd);
+                        execSync(installCmd, { encoding: 'utf8', timeout: 30000 });
+                        updateDebugStatus('Dependencies installed successfully');
+                      } catch(installError) {
+                        updateDebugStatus('Failed to install dependencies: ' + installError.message);
+                        updateDebugStatus('Manual fix: cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && npm install');
+                        return;
+                      }
+                    }
+                    
                     updateDebugStatus('Spawning: ' + nodePath + ' ' + serverPath);
                     
                     // Use exec with full command - Windows compatible
                     var exec = require('child_process').exec;
                     var cmd;
                     if (isWindows) {
-                      cmd = 'cd /d "' + extPath + '\\server" && "' + nodePath + '" "' + serverPath + '"';
+                      // Fix Windows path separators and quoting
+                      var serverDir = extPath.replace(/\//g, '\\') + '\\server';
+                      cmd = 'cd /d "' + serverDir + '" && "' + nodePath + '" "' + serverPath + '"';
                     } else {
                       cmd = 'cd "' + extPath + '/server" && "' + nodePath + '" "' + serverPath + '"';
                     }

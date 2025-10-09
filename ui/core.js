@@ -117,7 +117,7 @@
       // Expose a quick diagnostic runner used by UI to surface host state
       async function runInOutDiagnostics(){
         try{
-          const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+          const isAE = (window.HOST_CONFIG && window.HOST_CONFIG.isAE);
           if (isAE) {
             try {
               const aeRes = await evalExtendScript('AEFT_diagInOut', {});
@@ -187,7 +187,7 @@
           // Ensure only current host script is loaded before invoking
           try {
             const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-            const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+            const isAE = (window.HOST_CONFIG && window.HOST_CONFIG.isAE);
             const hostFile = isAE ? 'ae' : 'ppro';
             await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}.jsx\")`, ()=>resolve()));
           } catch(_){ }
@@ -195,7 +195,7 @@
           try {
             const payload = JSON.stringify({ kind: k }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
             return await new Promise(resolve => {
-              const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT');
+              const isAE = (window.HOST_CONFIG && window.HOST_CONFIG.isAE);
               const fn = isAE ? 'AEFT_showFileDialog' : 'PPRO_showFileDialog';
               cs.evalScript(`${fn}(\"${payload}\")`, function(r){
                 try { var j = JSON.parse(r||'{}'); if (j && j.ok && j.path) { resolve(j.path); return; } } catch(_){ }

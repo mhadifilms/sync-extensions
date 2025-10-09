@@ -47,7 +47,7 @@
               const r = await window.nle.getProjectDir();
               if (r && r.ok && r.outputDir) outputDir = r.outputDir;
               // AE fallback: if no project folder, prefer ~/Documents mode
-              if ((!outputDir || !r.ok) && window.nle.getHostId && window.nle.getHostId() === 'AEFT') {
+              if ((!outputDir || !r.ok) && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
                 try { const r2 = await window.nle.getProjectDir(); if (r2 && r2.ok && r2.outputDir) outputDir = r2.outputDir; } catch(_){ }
               }
             } else {
@@ -228,7 +228,7 @@
           } catch(_){ }
           // If project selected but host didn’t resolve, fallback to Documents in AE
           try {
-            if (!targetDir && window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT') {
+            if (!targetDir && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
               location = 'documents';
             }
           } catch(_){ }
@@ -271,7 +271,14 @@
             // File logging for debugging
             function logToFile(msg) {
               try {
-                var logFile = new File('/tmp/sync_save_debug.log');
+                var logPath = '/tmp/sync_save_debug.log';
+                try {
+                  // Windows compatibility
+                  if (navigator.platform && navigator.platform.indexOf('Win') !== -1) {
+                    logPath = 'C:\\temp\\sync_save_debug.log';
+                  }
+                } catch(_) {}
+                var logFile = new File(logPath);
                 logFile.open('a');
                 logFile.write('[' + new Date().toISOString() + '] ' + msg + '\n');
                 logFile.close();
@@ -286,14 +293,32 @@
                 logToFile('[AE Save] Extension path: ' + extPath);
                 logToFile('[AE Save] File path: ' + fp);
                 
-                // Try the exact same approach as working version
-                const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx';
-                const importFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_importFileToBin' : 'PPRO_importFileToBin';
+                // Use HOST_CONFIG for reliable host detection
+                const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
+                const importFunc = isAE ? 'AEFT_importFileToBin' : 'PPRO_importFileToBin';
                 cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${importFunc}(\"${fp}\")`, function(r){
                   logToFile('[AE Save] Raw response: ' + String(r));
                   let ok = false; let out = null;
                   try { 
-                    out = (typeof r === 'string') ? JSON.parse(r||'{}') : r; 
+                    // Handle different response types
+                    if (typeof r === 'string') {
+                      // Try to parse as JSON first
+                      try {
+                        out = JSON.parse(r||'{}');
+                      } catch(parseErr) {
+                        // If not JSON, check if it's "[object Object]" which means success
+                        if (r === '[object Object]' || r.indexOf('ok') !== -1) {
+                          out = { ok: true };
+                        } else {
+                          out = { ok: false, error: r };
+                        }
+                      }
+                    } else if (typeof r === 'object' && r !== null) {
+                      out = r;
+                    } else {
+                      out = { ok: false, error: String(r) };
+                    }
+                    
                     ok = !!(out && out.ok); 
                     logToFile('[AE Save] Parsed result: ' + JSON.stringify(out) + ' ok: ' + ok);
                   } catch(e){ 
@@ -346,7 +371,7 @@
           } catch(_){ }
           // If project selected but host didn’t resolve, fallback to Documents in AE
           try {
-            if (!targetDir && window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT') {
+            if (!targetDir && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
               location = 'documents';
             }
           } catch(_){ }
@@ -376,7 +401,14 @@
           // File logging for debugging
           function logToFile(msg) {
             try {
-              var logFile = new File('/tmp/sync_insert_debug.log');
+              var logPath = '/tmp/sync_insert_debug.log';
+              try {
+                // Windows compatibility
+                if (navigator.platform && navigator.platform.indexOf('Win') !== -1) {
+                  logPath = 'C:\\temp\\sync_insert_debug.log';
+                }
+              } catch(_) {}
+              var logFile = new File(logPath);
               logFile.open('a');
               logFile.write('[' + new Date().toISOString() + '] ' + msg + '\n');
               logFile.close();
@@ -391,14 +423,32 @@
               logToFile('[AE Insert] Extension path: ' + extPath);
               logToFile('[AE Insert] File path: ' + fp);
               
-              // Try the exact same approach as working version
-              const hostFile = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'ae.jsx' : 'ppro.jsx';
-              const insertFunc = window.nle && window.nle.getHostId && window.nle.getHostId() === 'AEFT' ? 'AEFT_insertFileAtPlayhead' : 'PPRO_insertFileAtPlayhead';
+              // Use HOST_CONFIG for reliable host detection
+              const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
+              const insertFunc = isAE ? 'AEFT_insertFileAtPlayhead' : 'PPRO_insertFileAtPlayhead';
               cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${insertFunc}(\"${fp}\")`, function(r){
                 logToFile('[AE Insert] Raw response: ' + String(r));
                 let out = null;
                 try { 
-                  out = (typeof r === 'string') ? JSON.parse(r||'{}') : r; 
+                  // Handle different response types
+                  if (typeof r === 'string') {
+                    // Try to parse as JSON first
+                    try {
+                      out = JSON.parse(r||'{}');
+                    } catch(parseErr) {
+                      // If not JSON, check if it's "[object Object]" which means success
+                      if (r === '[object Object]' || r.indexOf('ok') !== -1) {
+                        out = { ok: true };
+                      } else {
+                        out = { ok: false, error: r };
+                      }
+                    }
+                  } else if (typeof r === 'object' && r !== null) {
+                    out = r;
+                  } else {
+                    out = { ok: false, error: String(r) };
+                  }
+                  
                   logToFile('[AE Insert] Parsed result: ' + JSON.stringify(out));
                 } catch(e){ 
                   logToFile('[AE Insert] Parse error: ' + String(e) + ' raw: ' + String(r)); 
@@ -448,17 +498,35 @@
 
       async function loadJobsFromServer() {
         const historyList = document.getElementById('historyList');
-        if (historyList && !historyList.innerHTML.trim()) {
-          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">loading generations...</div>';
-        }
+        if (!historyList) return;
+        
         try {
           const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
           if (!apiKey) {
-            if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">add your API key in settings to load history</div>';
+            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no api key found</div>';
             return;
           }
+          
+          // Check server health first
+          let healthy = false;
+          try { 
+            const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); 
+            healthy = !!(r && r.ok); 
+          } catch(_){ 
+            healthy = false; 
+          }
+          
+          if (!healthy) {
+            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+            return;
+          }
+          
+          // Show loading state
+          historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
+          
           await ensureAuthToken();
           const gen = await fetch(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });
+          
           if (Array.isArray(gen)) {
             jobs = gen.map(function(g){
               var arr = (g && g.input && g.input.slice) ? g.input.slice() : [];
@@ -477,15 +545,18 @@
             });
             saveJobsLocal();
             updateHistory();
+            
             if (gen.length === 0) {
-              if (historyList) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
+              historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
             }
             return;
           }
-          if (historyList) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
+          
+          // If we get here, the request failed or returned invalid data
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
         } catch (e) {
           console.warn('Failed to load cloud history');
-          if (historyList && !historyList.innerHTML.trim()) historyList.innerHTML = '<div style="color:#f87171; text-align:center; padding:20px;">failed to load history</div>';
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
         }
       }
 

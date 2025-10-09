@@ -134,17 +134,35 @@ if $AE; then
     fi
   fi
   
+  echo "Installing AE server dependencies with npm..."
   if ! npm install --omit=dev; then
     echo "ERROR: Failed to install AE server dependencies"
     echo "Please check your Node.js installation and try again"
+    echo "You can also try running manually:"
+    echo "  cd \"$AE_DEST_DIR/server\""
+    echo "  npm install"
     exit 1
   fi
+  echo "✅ AE server dependencies installed successfully"
   
   # Verify critical dependencies
+  echo "Verifying server dependencies..."
   if [ ! -d "node_modules/node-fetch" ]; then
     echo "ERROR: node-fetch not found in AE server dependencies"
     exit 1
   fi
+  
+  if [ ! -d "node_modules/express" ]; then
+    echo "ERROR: express not found in AE server dependencies"
+    exit 1
+  fi
+  
+  if [ ! -d "node_modules/cors" ]; then
+    echo "ERROR: cors not found in AE server dependencies"
+    exit 1
+  fi
+  
+  echo "✅ All critical dependencies verified for AE"
   
   echo "Checking for ffmpeg…"
   if command -v ffmpeg >/dev/null 2>&1; then
@@ -233,17 +251,35 @@ if $PR; then
     fi
   fi
   
+  echo "Installing Premiere server dependencies with npm..."
   if ! npm install --omit=dev; then
     echo "ERROR: Failed to install Premiere server dependencies"
     echo "Please check your Node.js installation and try again"
+    echo "You can also try running manually:"
+    echo "  cd \"$PPRO_DEST_DIR/server\""
+    echo "  npm install"
     exit 1
   fi
+  echo "✅ Premiere server dependencies installed successfully"
   
   # Verify critical dependencies
+  echo "Verifying server dependencies..."
   if [ ! -d "node_modules/node-fetch" ]; then
     echo "ERROR: node-fetch not found in Premiere server dependencies"
     exit 1
   fi
+  
+  if [ ! -d "node_modules/express" ]; then
+    echo "ERROR: express not found in Premiere server dependencies"
+    exit 1
+  fi
+  
+  if [ ! -d "node_modules/cors" ]; then
+    echo "ERROR: cors not found in Premiere server dependencies"
+    exit 1
+  fi
+  
+  echo "✅ All critical dependencies verified for Premiere"
   
   echo "✅ Premiere Pro extension installed successfully!"
 fi

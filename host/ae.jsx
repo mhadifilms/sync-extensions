@@ -174,7 +174,13 @@ function AEFT_exportInOutVideo(payloadJson) {
     var rq = app.project.renderQueue;
     var item = rq.items.add(comp);
     try { item.applyTemplate('Best Settings'); } catch(_){ }
-    try { item.timeSpanStart = comp.workAreaStart; } catch(_){ }
+    // timeSpanStart is evaluated in the comp's display time domain.
+    // If a comp uses a non-zero displayStartTime (e.g. sequence timecode),
+    // setting workAreaStart alone can fall outside the allowed range and
+    // trigger AE's warning dialog. Offset by displayStartTime to keep it in-range.
+    var __start = 0; 
+    try { __start = (comp.displayStartTime || 0) + (comp.workAreaStart || 0); } catch(_){ __start = comp.workAreaStart || 0; }
+    try { item.timeSpanStart = __start; } catch(_){ }
     try { item.timeSpanDuration = comp.workAreaDuration; } catch(_){ }
 
     var want = String(p.codec||'h264').toLowerCase();
@@ -249,7 +255,10 @@ function AEFT_exportInOutAudio(payloadJson) {
     var rq = app.project.renderQueue;
     var item = rq.items.add(comp);
     try { item.applyTemplate('Best Settings'); } catch(_){ }
-    try { item.timeSpanStart = comp.workAreaStart; } catch(_){ }
+    // See note above in AEFT_exportInOutVideo about displayStartTime offset
+    var __astart = 0;
+    try { __astart = (comp.displayStartTime || 0) + (comp.workAreaStart || 0); } catch(_){ __astart = comp.workAreaStart || 0; }
+    try { item.timeSpanStart = __astart; } catch(_){ }
     try { item.timeSpanDuration = comp.workAreaDuration; } catch(_){ }
 
     var om = item.outputModule(1);
