@@ -4,9 +4,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Execution policy bypass instructions
+# Progress bar functions
+function Show-Progress {
+    param(
+        [int]$Current,
+        [int]$Total,
+        [string]$Message
+    )
+    
+    $width = 50
+    $percentage = [math]::Round(($Current * 100) / $Total)
+    $filled = [math]::Round(($Current * $width) / $Total)
+    $empty = $width - $filled
+    
+    $progressBar = "[" + ("=" * $filled) + (" " * $empty) + "] $percentage% $Message"
+    Write-Host "`r$progressBar" -NoNewline
+}
+
+function Hide-Output {
+    param([scriptblock]$ScriptBlock)
+    & $ScriptBlock *>$null
+}
+
 Write-Host "sync. Extension Installer" -ForegroundColor Cyan
-Write-Host "=========================" -ForegroundColor Cyan
+Write-Host "========================" -ForegroundColor Cyan
 Write-Host ""
 
 $repoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
@@ -141,6 +162,14 @@ if (-not $App) {
   }
 }
 
+# Calculate total steps
+$totalSteps = 0
+if ($App -eq 'ae' -or $App -eq 'both') { $totalSteps += 6 }
+if ($App -eq 'premiere' -or $App -eq 'both') { $totalSteps += 6 }
+$currentStep = 0
+
+Show-Progress $currentStep $totalSteps "Starting installation..."
+
 function Enable-PlayerDebugMode {
   Write-Host "Enabling PlayerDebugMode for unsigned extensions..." -ForegroundColor Yellow
   
@@ -166,17 +195,21 @@ function Enable-PlayerDebugMode {
 function Install-AE {
   $extId = 'com.sync.extension.ae.panel'
   $destDir = Join-Path $destBase $extId
-  Write-Host "Installing AE panel to: $destDir" -ForegroundColor Green
+  
+  $script:currentStep++
+  Show-Progress $script:currentStep $script:totalSteps "Preparing After Effects extension..."
   
   # Remove existing installation
   if (Test-Path $destDir) {
-    Remove-Item -Path $destDir -Recurse -Force
+    Hide-Output { Remove-Item -Path $destDir -Recurse -Force }
   }
   
   # Create directory structure
-  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+  Hide-Output { New-Item -ItemType Directory -Path $destDir -Force }
   
   # Copy core project files (mirror macOS rsync behavior)
+  $script:currentStep++
+  Show-Progress $script:currentStep $script:totalSteps "Copying extension files..."
   # Exclude: .git, dist, extensions, scripts, CSXS, node_modules, .DS_Store, *.log, .env, .vscode
   $excludeDirs = @(
     (Join-Path $repoRoot '.git'),
@@ -188,27 +221,27 @@ function Install-AE {
     (Join-Path $repoRoot 'server\node_modules'),
     (Join-Path $repoRoot '.vscode')
   )
-  robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs | Out-Null
+  Hide-Output { robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs }
   
   # Overlay AE-specific files (host-detection + manifest)
   $aeExtDir = Join-Path $repoRoot 'extensions\ae-extension'
-  if (Test-Path (Join-Path $aeExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force | Out-Null }
-  if (Test-Path (Join-Path $aeExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $aeExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
-  New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force | Out-Null
-  if (Test-Path (Join-Path $aeExtDir 'CSXS\manifest.xml')) { 
-    Copy-Item (Join-Path $aeExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force
-    Write-Host "✅ Copied manifest.xml to CSXS directory" -ForegroundColor Green
-  } else {
-    Write-Host "❌ Manifest not found at: $aeExtDir\CSXS\manifest.xml" -ForegroundColor Red
+  Hide-Output { 
+    if (Test-Path (Join-Path $aeExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force }
+    if (Test-Path (Join-Path $aeExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $aeExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
+    New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force
+    if (Test-Path (Join-Path $aeExtDir 'CSXS\manifest.xml')) { 
+      Copy-Item (Join-Path $aeExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force
+    }
   }
   
   # Unblock downloaded files (Mark-of-the-Web)
-  try { Get-ChildItem -Path $destDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue } catch {}
+  Hide-Output { Get-ChildItem -Path $destDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue }
   
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
   if (Test-Path $serverDir) {
-    Write-Host "Installing server dependencies..." -ForegroundColor Yellow
+    $script:currentStep++
+    Show-Progress $script:currentStep $script:totalSteps "Installing server dependencies..."
     Push-Location $serverDir
     try {
       # Try npm from PATH first, then common locations
@@ -225,38 +258,38 @@ function Install-AE {
         try {
           if ($npmPath -eq "npm") {
             # Try standard install first (silent)
-            & npm install --omit=dev --silent 2>$null
+            Hide-Output { & npm install --omit=dev --silent }
             if ($LASTEXITCODE -eq 0) {
               $npmInstalled = $true
               break
             }
             # If that fails, try with flags for Windows compatibility
             Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-            & npm install --no-optional --ignore-scripts --silent 2>$null
+            Hide-Output { & npm install --no-optional --ignore-scripts --silent }
             if ($LASTEXITCODE -eq 0) {
               # Detect Windows architecture and set appropriate flags
               $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
               Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-              & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+              Hide-Output { & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
               $npmInstalled = $true
               break
             }
           } else {
             if (Test-Path $npmPath) {
               # Try standard install first (silent)
-              & $npmPath install --omit=dev --silent 2>$null
+              Hide-Output { & $npmPath install --omit=dev --silent }
               if ($LASTEXITCODE -eq 0) {
                 $npmInstalled = $true
                 break
               }
               # If that fails, try with flags for Windows compatibility
               Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-              & $npmPath install --no-optional --ignore-scripts --silent 2>$null
+              Hide-Output { & $npmPath install --no-optional --ignore-scripts --silent }
               if ($LASTEXITCODE -eq 0) {
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
                 Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-                & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+                Hide-Output { & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
                 $npmInstalled = $true
                 break
               }
@@ -268,6 +301,7 @@ function Install-AE {
       }
       
       if (-not $npmInstalled) {
+        Write-Host ""
         Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
         Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
       }
@@ -280,17 +314,21 @@ function Install-AE {
 function Install-Premiere {
   $extId = 'com.sync.extension.ppro.panel'
   $destDir = Join-Path $destBase $extId
-  Write-Host "Installing Premiere panel to: $destDir" -ForegroundColor Green
+  
+  $script:currentStep++
+  Show-Progress $script:currentStep $script:totalSteps "Preparing Premiere Pro extension..."
   
   # Remove existing installation
   if (Test-Path $destDir) {
-    Remove-Item -Path $destDir -Recurse -Force
+    Hide-Output { Remove-Item -Path $destDir -Recurse -Force }
   }
   
   # Create directory structure
-  New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+  Hide-Output { New-Item -ItemType Directory -Path $destDir -Force }
   
   # Copy core project files (mirror macOS rsync behavior)
+  $script:currentStep++
+  Show-Progress $script:currentStep $script:totalSteps "Copying extension files..."
   # Exclude: .git, dist, extensions, scripts, CSXS, node_modules, .DS_Store, *.log, .env, .vscode
   $excludeDirs = @(
     (Join-Path $repoRoot '.git'),
@@ -302,33 +340,32 @@ function Install-Premiere {
     (Join-Path $repoRoot 'server\node_modules'),
     (Join-Path $repoRoot '.vscode')
   )
-  robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs | Out-Null
+  Hide-Output { robocopy $repoRoot $destDir /E /NFL /NDL /NJH /NJS /XD $excludeDirs }
   
   # Overlay Premiere-specific files (host-detection + manifest)
   $pproExtDir = Join-Path $repoRoot 'extensions\premiere-extension'
-  if (Test-Path (Join-Path $pproExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force | Out-Null }
-  if (Test-Path (Join-Path $pproExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $pproExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
-  New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force | Out-Null
-  if (Test-Path (Join-Path $pproExtDir 'CSXS\manifest.xml')) { 
-    Copy-Item (Join-Path $pproExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force
-    Write-Host "✅ Copied manifest.xml to CSXS directory" -ForegroundColor Green
-  } else {
-    Write-Host "❌ Manifest not found at: $pproExtDir\CSXS\manifest.xml" -ForegroundColor Red
+  Hide-Output { 
+    if (Test-Path (Join-Path $pproExtDir 'ui')) { New-Item -ItemType Directory -Path (Join-Path $destDir 'ui') -Force }
+    if (Test-Path (Join-Path $pproExtDir 'ui\host-detection.js')) { Copy-Item (Join-Path $pproExtDir 'ui\host-detection.js') (Join-Path $destDir 'ui\host-detection.js') -Force }
+    New-Item -ItemType Directory -Path (Join-Path $destDir 'CSXS') -Force
+    if (Test-Path (Join-Path $pproExtDir 'CSXS\manifest.xml')) { 
+      Copy-Item (Join-Path $pproExtDir 'CSXS\manifest.xml') (Join-Path $destDir 'CSXS\manifest.xml') -Force
+    }
   }
   
   # Copy EPR files for Premiere
   if (Test-Path (Join-Path $pproExtDir 'epr')) {
-    Copy-Item (Join-Path $pproExtDir 'epr') (Join-Path $destDir 'epr') -Recurse -Force
-    Write-Host "✅ Copied EPR files for Premiere" -ForegroundColor Green
+    Hide-Output { Copy-Item (Join-Path $pproExtDir 'epr') (Join-Path $destDir 'epr') -Recurse -Force }
   }
   
   # Unblock downloaded files (Mark-of-the-Web)
-  try { Get-ChildItem -Path $destDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue } catch {}
+  Hide-Output { Get-ChildItem -Path $destDir -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue }
   
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
   if (Test-Path $serverDir) {
-    Write-Host "Installing server dependencies..." -ForegroundColor Yellow
+    $script:currentStep++
+    Show-Progress $script:currentStep $script:totalSteps "Installing server dependencies..."
     Push-Location $serverDir
     try {
       # Try npm from PATH first, then common locations
@@ -345,38 +382,38 @@ function Install-Premiere {
         try {
           if ($npmPath -eq "npm") {
             # Try standard install first (silent)
-            & npm install --omit=dev --silent 2>$null
+            Hide-Output { & npm install --omit=dev --silent }
             if ($LASTEXITCODE -eq 0) {
               $npmInstalled = $true
               break
             }
             # If that fails, try with flags for Windows compatibility
             Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-            & npm install --no-optional --ignore-scripts --silent 2>$null
+            Hide-Output { & npm install --no-optional --ignore-scripts --silent }
             if ($LASTEXITCODE -eq 0) {
               # Detect Windows architecture and set appropriate flags
               $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
               Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-              & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+              Hide-Output { & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
               $npmInstalled = $true
               break
             }
           } else {
             if (Test-Path $npmPath) {
               # Try standard install first (silent)
-              & $npmPath install --omit=dev --silent 2>$null
+              Hide-Output { & $npmPath install --omit=dev --silent }
               if ($LASTEXITCODE -eq 0) {
                 $npmInstalled = $true
                 break
               }
               # If that fails, try with flags for Windows compatibility
               Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-              & $npmPath install --no-optional --ignore-scripts --silent 2>$null
+              Hide-Output { & $npmPath install --no-optional --ignore-scripts --silent }
               if ($LASTEXITCODE -eq 0) {
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
                 Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-                & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi
+                Hide-Output { & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
                 $npmInstalled = $true
                 break
               }
@@ -388,6 +425,7 @@ function Install-Premiere {
       }
       
       if (-not $npmInstalled) {
+        Write-Host ""
         Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
         Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
       }
@@ -397,6 +435,8 @@ function Install-Premiere {
   }
 }
 
+$script:currentStep++
+Show-Progress $script:currentStep $script:totalSteps "Enabling debug mode..."
 Enable-PlayerDebugMode
 
 switch ($App) {

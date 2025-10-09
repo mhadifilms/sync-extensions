@@ -274,22 +274,18 @@ function AEFT_exportInOutAudio(payloadJson) {
     if (!aif || !aif.exists) return _respond({ ok:false, error:'Render timeout (audio)' });
 
     var want = String(p.format||'wav').toLowerCase();
-    var ff = _ffmpegPath();
-    if (!ff){
-      // ffmpeg not found: return AIFF directly
-      return _respond({ ok:true, path: aif.fsName, note:'ffmpeg missing; returning AIFF' });
-    }
-
-    var outPath = new File(outDir + '/sync_inout_audio_' + (new Date().getTime()) + (want==='mp3'?'.mp3':'.wav'));
-    var cmd = '';
-    if (want === 'mp3') {
-      cmd = "/bin/bash -lc " + _shq((_shq(ff).slice(1,-1)) + " -y -loglevel error -i " + _shq(aif.fsName) + " -codec:a libmp3lame -b:a 320k " + _shq(outPath.fsName));
-    } else {
-      cmd = "/bin/bash -lc " + _shq((_shq(ff).slice(1,-1)) + " -y -loglevel error -i " + _shq(aif.fsName) + " -c:a pcm_s16le " + _shq(outPath.fsName));
-    }
-    var out = system.callSystem(cmd);
-    try { if (outPath && outPath.exists) { try{ aif.remove(); }catch(_){ } return _respond({ ok:true, path: outPath.fsName, note:'ffmpeg audio transcode '+want }); } } catch(_){ }
-    return _respond({ ok:true, path: aif.fsName, note:'ffmpeg failed; returning AIFF' });
+    // Pure Node conversion via local server (/audio/convert) to avoid ffmpeg
+    try {
+      var payload = '{"srcPath": ' + JSON.stringify(aif.fsName) + ', "format": ' + JSON.stringify(want) + '}';
+      var curl = "/bin/bash -lc " + _shq("curl -s -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/audio/convert || true");
+      var resp = system.callSystem(curl);
+      var j = null; try { j = JSON.parse(String(resp||'{}')); } catch(_){ j = null; }
+      if (j && j.ok && j.path) {
+        try { var f2 = new File(String(j.path)); if (f2 && f2.exists) { try{ aif.remove(); }catch(_){ } return _respond({ ok:true, path: f2.fsName, note:'node convert '+want }); } } catch(_){ }
+      }
+    } catch(_){ }
+    // Fallback: return AIFF directly
+    return _respond({ ok:true, path: aif.fsName, note:'node convert unavailable; returning AIFF' });
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
   }

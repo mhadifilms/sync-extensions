@@ -49,6 +49,12 @@
           var cs = new CSInterface();
           var serverStarted = false;
 
+          // Detect OS early
+          var isWindows = false;
+          try {
+            isWindows = (process.platform === 'win32');
+          } catch(e) {}
+
           function updateDebugStatus(message) {
             log(message);
           }
@@ -109,7 +115,12 @@
                     extPath = decodeURIComponent(extPath);
                     updateDebugStatus('Decoded extension path: ' + extPath);
                     
-                    var serverPath = extPath + (isWindows ? '\\server\\src\\server.js' : '/server/src/server.js');
+                    var serverPath;
+                    if (isWindows) {
+                      serverPath = extPath.replace(/\//g, '\\') + '\\server\\src\\server.js';
+                    } else {
+                      serverPath = extPath + '/server/src/server.js';
+                    }
                     updateDebugStatus('Server path: ' + serverPath);
                     
                     // Check if server file exists
@@ -119,7 +130,12 @@
                         updateDebugStatus('Server file exists: true');
                         
                         // Check if node_modules exists
-                        var nodeModulesPath = extPath + (isWindows ? '\\server\\node_modules' : '/server/node_modules');
+                        var nodeModulesPath;
+                        if (isWindows) {
+                          nodeModulesPath = extPath.replace(/\//g, '\\') + '\\server\\node_modules';
+                        } else {
+                          nodeModulesPath = extPath + '/server/node_modules';
+                        }
                         if (fs.existsSync(nodeModulesPath)) {
                           updateDebugStatus('Node modules directory exists: true');
                           
@@ -129,11 +145,19 @@
                             updateDebugStatus('Express dependency found: true');
                           } else {
                             updateDebugStatus('Express dependency found: false - server will fail to start');
-                            updateDebugStatus('Run: cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && npm install');
+                            if (isWindows) {
+                              updateDebugStatus('Run: cd /d "' + extPath.replace(/\//g, '\\') + '\\server" && npm install');
+                            } else {
+                              updateDebugStatus('Run: cd "' + extPath + '/server" && npm install');
+                            }
                           }
                         } else {
                           updateDebugStatus('Node modules directory exists: false - server will fail to start');
-                          updateDebugStatus('Run: cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && npm install');
+                          if (isWindows) {
+                            updateDebugStatus('Run: cd /d "' + extPath.replace(/\//g, '\\') + '\\server" && npm install');
+                          } else {
+                            updateDebugStatus('Run: cd "' + extPath + '/server" && npm install');
+                          }
                         }
                       } else {
                         updateDebugStatus('Server file exists: false - this will cause startup failure');
@@ -145,12 +169,6 @@
                     // Find actual Node.js executable - try multiple paths
                     var nodePath = null;
                     var fs = require('fs');
-                    
-                    // Detect OS
-                    var isWindows = false;
-                    try {
-                      isWindows = (process.platform === 'win32');
-                    } catch(e) {}
                     
                     var candidates = [];
                     if (isWindows) {
@@ -230,20 +248,36 @@
                     }
                     
                     // Check if dependencies need to be installed
-                    var nodeModulesPath = extPath + (isWindows ? '\\server\\node_modules' : '/server/node_modules');
+                    var nodeModulesPath;
+                    if (isWindows) {
+                      nodeModulesPath = extPath.replace(/\//g, '\\') + '\\server\\node_modules';
+                    } else {
+                      nodeModulesPath = extPath + '/server/node_modules';
+                    }
                     var expressPath = nodeModulesPath + (isWindows ? '\\express' : '/express');
                     
                     if (!fs.existsSync(nodeModulesPath) || !fs.existsSync(expressPath)) {
                       updateDebugStatus('Dependencies missing, attempting to install...');
                       try {
                         var execSync = require('child_process').execSync;
-                        var installCmd = 'cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && "' + nodePath + '" install --omit=dev';
+                        var installCmd;
+                        if (isWindows) {
+                          // Windows: use proper path separators and npm instead of node
+                          var serverDir = extPath.replace(/\//g, '\\') + '\\server';
+                          installCmd = 'cd /d "' + serverDir + '" && npm install --omit=dev';
+                        } else {
+                          installCmd = 'cd "' + extPath + '/server" && npm install --omit=dev';
+                        }
                         updateDebugStatus('Running: ' + installCmd);
                         execSync(installCmd, { encoding: 'utf8', timeout: 30000 });
                         updateDebugStatus('Dependencies installed successfully');
                       } catch(installError) {
                         updateDebugStatus('Failed to install dependencies: ' + installError.message);
-                        updateDebugStatus('Manual fix: cd "' + extPath + (isWindows ? '\\server' : '/server') + '" && npm install');
+                        if (isWindows) {
+                          updateDebugStatus('Manual fix: cd /d "' + extPath.replace(/\//g, '\\') + '\\server" && npm install');
+                        } else {
+                          updateDebugStatus('Manual fix: cd "' + extPath + '/server" && npm install');
+                        }
                         return;
                       }
                     }

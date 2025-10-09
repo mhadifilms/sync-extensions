@@ -11,6 +11,7 @@ import { exec as _exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createServer } from 'net';
+import { convertAudio } from './audio.js';
 
 dotenv.config();
 
@@ -192,6 +193,21 @@ app.get('/auth/token', (req,res)=>{
     }
   }catch(_){ }
   res.json({ token: AUTH_TOKEN });
+});
+
+// Public: AIFF -> WAV/MP3 conversion (pure Node)
+app.post('/audio/convert', async (req, res) => {
+  try{
+    const { srcPath, format } = req.body || {};
+    if (!srcPath || typeof srcPath !== 'string' || !path.isAbsolute(srcPath)){
+      return res.status(400).json({ error:'invalid srcPath' });
+    }
+    if (!fs.existsSync(srcPath)) return res.status(404).json({ error:'source not found' });
+    const fmt = String(format||'wav').toLowerCase();
+    const out = await convertAudio(srcPath, fmt);
+    if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
+    res.json({ ok:true, path: out });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Public waveform file reader (before auth middleware)

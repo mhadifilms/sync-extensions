@@ -3,6 +3,30 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Progress bar functions
+show_progress() {
+    local current=$1
+    local total=$2
+    local message=$3
+    local width=50
+    local percentage=$((current * 100 / total))
+    local filled=$((current * width / total))
+    local empty=$((width - filled))
+    
+    printf "\r["
+    printf "%*s" $filled | tr ' ' '='
+    printf "%*s" $empty | tr ' ' ' '
+    printf "] %d%% %s" $percentage "$message"
+}
+
+hide_output() {
+    "$@" > /dev/null 2>&1
+}
+
+echo "sync. Extension Installer"
+echo "========================"
+echo ""
+
 usage(){
   cat <<EOF
 Usage: $(basename "$0") [--ae] [--premiere] [--both]
@@ -42,6 +66,14 @@ if ! $AE && ! $PR; then
   esac
 fi
 
+# Calculate total steps
+TOTAL_STEPS=0
+if $AE; then TOTAL_STEPS=$((TOTAL_STEPS + 6)); fi
+if $PR; then TOTAL_STEPS=$((TOTAL_STEPS + 6)); fi
+CURRENT_STEP=0
+
+show_progress $CURRENT_STEP $TOTAL_STEPS "Starting installation..."
+
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 AE_EXT_ID="com.sync.extension.ae.panel"
 PPRO_EXT_ID="com.sync.extension.ppro.panel"
@@ -68,12 +100,14 @@ if [ -d "$LEGACY_DIR" ]; then
 fi
 
 if $AE; then
-  echo "=== Installing After Effects Extension ==="
-  echo "Installing AE to: $AE_DEST_DIR"
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Preparing After Effects extension..."
   mkdir -p "$AE_DEST_DIR"
   
   # Copy shared app files
-  rsync -a --delete \
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Copying extension files..."
+  hide_output rsync -a --delete \
     --exclude ".git/" \
     --exclude "dist/" \
     --exclude "extensions/" \
@@ -88,104 +122,76 @@ if $AE; then
     "$ROOT_DIR/" "$AE_DEST_DIR/"
   
   # Overwrite host-detection with AE-specific
-  mkdir -p "$AE_DEST_DIR/ui"
-  cp -f "$AE_SRC_DIR/ui/host-detection.js" "$AE_DEST_DIR/ui/host-detection.js"
+  hide_output mkdir -p "$AE_DEST_DIR/ui"
+  hide_output cp -f "$AE_SRC_DIR/ui/host-detection.js" "$AE_DEST_DIR/ui/host-detection.js"
   
   # Use AE manifest
-  mkdir -p "$AE_DEST_DIR/CSXS"
-  cp -f "$AE_SRC_DIR/CSXS/manifest.xml" "$AE_DEST_DIR/CSXS/manifest.xml"
+  hide_output mkdir -p "$AE_DEST_DIR/CSXS"
+  hide_output cp -f "$AE_SRC_DIR/CSXS/manifest.xml" "$AE_DEST_DIR/CSXS/manifest.xml"
   
   # Install server dependencies
-  echo "Installing server dependencies for AE..."
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Installing server dependencies..."
   cd "$AE_DEST_DIR/server"
   
   # Check if Node.js is available
   if ! command -v npm >/dev/null 2>&1; then
-    echo "⚠️  Node.js/npm not found. Attempting to install Node.js..."
-    
-    # Try to install Node.js via Homebrew
-    if command -v brew >/dev/null 2>&1; then
-      echo "Installing Node.js via Homebrew..."
-      if brew install node; then
-        echo "✅ Node.js installed successfully"
-        # Reload shell environment
-        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      else
-        echo "❌ Failed to install Node.js via Homebrew"
-        echo ""
-        echo "Please install Node.js manually:"
-        echo "1. Visit https://nodejs.org/"
-        echo "2. Download and install the LTS version"
-        echo "3. Restart your terminal and run this script again"
-        echo ""
-        echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
-        echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
-        exit 1
-      fi
-    else
-      echo "❌ Homebrew not found. Please install Node.js manually:"
-      echo "1. Visit https://nodejs.org/"
-      echo "2. Download and install the LTS version"
-      echo "3. Restart your terminal and run this script again"
-      echo ""
-      echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
-      echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
-      exit 1
-    fi
-  fi
-  
-  echo "Installing AE server dependencies with npm..."
-  if ! npm install --omit=dev; then
-    echo "ERROR: Failed to install AE server dependencies"
-    echo "Please check your Node.js installation and try again"
-    echo "You can also try running manually:"
-    echo "  cd \"$AE_DEST_DIR/server\""
-    echo "  npm install"
+    echo ""
+    echo "❌ Node.js not found!"
+    echo ""
+    echo "Please install Node.js manually:"
+    echo "1. Visit https://nodejs.org/"
+    echo "2. Download and install the LTS version"
+    echo "3. Restart your terminal and run this script again"
+    echo ""
+    echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
+    echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
     exit 1
   fi
-  echo "✅ AE server dependencies installed successfully"
+  
+  if ! hide_output npm install --omit=dev; then
+    echo ""
+    echo "❌ Failed to install server dependencies"
+    echo "Please check your Node.js installation and try again"
+    exit 1
+  fi
   
   # Verify critical dependencies
-  echo "Verifying server dependencies..."
-  if [ ! -d "node_modules/node-fetch" ]; then
-    echo "ERROR: node-fetch not found in AE server dependencies"
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Verifying dependencies..."
+  if [ ! -d "node_modules/node-fetch" ] || [ ! -d "node_modules/express" ] || [ ! -d "node_modules/cors" ]; then
+    echo ""
+    echo "❌ Critical dependencies missing"
     exit 1
   fi
   
-  if [ ! -d "node_modules/express" ]; then
-    echo "ERROR: express not found in AE server dependencies"
-    exit 1
+  # Test server startup
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Testing server startup..."
+  if ! timeout 5s node src/server.js > /dev/null 2>&1; then
+    echo ""
+    echo "⚠️  Server startup test failed - this may indicate a dependency issue"
   fi
   
-  if [ ! -d "node_modules/cors" ]; then
-    echo "ERROR: cors not found in AE server dependencies"
-    exit 1
-  fi
-  
-  echo "✅ All critical dependencies verified for AE"
-  
-  echo "Checking for ffmpeg…"
-  if command -v ffmpeg >/dev/null 2>&1; then
-    echo "ffmpeg found"
-  else
+  # Check for ffmpeg
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Checking ffmpeg..."
+  if ! command -v ffmpeg >/dev/null 2>&1; then
     if command -v brew >/dev/null 2>&1; then
-      echo "Installing ffmpeg via Homebrew…"
-      brew install ffmpeg >/tmp/sync_ffmpeg_install.log 2>&1 || true
-    else
-      echo "Homebrew not found; please install ffmpeg manually (https://ffmpeg.org) for AE transcodes."
+      hide_output brew install ffmpeg || true
     fi
   fi
-  
-  echo "✅ After Effects extension installed successfully!"
 fi
 
 if $PR; then
-  echo "=== Installing Premiere Pro Extension ==="
-  echo "Installing Premiere to: $PPRO_DEST_DIR"
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Preparing Premiere Pro extension..."
   mkdir -p "$PPRO_DEST_DIR"
   
   # Copy shared app files
-  rsync -a --delete \
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Copying extension files..."
+  hide_output rsync -a --delete \
     --exclude ".git/" \
     --exclude "dist/" \
     --exclude "extensions/" \
@@ -200,96 +206,70 @@ if $PR; then
     "$ROOT_DIR/" "$PPRO_DEST_DIR/"
   
   # Overwrite host-detection with PPro-specific
-  mkdir -p "$PPRO_DEST_DIR/ui"
-  cp -f "$PPRO_SRC_DIR/ui/host-detection.js" "$PPRO_DEST_DIR/ui/host-detection.js"
+  hide_output mkdir -p "$PPRO_DEST_DIR/ui"
+  hide_output cp -f "$PPRO_SRC_DIR/ui/host-detection.js" "$PPRO_DEST_DIR/ui/host-detection.js"
   
   # Use PPro manifest
-  mkdir -p "$PPRO_DEST_DIR/CSXS"
-  cp -f "$PPRO_SRC_DIR/CSXS/manifest.xml" "$PPRO_DEST_DIR/CSXS/manifest.xml"
+  hide_output mkdir -p "$PPRO_DEST_DIR/CSXS"
+  hide_output cp -f "$PPRO_SRC_DIR/CSXS/manifest.xml" "$PPRO_DEST_DIR/CSXS/manifest.xml"
   
   # Copy EPR files for Premiere
   if [ -d "$PPRO_SRC_DIR/epr" ]; then
-    cp -R "$PPRO_SRC_DIR/epr" "$PPRO_DEST_DIR/"
+    hide_output cp -R "$PPRO_SRC_DIR/epr" "$PPRO_DEST_DIR/"
   fi
   
   # Install server dependencies
-  echo "Installing server dependencies for Premiere..."
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Installing server dependencies..."
   cd "$PPRO_DEST_DIR/server"
   
   # Check if Node.js is available
   if ! command -v npm >/dev/null 2>&1; then
-    echo "⚠️  Node.js/npm not found. Attempting to install Node.js..."
-    
-    # Try to install Node.js via Homebrew
-    if command -v brew >/dev/null 2>&1; then
-      echo "Installing Node.js via Homebrew..."
-      if brew install node; then
-        echo "✅ Node.js installed successfully"
-        # Reload shell environment
-        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-      else
-        echo "❌ Failed to install Node.js via Homebrew"
-        echo ""
-        echo "Please install Node.js manually:"
-        echo "1. Visit https://nodejs.org/"
-        echo "2. Download and install the LTS version"
-        echo "3. Restart your terminal and run this script again"
-        echo ""
-        echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
-        echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
-        exit 1
-      fi
-    else
-      echo "❌ Homebrew not found. Please install Node.js manually:"
-      echo "1. Visit https://nodejs.org/"
-      echo "2. Download and install the LTS version"
-      echo "3. Restart your terminal and run this script again"
-      echo ""
-      echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
-      echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
-      exit 1
-    fi
-  fi
-  
-  echo "Installing Premiere server dependencies with npm..."
-  if ! npm install --omit=dev; then
-    echo "ERROR: Failed to install Premiere server dependencies"
-    echo "Please check your Node.js installation and try again"
-    echo "You can also try running manually:"
-    echo "  cd \"$PPRO_DEST_DIR/server\""
-    echo "  npm install"
+    echo ""
+    echo "❌ Node.js not found!"
+    echo ""
+    echo "Please install Node.js manually:"
+    echo "1. Visit https://nodejs.org/"
+    echo "2. Download and install the LTS version"
+    echo "3. Restart your terminal and run this script again"
+    echo ""
+    echo "Alternatively, you can install from the release ZIP which doesn't require Node.js:"
+    echo "https://github.com/mhadifilms/sync-extensions/releases/latest"
     exit 1
   fi
-  echo "✅ Premiere server dependencies installed successfully"
+  
+  if ! hide_output npm install --omit=dev; then
+    echo ""
+    echo "❌ Failed to install server dependencies"
+    echo "Please check your Node.js installation and try again"
+    exit 1
+  fi
   
   # Verify critical dependencies
-  echo "Verifying server dependencies..."
-  if [ ! -d "node_modules/node-fetch" ]; then
-    echo "ERROR: node-fetch not found in Premiere server dependencies"
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Verifying dependencies..."
+  if [ ! -d "node_modules/node-fetch" ] || [ ! -d "node_modules/express" ] || [ ! -d "node_modules/cors" ]; then
+    echo ""
+    echo "❌ Critical dependencies missing"
     exit 1
   fi
   
-  if [ ! -d "node_modules/express" ]; then
-    echo "ERROR: express not found in Premiere server dependencies"
-    exit 1
+  # Test server startup
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Testing server startup..."
+  if ! timeout 5s node src/server.js > /dev/null 2>&1; then
+    echo ""
+    echo "⚠️  Server startup test failed - this may indicate a dependency issue"
   fi
-  
-  if [ ! -d "node_modules/cors" ]; then
-    echo "ERROR: cors not found in Premiere server dependencies"
-    exit 1
-  fi
-  
-  echo "✅ All critical dependencies verified for Premiere"
-  
-  echo "✅ Premiere Pro extension installed successfully!"
 fi
 
 # Enable PlayerDebugMode (only once regardless of how many extensions installed)
 if $AE || $PR; then
-  echo "Enable PlayerDebugMode (if not already)"
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  show_progress $CURRENT_STEP $TOTAL_STEPS "Enabling debug mode..."
   # Cover a range of CEP versions used by modern Adobe apps
   for v in 10 11 12 13 14; do
-    defaults write "com.adobe.CSXS.$v" PlayerDebugMode 1 || true
+    hide_output defaults write "com.adobe.CSXS.$v" PlayerDebugMode 1 || true
   done
 fi
 
