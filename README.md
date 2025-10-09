@@ -11,7 +11,7 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 - **After Effects & Premiere Pro support**: Works natively in both AE and PPro, with host-specific import and bin management.
 - **Batch job history**: Save and insert previous jobs from the built-in history tab directly into your project.
 - **Automatic backend management**: Local Node.js server auto-starts and handles all file operations, transcoding, and API communication.
-- **ffmpeg integration**: Handles all necessary transcoding for After Effects workflows, including audio extraction and format conversion.
+- **Pure Node.js audio conversion**: Handles AIFF to WAV/MP3 conversion without external dependencies.
 
 ## Limitations
 - Uses Supabase for file storage on files above 20MB, and for files up to 1GB. Files above 1GB are automatically rejected.
@@ -31,11 +31,11 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 
 ### Dependencies
 - **Node.js**: 16.0 or later (auto-detected from common install locations)
-- **ffmpeg**: Required for After Effects transcoding (auto-installed via Homebrew on macOS)
+- **Node.js**: Required for audio conversion and server functionality (auto-installed via Homebrew on macOS)
 - **CEP Runtime**: 11.0+ (automatically enabled by install script)
 
 ### Package Managers (for automated installation)
-- **macOS**: Homebrew (https://brew.sh/) - Required for automatic Node.js/ffmpeg installation
+- **macOS**: Homebrew (https://brew.sh/) - Required for automatic Node.js installation
 - **Windows**: No additional package manager required (uses built-in PowerShell)
 
 ### Network
@@ -134,7 +134,7 @@ npm start
 ### Media Issues
 - **ProRes preview shows black** → Chromium won't decode ProRes; preview uses H.264.
 - **Export preset missing** → Check files in `extensions/premiere-extension/epr/` match names in the UI.
-- **ffmpeg not found** → Install via Homebrew (macOS) or download from ffmpeg.org
+- **Audio conversion failed** → Check Node.js installation and server status
 
 ### System Issues
 - **Node.js not found** → Install Node.js 16+ from nodejs.org or via Homebrew (`brew install node`)

@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Progress bar functions
 show_progress() {
     local current=$1
     local total=$2
@@ -170,14 +169,6 @@ if $AE; then
   fi
   
   
-  # Check for ffmpeg
-  CURRENT_STEP=$((CURRENT_STEP + 1))
-  show_progress $CURRENT_STEP $TOTAL_STEPS "Checking ffmpeg..."
-  if ! command -v ffmpeg >/dev/null 2>&1; then
-    if command -v brew >/dev/null 2>&1; then
-      hide_output brew install ffmpeg || true
-    fi
-  fi
 fi
 
 if $PR; then

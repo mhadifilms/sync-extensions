@@ -140,17 +140,24 @@ async function getLatestReleaseInfo(){
     const tag = j.tag_name || j.name || '';
     if (!tag) return null;
     
-    // Look for platform-specific release asset instead of zipball
+    // Look for platform-specific release asset (ZXP preferred, ZIP fallback)
     const isWindows = process.platform === 'win32';
-    const assetName = isWindows ? `sync-extensions-windows-${tag}.zip` : `sync-extensions-mac-${tag}.zip`;
-    const asset = j.assets?.find(a => a.name === assetName);
+    const zxpName = isWindows ? `sync-extensions-windows-${tag}.zxp` : `sync-extensions-mac-${tag}.zxp`;
+    const zipName = isWindows ? `sync-extensions-windows-${tag}.zip` : `sync-extensions-mac-${tag}.zip`;
+    
+    // Prefer ZXP over ZIP
+    let asset = j.assets?.find(a => a.name === zxpName);
+    if (!asset) {
+      asset = j.assets?.find(a => a.name === zipName);
+    }
     
     if (asset) {
       return { 
         tag, 
         version: normalizeVersion(tag), 
         html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`, 
-        zip_url: asset.browser_download_url 
+        zip_url: asset.browser_download_url,
+        is_zxp: asset.name.endsWith('.zxp')
       };
     }
     
@@ -427,11 +434,12 @@ app.post('/update/apply', async (req,res)=>{
     const zipBuffer = await zipResp.buffer();
     fs.writeFileSync(zipPath, zipBuffer);
     
-    // Extract zip (could be release asset with sync-extensions/ or zipball with repo-name-tag/)
+    // Extract zip/zxp (ZXP is just a ZIP with extension folders)
     const isWindows = process.platform === 'win32';
+    const isZxp = latest.is_zxp;
     
     if (isWindows) {
-      // Windows: Use PowerShell to extract zip
+      // Windows: Use PowerShell to extract zip/zxp
       const extractCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${tempDir}' -Force"`;
       console.log('Windows extract command:', extractCmd);
       try {
@@ -439,7 +447,7 @@ app.post('/update/apply', async (req,res)=>{
         console.log('PowerShell extraction completed');
       } catch(e) {
         console.log('PowerShell extraction failed:', e.message);
-        throw new Error('Failed to extract zip with PowerShell: ' + e.message);
+        throw new Error('Failed to extract zip/zxp with PowerShell: ' + e.message);
       }
     } else {
       // macOS/Linux: Use unzip
@@ -450,11 +458,11 @@ app.post('/update/apply', async (req,res)=>{
         console.log('Unix extraction completed');
       } catch(e) {
         console.log('Unix extraction failed:', e.message);
-        throw new Error('Failed to extract zip with unzip: ' + e.message);
+        throw new Error('Failed to extract zip/zxp with unzip: ' + e.message);
       }
     }
     
-    // Find the extracted directory (release asset: sync-extensions/ or zipball: repo-name-tag/)
+    // Find the extracted directory (ZXP: extension folders, ZIP: sync-extensions/, zipball: repo-name-tag/)
     const allItems = fs.readdirSync(tempDir);
     console.log('Extracted items:', allItems);
     
@@ -472,10 +480,14 @@ app.post('/update/apply', async (req,res)=>{
     
     let extractedDir;
     
-    // Prefer sync-extensions directory (from release asset) over GitHub zipball format
-    if (extractedDirs.includes('sync-extensions')) {
+    if (isZxp) {
+      // ZXP format: extension folders are directly in tempDir
+      extractedDir = tempDir;
+      console.log('Using ZXP format - extension folders directly in temp dir');
+    } else if (extractedDirs.includes('sync-extensions')) {
+      // ZIP format: sync-extensions directory
       extractedDir = path.join(tempDir, 'sync-extensions');
-      console.log('Using sync-extensions directory from release asset');
+      console.log('Using sync-extensions directory from ZIP release asset');
     } else if (extractedDirs.length > 0) {
       // Fallback to GitHub zipball format (repo-name-tag/)
       extractedDir = path.join(tempDir, extractedDirs[0]);
@@ -591,72 +603,83 @@ app.post('/update/apply', async (req,res)=>{
       try { fs.rmSync(aeDestDir, { recursive: true, force: true }); } catch(_){}
       try { fs.rmSync(pproDestDir, { recursive: true, force: true }); } catch(_){}
       
-      // Copy AE extension
-      const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
-      if (fs.existsSync(aeSrcDir)) {
-        fs.mkdirSync(aeDestDir, { recursive: true });
+      // Copy extensions (handle both ZXP and ZIP formats)
+      if (isZxp) {
+        // ZXP format: extension folders are directly in extractedDir
+        const aeSrcDir = path.join(extractedDir, 'com.sync.extension.ae.panel');
+        const pproSrcDir = path.join(extractedDir, 'com.sync.extension.ppro.panel');
         
-        if (isWindows) {
-          // Windows: Use robocopy
-          await exec(`robocopy "${aeSrcDir}" "${aeDestDir}" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/ui" "${aeDestDir}/ui" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/server" "${aeDestDir}/server" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/icons" "${aeDestDir}/icons" /E /NFL /NDL /NJH /NJS`);
-          await exec(`copy "${extractedDir}/index.html" "${aeDestDir}/"`);
-          await exec(`robocopy "${extractedDir}/lib" "${aeDestDir}/lib" /E /NFL /NDL /NJH /NJS`);
-        } else {
-          // macOS/Linux: Use cp
-          await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
-          await exec(`cp -R "${extractedDir}"/ui "${aeDestDir}/"`);
-          await exec(`cp -R "${extractedDir}"/server "${aeDestDir}/"`);
-          await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
-          await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
-          await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
+        if (fs.existsSync(aeSrcDir)) {
+          fs.mkdirSync(aeDestDir, { recursive: true });
+          if (isWindows) {
+            await exec(`robocopy "${aeSrcDir}" "${aeDestDir}" /E /NFL /NDL /NJH /NJS`);
+          } else {
+            await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
+          }
         }
-        // EPR files are Premiere-only, skip for AE
+        
+        if (fs.existsSync(pproSrcDir)) {
+          fs.mkdirSync(pproDestDir, { recursive: true });
+          if (isWindows) {
+            await exec(`robocopy "${pproSrcDir}" "${pproDestDir}" /E /NFL /NDL /NJH /NJS`);
+          } else {
+            await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
+          }
+        }
+      } else {
+        // ZIP format: extensions are in extensions/ subdirectory
+        const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
+        if (fs.existsSync(aeSrcDir)) {
+          fs.mkdirSync(aeDestDir, { recursive: true });
+          
+          if (isWindows) {
+            // Windows: Use robocopy
+            await exec(`robocopy "${aeSrcDir}" "${aeDestDir}" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/ui" "${aeDestDir}/ui" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/server" "${aeDestDir}/server" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/icons" "${aeDestDir}/icons" /E /NFL /NDL /NJH /NJS`);
+            await exec(`copy "${extractedDir}/index.html" "${aeDestDir}/"`);
+            await exec(`robocopy "${extractedDir}/lib" "${aeDestDir}/lib" /E /NFL /NDL /NJH /NJS`);
+          } else {
+            // macOS/Linux: Use cp
+            await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
+            await exec(`cp -R "${extractedDir}"/ui "${aeDestDir}/"`);
+            await exec(`cp -R "${extractedDir}"/server "${aeDestDir}/"`);
+            await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
+            await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
+            await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
+          }
+          // EPR files are Premiere-only, skip for AE
+        }
+        
+        // Copy Premiere extension
+        const pproSrcDir = path.join(extractedDir, 'extensions', 'premiere-extension');
+        if (fs.existsSync(pproSrcDir)) {
+          fs.mkdirSync(pproDestDir, { recursive: true });
+          
+          if (isWindows) {
+            // Windows: Use robocopy
+            await exec(`robocopy "${pproSrcDir}" "${pproDestDir}" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/ui" "${pproDestDir}/ui" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/server" "${pproDestDir}/server" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/icons" "${pproDestDir}/icons" /E /NFL /NDL /NJH /NJS`);
+            await exec(`copy "${extractedDir}/index.html" "${pproDestDir}/"`);
+            await exec(`robocopy "${extractedDir}/lib" "${pproDestDir}/lib" /E /NFL /NDL /NJH /NJS`);
+            await exec(`robocopy "${extractedDir}/extensions/premiere-extension/epr" "${pproDestDir}/epr" /E /NFL /NDL /NJH /NJS`);
+          } else {
+            // macOS/Linux: Use cp
+            await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
+            await exec(`cp -R "${extractedDir}"/ui "${pproDestDir}/"`);
+            await exec(`cp -R "${extractedDir}"/server "${pproDestDir}/"`);
+            await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
+            await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
+            await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
+            await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${pproDestDir}/" -R`);
+          }
+        }
       }
       
-      // Copy Premiere extension
-      const pproSrcDir = path.join(extractedDir, 'extensions', 'premiere-extension');
-      if (fs.existsSync(pproSrcDir)) {
-        fs.mkdirSync(pproDestDir, { recursive: true });
-        
-        if (isWindows) {
-          // Windows: Use robocopy
-          await exec(`robocopy "${pproSrcDir}" "${pproDestDir}" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/ui" "${pproDestDir}/ui" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/server" "${pproDestDir}/server" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/icons" "${pproDestDir}/icons" /E /NFL /NDL /NJH /NJS`);
-          await exec(`copy "${extractedDir}/index.html" "${pproDestDir}/"`);
-          await exec(`robocopy "${extractedDir}/lib" "${pproDestDir}/lib" /E /NFL /NDL /NJH /NJS`);
-          await exec(`robocopy "${extractedDir}/extensions/premiere-extension/epr" "${pproDestDir}/epr" /E /NFL /NDL /NJH /NJS`);
-        } else {
-          // macOS/Linux: Use cp
-          await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
-          await exec(`cp -R "${extractedDir}"/ui "${pproDestDir}/"`);
-          await exec(`cp -R "${extractedDir}"/server "${pproDestDir}/"`);
-          await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
-          await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
-          await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
-          await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${pproDestDir}/" -R`);
-        }
-      }
-      
-      // Install server dependencies
-      if (fs.existsSync(path.join(aeDestDir, 'server'))) {
-        if (isWindows) {
-          await exec(`cd /d "${aeDestDir}/server" && npm install --omit=dev`);
-        } else {
-          await exec(`cd "${aeDestDir}/server" && npm install --omit=dev`);
-        }
-      }
-      if (fs.existsSync(path.join(pproDestDir, 'server'))) {
-        if (isWindows) {
-          await exec(`cd /d "${pproDestDir}/server" && npm install --omit=dev`);
-        } else {
-          await exec(`cd "${pproDestDir}/server" && npm install --omit=dev`);
-        }
-      }
+      // Node modules are now bundled in the package; no runtime installation
     }
     
     // Cleanup

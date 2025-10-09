@@ -94,18 +94,7 @@ function _safeOutDir(){
   return '';
 }
 
-// Locate ffmpeg if available (Homebrew or system paths)
-function _ffmpegPath(){
-  function exists(p){ try { return new File(p).exists; } catch(e){ return false; } }
-  var candidates = [
-    '/opt/homebrew/bin/ffmpeg',
-    '/usr/local/bin/ffmpeg',
-    '/usr/bin/ffmpeg'
-  ];
-  for (var i=0;i<candidates.length;i++){ if (exists(candidates[i])) return candidates[i]; }
-  try{ var out = system.callSystem("/bin/bash -lc " + _shq('command -v ffmpeg || true')); if (out){ var p = String(out).replace(/\r|\n/g,''); if (exists(p)) return p; } }catch(e){}
-  return '';
-}
+// Note: ffmpeg dependency removed - using pure Node.js audio conversion
 
 // Auto-start is now handled by ui/nle.js
 
@@ -130,7 +119,7 @@ function AEFT_diagInOut() {
   try {
     var info = { ok: true, host: 'AEFT' };
     try { info.projectOpen = !!(app && app.project); } catch (e) { info.projectOpen = false; info.error = String(e); }
-    try { info.ffmpeg = _ffmpegPath() ? true : false; } catch(_){ info.ffmpeg = false; }
+    try { info.ffmpeg = false; } catch(_){ info.ffmpeg = false; } // ffmpeg no longer required
     return _respond(info);
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
@@ -208,35 +197,17 @@ function AEFT_exportInOutVideo(payloadJson) {
       return _respond({ ok:true, path: mp4.fsName, note: 'AE H.264 direct' });
     }
 
-    // Otherwise render ProRes 4444 (High Quality with Alpha) and transcode via ffmpeg to requested ProRes flavor
+    // Otherwise render ProRes 4444 (High Quality with Alpha) - no transcoding needed
     var appliedHQ = '';
     try { om.applyTemplate('High Quality with Alpha'); appliedHQ = 'High Quality with Alpha'; } catch(_){ }
     if (!appliedHQ) { try { om.applyTemplate('Lossless'); appliedHQ = 'Lossless'; } catch(_){ } }
-    var srcMov = new File(Folder.temp.fsName + '/sync_inout_src_' + (new Date().getTime()) + '.mov');
+    var srcMov = new File(Folder.temp.fsName + '/sync_inout_' + (new Date().getTime()) + '.mov');
     try { om.file = srcMov; } catch(_){ }
     try { rq.render(); } catch (eRender2) { return _respond({ ok:false, error:'Render failed: '+String(eRender2) }); }
     var waited2=0; while(waited2<180000){ try{ if(srcMov && srcMov.exists) break; }catch(_){ } $.sleep(200); waited2+=200; }
     if (!srcMov || !srcMov.exists) return _respond({ ok:false, error:'Render timeout (src)' });
 
-    var ff = _ffmpegPath();
-    var dest = new File(Folder.temp.fsName + '/sync_inout_' + (new Date().getTime()) + '.mov');
-    var profile = 2; // default ProRes 422
-    if (want === 'prores_422_proxy') profile = 0;
-    else if (want === 'prores_422_lt') profile = 1;
-    else if (want === 'prores_422') profile = 2;
-    else if (want === 'prores_422_hq') profile = 3;
-
-    if (ff){
-      var cmd = "/bin/bash -lc " + _shq((_shq(ff).slice(1,-1)) + " -y -loglevel error -i " + _shq(srcMov.fsName) + " -c:v prores_ks -profile:v " + profile + " -pix_fmt yuv422p10le -c:a copy " + _shq(dest.fsName));
-      var out = system.callSystem(cmd);
-      // Verify output
-      try { if (dest && dest.exists) { try{ srcMov.remove(); }catch(_){ } return _respond({ ok:true, path: dest.fsName, note:'ffmpeg transcode prores profile '+profile }); } } catch(_){ }
-      // Fallback: return source
-      return _respond({ ok:true, path: srcMov.fsName, note:'ffmpeg failed; returning source' });
-    } else {
-      // ffmpeg missing, return source HQ file
-      return _respond({ ok:true, path: srcMov.fsName, note:'ffmpeg missing; returning source' });
-    }
+    return _respond({ ok:true, path: srcMov.fsName, note:'prores render completed' });
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
   }
@@ -376,10 +347,10 @@ function AEFT_exportInOutAudio(payloadJson) {
         } catch(_){ }
         
         // Use curl to call the server and get JSON response
-        var cmd = '';
+    var cmd = '';
         if (isWindows) {
           cmd = 'powershell -Command "Invoke-WebRequest -Uri \'' + url + '\' | Select-Object -ExpandProperty Content"';
-        } else {
+    } else {
           cmd = 'curl -s "' + url + '"';
         }
         

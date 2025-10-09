@@ -6,3 +6,4 @@ server/node_modules/
 *.log
 .DS_Store
 dist/
+ZXPSignCmd/
