@@ -1,7 +1,18 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 // Minimal AIFF (AIFF/AIFC PCM) -> WAV converter implemented in pure Node.
+const DEBUG_LOG = (process.platform === 'win32')
+  ? path.join(os.tmpdir(), 'sync_ae_debug.log')
+  : '/tmp/sync_ae_debug.log';
+function tlog(){
+  try{
+    const line = `[${new Date().toISOString()}] [audio.js] ` + Array.from(arguments).map(a=>String(a)).join(' ') + '\n';
+    fs.appendFileSync(DEBUG_LOG, line);
+  }catch(_){ }
+}
+
 // Supports AIFF 'NONE' (big-endian PCM) and AIFC 'sowt' (little-endian PCM).
 // Bits per sample: 8/16/24/32. Streams without loading full file into memory.
 
@@ -80,11 +91,20 @@ function parseAiffHeader(fd){
   if (numChannels <= 0 || numFrames <= 0 || sampleSize <= 0 || ssndDataStart < 0)
     throw new Error('AIFF missing required chunks');
 
+  if (!isFinite(sampleRate) || sampleRate < 800 || sampleRate > 768000) {
+    // Fall back if parsing the 80-bit float failed
+    sampleRate = 48000;
+  }
+
   const bytesPerSample = Math.ceil(sampleSize / 8);
+  // Use SSND size when present; fall back to frames*channels*bytes if larger
   const pcmBytes = numFrames * numChannels * bytesPerSample;
-  // If SSND reported fewer bytes (due to offset), trust frames*channels*bytes
-  const dataBytes = Math.min(ssndDataSize > 0 ? ssndDataSize : pcmBytes, pcmBytes);
-  return { isAIFC, compressionType, numChannels, numFrames, sampleSize, sampleRate, bytesPerSample, dataBytes, ssndDataStart };
+  let dataBytes = ssndDataSize > 0 ? ssndDataSize : pcmBytes;
+  if (!isFinite(dataBytes) || dataBytes <= 0) dataBytes = pcmBytes;
+  dataBytes = Math.min(dataBytes, Math.max(0, (fileSize - ssndDataStart)));
+  const meta = { isAIFC, compressionType, numChannels, numFrames, sampleSize, sampleRate, bytesPerSample, dataBytes, ssndDataStart };
+  try { tlog('parseAiffHeader', JSON.stringify(meta)); } catch(_){ }
+  return meta;
 }
 
 function writeWavHeader(fd, meta){
@@ -106,7 +126,8 @@ function writeWavHeader(fd, meta){
   buf.writeUInt16LE(sampleSize, 34);
   buf.write('data', 36, 4, 'ascii');
   buf.writeUInt32LE(dataBytes, 40);
-  fs.writeSync(fd, buf, 0, 44, 0);
+  // Write header and advance file pointer (omit explicit position)
+  fs.writeSync(fd, buf, 0, 44);
 }
 
 function swapEndianInPlace(buf, bytesPerSample){
@@ -126,6 +147,7 @@ function swapEndianInPlace(buf, bytesPerSample){
 }
 
 export async function convertAiffToWav(srcPath, destPath){
+  tlog('convertAiffToWav start', srcPath, '->', destPath||'(auto)');
   const fd = fs.openSync(srcPath, 'r');
   try{
     const meta = parseAiffHeader(fd);
@@ -142,15 +164,16 @@ export async function convertAiffToWav(srcPath, destPath){
       let pos = meta.ssndDataStart;
       // Maintain alignment across chunk boundaries
       let leftover = Buffer.alloc(0);
+      let totalWritten = 0;
       while (remaining > 0){
         const toRead = Math.min(remaining, chunkSize);
         const buf = Buffer.alloc(toRead);
         const n = fs.readSync(fd, buf, 0, toRead, pos);
         if (!n) break;
         pos += n; remaining -= n;
-        let work = buf;
+        let work = buf.slice(0, n);
         if (leftover.length){
-          work = Buffer.concat([leftover, buf]);
+          work = Buffer.concat([leftover, work]);
           leftover = Buffer.alloc(0);
         }
         const aligned = Math.floor(work.length / bytesPerSample) * bytesPerSample;
@@ -158,17 +181,19 @@ export async function convertAiffToWav(srcPath, destPath){
         leftover = work.slice(aligned);
         // If AIFF big-endian (NONE), swap to little-endian; sowt already LE
         const payload = (meta.compressionType === 'NONE') ? swapEndianInPlace(body, bytesPerSample) : body;
-        fs.writeSync(ofd, payload);
+        if (payload.length) { fs.writeSync(ofd, payload); totalWritten += payload.length; }
       }
       if (leftover.length){
         // Drop tail bytes if not aligned (should not happen)
       }
+      try { const sz = fs.statSync(out).size; tlog('convertAiffToWav done bytesWritten=', totalWritten, 'fileSize=', sz); } catch(_){ }
     } finally { fs.closeSync(ofd); }
     return destPath || srcPath.replace(/\.[^.]+$/, '.wav');
   } finally { fs.closeSync(fd); }
 }
 
 export async function convertAiffToMp3(srcPath, destPath){
+  tlog('convertAiffToMp3 start', srcPath, '->', destPath||'(auto)');
   // Prefer encoding directly from AIFF sample stream using lamejs (pure JS)
   let lamejs = null;
   try { const mod = await import('lamejs'); lamejs = mod && (mod.default || mod); } catch(_){ }
@@ -202,13 +227,14 @@ export async function convertAiffToMp3(srcPath, destPath){
         }
         return out;
       }
+      let totalFrames = 0; let totalBytes = 0;
       while (remaining > 0){
         const toRead = Math.min(remaining, chunkSize);
         const buf = Buffer.alloc(toRead);
         const n = fs.readSync(fd, buf, 0, toRead, pos);
         if (!n) break;
         pos += n; remaining -= n;
-        let work = buf;
+        let work = buf.slice(0, n);
         if (leftover.length){ work = Buffer.concat([leftover, buf]); leftover = Buffer.alloc(0); }
         const aligned = Math.floor(work.length / bytesPerSample) * bytesPerSample;
         const body = work.slice(0, aligned);
@@ -224,14 +250,15 @@ export async function convertAiffToMp3(srcPath, destPath){
           const R = new Int16Array(samples.length/2);
           for (let i=0,j=0;i<samples.length;i+=2,j++){ L[j]=samples[i]; R[j]=samples[i+1]; }
           const mp3buf = mp3enc.encodeBuffer(L, R);
-          if (mp3buf && mp3buf.length) fs.writeSync(ofd, Buffer.from(mp3buf));
+          if (mp3buf && mp3buf.length) { fs.writeSync(ofd, Buffer.from(mp3buf)); totalBytes += mp3buf.length; totalFrames += L.length; }
         } else {
           const mp3buf = mp3enc.encodeBuffer(samples);
-          if (mp3buf && mp3buf.length) fs.writeSync(ofd, Buffer.from(mp3buf));
+          if (mp3buf && mp3buf.length) { fs.writeSync(ofd, Buffer.from(mp3buf)); totalBytes += mp3buf.length; totalFrames += samples.length; }
         }
       }
       const end = mp3enc.flush();
-      if (end && end.length) fs.writeSync(ofd, Buffer.from(end));
+      if (end && end.length) { fs.writeSync(ofd, Buffer.from(end)); totalBytes += end.length; }
+      try { const sz = fs.statSync(out).size; tlog('convertAiffToMp3 done frames=', totalFrames, 'bytes=', totalBytes, 'fileSize=', sz); } catch(_){ }
     } finally { fs.closeSync(ofd); }
     return out;
   } finally { fs.closeSync(fd); }

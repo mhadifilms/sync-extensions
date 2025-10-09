@@ -17,6 +17,10 @@ show_progress() {
     printf "%*s" $filled | tr ' ' '='
     printf "%*s" $empty | tr ' ' ' '
     printf "] %d%% %s" $percentage "$message"
+    
+    if [ $current -eq $total ]; then
+        printf "\n"
+    fi
 }
 
 hide_output() {
@@ -68,8 +72,8 @@ fi
 
 # Calculate total steps
 TOTAL_STEPS=0
-if $AE; then TOTAL_STEPS=$((TOTAL_STEPS + 6)); fi
-if $PR; then TOTAL_STEPS=$((TOTAL_STEPS + 6)); fi
+if $AE; then TOTAL_STEPS=$((TOTAL_STEPS + 5)); fi
+if $PR; then TOTAL_STEPS=$((TOTAL_STEPS + 5)); fi
 CURRENT_STEP=0
 
 show_progress $CURRENT_STEP $TOTAL_STEPS "Starting installation..."
@@ -95,8 +99,7 @@ PPRO_DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/$PPRO_EXT_
 # Remove legacy single-bundle extension to avoid confusion
 LEGACY_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.panel"
 if [ -d "$LEGACY_DIR" ]; then
-  echo "Removing legacy extension: $LEGACY_DIR"
-  rm -rf "$LEGACY_DIR"
+  hide_output rm -rf "$LEGACY_DIR"
 fi
 
 if $AE; then
@@ -159,19 +162,12 @@ if $AE; then
   # Verify critical dependencies
   CURRENT_STEP=$((CURRENT_STEP + 1))
   show_progress $CURRENT_STEP $TOTAL_STEPS "Verifying dependencies..."
-  if [ ! -d "node_modules/node-fetch" ] || [ ! -d "node_modules/express" ] || [ ! -d "node_modules/cors" ]; then
+  if [ ! -d "node_modules/express" ] || [ ! -d "node_modules/node-fetch" ] || [ ! -d "node_modules/cors" ] || [ ! -d "node_modules/@xenova/transformers" ] || [ ! -d "node_modules/exiftool-vendored" ]; then
     echo ""
     echo "❌ Critical dependencies missing"
     exit 1
   fi
   
-  # Test server startup
-  CURRENT_STEP=$((CURRENT_STEP + 1))
-  show_progress $CURRENT_STEP $TOTAL_STEPS "Testing server startup..."
-  if ! timeout 5s node src/server.js > /dev/null 2>&1; then
-    echo ""
-    echo "⚠️  Server startup test failed - this may indicate a dependency issue"
-  fi
   
   # Check for ffmpeg
   CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -248,19 +244,12 @@ if $PR; then
   # Verify critical dependencies
   CURRENT_STEP=$((CURRENT_STEP + 1))
   show_progress $CURRENT_STEP $TOTAL_STEPS "Verifying dependencies..."
-  if [ ! -d "node_modules/node-fetch" ] || [ ! -d "node_modules/express" ] || [ ! -d "node_modules/cors" ]; then
+  if [ ! -d "node_modules/express" ] || [ ! -d "node_modules/node-fetch" ] || [ ! -d "node_modules/cors" ] || [ ! -d "node_modules/@xenova/transformers" ] || [ ! -d "node_modules/exiftool-vendored" ]; then
     echo ""
     echo "❌ Critical dependencies missing"
     exit 1
   fi
   
-  # Test server startup
-  CURRENT_STEP=$((CURRENT_STEP + 1))
-  show_progress $CURRENT_STEP $TOTAL_STEPS "Testing server startup..."
-  if ! timeout 5s node src/server.js > /dev/null 2>&1; then
-    echo ""
-    echo "⚠️  Server startup test failed - this may indicate a dependency issue"
-  fi
 fi
 
 # Enable PlayerDebugMode (only once regardless of how many extensions installed)

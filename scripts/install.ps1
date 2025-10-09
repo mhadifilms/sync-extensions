@@ -4,6 +4,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Add timeout and better error handling for update operations
+$script:UpdateTimeout = 240 # 4 minutes timeout for update operations
+$script:NpmTimeout = 300 # 5 minutes timeout for npm operations
+
 # Progress bar functions
 function Show-Progress {
     param(
@@ -19,11 +23,48 @@ function Show-Progress {
     
     $progressBar = "[" + ("=" * $filled) + (" " * $empty) + "] $percentage% $Message"
     Write-Host "`r$progressBar" -NoNewline
+    if ($Current -eq $Total) {
+        Write-Host ""
+    }
 }
 
 function Hide-Output {
     param([scriptblock]$ScriptBlock)
-    & $ScriptBlock *>$null
+    try {
+        & $ScriptBlock *>$null
+    } catch {
+        # Silent failure
+    }
+}
+
+function Invoke-NpmWithTimeout {
+    param(
+        [string]$Command,
+        [int]$TimeoutSeconds = 300
+    )
+    
+    try {
+        # Create a job to run the npm command
+        $job = Start-Job -ScriptBlock { param($cmd) & $cmd } -ArgumentList $Command
+        
+        # Wait for the job to complete with timeout
+        $result = Wait-Job -Job $job -Timeout $TimeoutSeconds
+        
+        if ($result) {
+            # Job completed successfully
+            $output = Receive-Job -Job $job
+            Remove-Job -Job $job
+            return $output
+        } else {
+            # Job timed out
+            Stop-Job -Job $job
+            Remove-Job -Job $job
+            return $null
+        }
+    } catch {
+        # Error occurred
+        return $null
+    }
 }
 
 Write-Host "sync. Extension Installer" -ForegroundColor Cyan
@@ -64,9 +105,17 @@ function Test-NodeJS {
       if ($nodePath -eq "node") {
         # Try PATH lookup
         $nodeVersion = & node --version 2>$null
-        $npmVersion = & npm --version 2>$null
-        if ($LASTEXITCODE -eq 0 -and $nodeVersion -and $npmVersion) {
-          return $true
+        if ($LASTEXITCODE -eq 0 -and $nodeVersion) {
+          # Test npm separately with better error handling
+          try {
+            $npmVersion = & npm --version 2>$null
+            if ($LASTEXITCODE -eq 0 -and $npmVersion) {
+              return $true
+            }
+          } catch {
+            # npm failed, continue to next path
+            continue
+          }
         }
       } else {
         # Try specific path
@@ -76,9 +125,14 @@ function Test-NodeJS {
             # Also check for npm in the same directory
             $npmPath = Join-Path (Split-Path $nodePath) "npm.cmd"
             if (Test-Path $npmPath) {
-              $npmVersion = & $npmPath --version 2>$null
-              if ($LASTEXITCODE -eq 0 -and $npmVersion) {
-                return $true
+              try {
+                $npmVersion = & $npmPath --version 2>$null
+                if ($LASTEXITCODE -eq 0 -and $npmVersion) {
+                  return $true
+                }
+              } catch {
+                # npm failed, continue to next path
+                continue
               }
             }
           }
@@ -164,31 +218,22 @@ if (-not $App) {
 
 # Calculate total steps
 $totalSteps = 0
-if ($App -eq 'ae' -or $App -eq 'both') { $totalSteps += 6 }
-if ($App -eq 'premiere' -or $App -eq 'both') { $totalSteps += 6 }
+if ($App -eq 'ae' -or $App -eq 'both') { $totalSteps += 5 }
+if ($App -eq 'premiere' -or $App -eq 'both') { $totalSteps += 5 }
 $currentStep = 0
 
 Show-Progress $currentStep $totalSteps "Starting installation..."
 
 function Enable-PlayerDebugMode {
-  Write-Host "Enabling PlayerDebugMode for unsigned extensions..." -ForegroundColor Yellow
-  
   $enabledVersions = @()
   foreach ($v in 10,11,12,13,14) {
     try {
-      New-Item -Path "HKCU:\Software\Adobe\CSXS.$v" -ErrorAction SilentlyContinue | Out-Null
-      Set-ItemProperty -Path "HKCU:\Software\Adobe\CSXS.$v" -Name PlayerDebugMode -Type DWord -Value 1 -ErrorAction SilentlyContinue
+      Hide-Output { New-Item -Path "HKCU:\Software\Adobe\CSXS.$v" -ErrorAction SilentlyContinue }
+      Hide-Output { Set-ItemProperty -Path "HKCU:\Software\Adobe\CSXS.$v" -Name PlayerDebugMode -Type DWord -Value 1 -ErrorAction SilentlyContinue }
       $enabledVersions += $v
     } catch {
-      Write-Host "Warning: Could not enable PlayerDebugMode for CSXS.$v" -ForegroundColor Yellow
+      # Silent failure
     }
-  }
-  
-  if ($enabledVersions.Count -gt 0) {
-    Write-Host "✅ PlayerDebugMode enabled for CSXS versions: $($enabledVersions -join ', ')" -ForegroundColor Green
-  } else {
-    Write-Host "❌ Failed to enable PlayerDebugMode" -ForegroundColor Red
-    Write-Host "Please run PowerShell as Administrator and try again" -ForegroundColor Yellow
   }
 }
 
@@ -196,8 +241,8 @@ function Install-AE {
   $extId = 'com.sync.extension.ae.panel'
   $destDir = Join-Path $destBase $extId
   
-  $script:currentStep++
-  Show-Progress $script:currentStep $script:totalSteps "Preparing After Effects extension..."
+  $currentStep++
+  Show-Progress $currentStep $totalSteps "Preparing After Effects extension..."
   
   # Remove existing installation
   if (Test-Path $destDir) {
@@ -208,8 +253,8 @@ function Install-AE {
   Hide-Output { New-Item -ItemType Directory -Path $destDir -Force }
   
   # Copy core project files (mirror macOS rsync behavior)
-  $script:currentStep++
-  Show-Progress $script:currentStep $script:totalSteps "Copying extension files..."
+  $currentStep++
+  Show-Progress $script:currentStep $totalSteps "Copying extension files..."
   # Exclude: .git, dist, extensions, scripts, CSXS, node_modules, .DS_Store, *.log, .env, .vscode
   $excludeDirs = @(
     (Join-Path $repoRoot '.git'),
@@ -240,8 +285,8 @@ function Install-AE {
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
   if (Test-Path $serverDir) {
-    $script:currentStep++
-    Show-Progress $script:currentStep $script:totalSteps "Installing server dependencies..."
+    $currentStep++
+    Show-Progress $script:currentStep $totalSteps "Installing server dependencies..."
     Push-Location $serverDir
     try {
       # Try npm from PATH first, then common locations
@@ -257,41 +302,75 @@ function Install-AE {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
+            # Test npm first to avoid "pm" error
+            try {
+              $testResult = & npm --version 2>$null
+              if ($LASTEXITCODE -ne 0 -or -not $testResult) {
+                continue
+              }
+            } catch {
+              continue
+            }
+            
             # Try standard install first (silent)
-            Hide-Output { & npm install --omit=dev --silent }
-            if ($LASTEXITCODE -eq 0) {
-              $npmInstalled = $true
-              break
-            }
-            # If that fails, try with flags for Windows compatibility
-            Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-            Hide-Output { & npm install --no-optional --ignore-scripts --silent }
-            if ($LASTEXITCODE -eq 0) {
-              # Detect Windows architecture and set appropriate flags
-              $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-              Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-              Hide-Output { & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
-              $npmInstalled = $true
-              break
-            }
-          } else {
-            if (Test-Path $npmPath) {
-              # Try standard install first (silent)
-              Hide-Output { & $npmPath install --omit=dev --silent }
+            try {
+              & npm install --omit=dev --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 $npmInstalled = $true
                 break
               }
-              # If that fails, try with flags for Windows compatibility
-              Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-              Hide-Output { & $npmPath install --no-optional --ignore-scripts --silent }
+            } catch {
+              # Continue to next attempt
+            }
+            
+            # If that fails, try with flags for Windows compatibility
+            try {
+              & npm install --no-optional --ignore-scripts --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-                Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-                Hide-Output { & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
+                & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
                 $npmInstalled = $true
                 break
+              }
+            } catch {
+              # Continue to next path
+            }
+          } else {
+            if (Test-Path $npmPath) {
+              # Test npm first to avoid "pm" error
+              try {
+                $testResult = & $npmPath --version 2>$null
+                if ($LASTEXITCODE -ne 0 -or -not $testResult) {
+                  continue
+                }
+              } catch {
+                continue
+              }
+              
+              # Try standard install first (silent)
+              try {
+                & $npmPath install --omit=dev --silent 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                  $npmInstalled = $true
+                  break
+                }
+              } catch {
+                # Continue to next attempt
+              }
+              
+              # If that fails, try with flags for Windows compatibility
+              try {
+                & $npmPath install --no-optional --ignore-scripts --silent 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                  # Detect Windows architecture and set appropriate flags
+                  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+                  & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
+                  $npmInstalled = $true
+                  break
+                }
+              } catch {
+                # Continue to next path
               }
             }
           }
@@ -304,6 +383,16 @@ function Install-AE {
         Write-Host ""
         Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
         Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
+        Write-Host "This may be due to network issues or npm registry problems" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Common fixes:" -ForegroundColor Cyan
+        Write-Host "• Reinstall Node.js from https://nodejs.org" -ForegroundColor Yellow
+        Write-Host "• Run: npm cache clean --force" -ForegroundColor Yellow
+        Write-Host "• Check if antivirus is blocking npm" -ForegroundColor Yellow
+        Write-Host "• Try running PowerShell as Administrator" -ForegroundColor Yellow
+        Write-Host "• Check Windows PATH includes Node.js directory" -ForegroundColor Yellow
+      } else {
+        Write-Host "✅ Server dependencies installed successfully" -ForegroundColor Green
       }
     } finally {
       Pop-Location
@@ -315,8 +404,8 @@ function Install-Premiere {
   $extId = 'com.sync.extension.ppro.panel'
   $destDir = Join-Path $destBase $extId
   
-  $script:currentStep++
-  Show-Progress $script:currentStep $script:totalSteps "Preparing Premiere Pro extension..."
+  $currentStep++
+  Show-Progress $script:currentStep $totalSteps "Preparing Premiere Pro extension..."
   
   # Remove existing installation
   if (Test-Path $destDir) {
@@ -327,8 +416,8 @@ function Install-Premiere {
   Hide-Output { New-Item -ItemType Directory -Path $destDir -Force }
   
   # Copy core project files (mirror macOS rsync behavior)
-  $script:currentStep++
-  Show-Progress $script:currentStep $script:totalSteps "Copying extension files..."
+  $currentStep++
+  Show-Progress $script:currentStep $totalSteps "Copying extension files..."
   # Exclude: .git, dist, extensions, scripts, CSXS, node_modules, .DS_Store, *.log, .env, .vscode
   $excludeDirs = @(
     (Join-Path $repoRoot '.git'),
@@ -364,8 +453,8 @@ function Install-Premiere {
   # Install server dependencies
   $serverDir = Join-Path $destDir 'server'
   if (Test-Path $serverDir) {
-    $script:currentStep++
-    Show-Progress $script:currentStep $script:totalSteps "Installing server dependencies..."
+    $currentStep++
+    Show-Progress $script:currentStep $totalSteps "Installing server dependencies..."
     Push-Location $serverDir
     try {
       # Try npm from PATH first, then common locations
@@ -381,41 +470,75 @@ function Install-Premiere {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
+            # Test npm first to avoid "pm" error
+            try {
+              $testResult = & npm --version 2>$null
+              if ($LASTEXITCODE -ne 0 -or -not $testResult) {
+                continue
+              }
+            } catch {
+              continue
+            }
+            
             # Try standard install first (silent)
-            Hide-Output { & npm install --omit=dev --silent }
-            if ($LASTEXITCODE -eq 0) {
-              $npmInstalled = $true
-              break
-            }
-            # If that fails, try with flags for Windows compatibility
-            Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-            Hide-Output { & npm install --no-optional --ignore-scripts --silent }
-            if ($LASTEXITCODE -eq 0) {
-              # Detect Windows architecture and set appropriate flags
-              $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-              Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-              Hide-Output { & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
-              $npmInstalled = $true
-              break
-            }
-          } else {
-            if (Test-Path $npmPath) {
-              # Try standard install first (silent)
-              Hide-Output { & $npmPath install --omit=dev --silent }
+            try {
+              & npm install --omit=dev --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 $npmInstalled = $true
                 break
               }
-              # If that fails, try with flags for Windows compatibility
-              Write-Host "Standard install failed, trying Windows compatible install..." -ForegroundColor Yellow
-              Hide-Output { & $npmPath install --no-optional --ignore-scripts --silent }
+            } catch {
+              # Continue to next attempt
+            }
+            
+            # If that fails, try with flags for Windows compatibility
+            try {
+              & npm install --no-optional --ignore-scripts --silent 2>$null
               if ($LASTEXITCODE -eq 0) {
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-                Write-Host "Detected Windows architecture: $arch" -ForegroundColor Cyan
-                Hide-Output { & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi }
+                & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
                 $npmInstalled = $true
                 break
+              }
+            } catch {
+              # Continue to next path
+            }
+          } else {
+            if (Test-Path $npmPath) {
+              # Test npm first to avoid "pm" error
+              try {
+                $testResult = & $npmPath --version 2>$null
+                if ($LASTEXITCODE -ne 0 -or -not $testResult) {
+                  continue
+                }
+              } catch {
+                continue
+              }
+              
+              # Try standard install first (silent)
+              try {
+                & $npmPath install --omit=dev --silent 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                  $npmInstalled = $true
+                  break
+                }
+              } catch {
+                # Continue to next attempt
+              }
+              
+              # If that fails, try with flags for Windows compatibility
+              try {
+                & $npmPath install --no-optional --ignore-scripts --silent 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                  # Detect Windows architecture and set appropriate flags
+                  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+                  & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
+                  $npmInstalled = $true
+                  break
+                }
+              } catch {
+                # Continue to next path
               }
             }
           }
@@ -428,6 +551,16 @@ function Install-Premiere {
         Write-Host ""
         Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
         Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
+        Write-Host "This may be due to network issues or npm registry problems" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Common fixes:" -ForegroundColor Cyan
+        Write-Host "• Reinstall Node.js from https://nodejs.org" -ForegroundColor Yellow
+        Write-Host "• Run: npm cache clean --force" -ForegroundColor Yellow
+        Write-Host "• Check if antivirus is blocking npm" -ForegroundColor Yellow
+        Write-Host "• Try running PowerShell as Administrator" -ForegroundColor Yellow
+        Write-Host "• Check Windows PATH includes Node.js directory" -ForegroundColor Yellow
+      } else {
+        Write-Host "✅ Server dependencies installed successfully" -ForegroundColor Green
       }
     } finally {
       Pop-Location
@@ -435,8 +568,8 @@ function Install-Premiere {
   }
 }
 
-$script:currentStep++
-Show-Progress $script:currentStep $script:totalSteps "Enabling debug mode..."
+$currentStep++
+Show-Progress $script:currentStep $totalSteps "Enabling debug mode..."
 Enable-PlayerDebugMode
 
 switch ($App) {

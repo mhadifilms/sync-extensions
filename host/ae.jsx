@@ -270,18 +270,48 @@ function AEFT_exportInOutAudio(payloadJson) {
     try { om.file = aif; } catch(_){ }
 
     try { rq.render(); } catch (eRender) { return _respond({ ok:false, error:'Render failed: '+String(eRender) }); }
-    var waited=0; while(waited<180000){ try{ if(aif && aif.exists) break; }catch(_){ } $.sleep(200); waited+=200; }
+    var waited=0; while(waited<180000){ try{ if(aif && aif.exists && aif.length>0) break; }catch(_){ } $.sleep(200); waited+=200; }
     if (!aif || !aif.exists) return _respond({ ok:false, error:'Render timeout (audio)' });
 
     var want = String(p.format||'wav').toLowerCase();
     // Pure Node conversion via local server (/audio/convert) to avoid ffmpeg
     try {
       var payload = '{"srcPath": ' + JSON.stringify(aif.fsName) + ', "format": ' + JSON.stringify(want) + '}';
-      var curl = "/bin/bash -lc " + _shq("curl -s -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/audio/convert || true");
-      var resp = system.callSystem(curl);
+      // Ensure backend is up (quick health ping)
+      try {
+        var pingCmd = "/bin/bash -lc " + _shq("curl -s -m 1 http://127.0.0.1:3000/health >/dev/null 2>&1 || true");
+        system.callSystem(pingCmd);
+      } catch(_){ }
+      // Write payload to a temp file to avoid quoting issues
+      var pf = new File(Folder.temp.fsName + '/sync_audio_convert_payload.json');
+      try { pf.open('w'); pf.write(payload); pf.close(); } catch(_){ }
+      var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+      var cmd = '';
+      // Prefer GET with encoded params to avoid payload quoting issues
+      var encUrl = "http://127.0.0.1:3000/audio/convert?format=" + encodeURIComponent(String(want||'wav')) + "&srcPath=" + encodeURIComponent(String(aif.fsName||''));
+      if (isWindows) {
+        cmd = 'cmd.exe /c curl -s -m 3 "' + encUrl.replace(/"/g,'\\\"') + '"';
+      } else {
+        cmd = "/bin/bash -lc " + _shq("curl -s -m 3 \"" + encUrl + "\" || true");
+      }
+      try {
+        var dbg1 = new File('/tmp/sync_ae_debug.log');
+        dbg1.open('a');
+        dbg1.writeln('[' + new Date().toString() + '] aif=' + String(aif && aif.fsName) + ' len=' + String(aif && aif.length));
+        dbg1.writeln('[' + new Date().toString() + '] url=' + encUrl);
+        dbg1.close();
+      } catch(_){ }
+      var resp = system.callSystem(cmd);
       var j = null; try { j = JSON.parse(String(resp||'{}')); } catch(_){ j = null; }
+      // Log for diagnostics
+      try {
+        var dbg = new File('/tmp/sync_ae_debug.log');
+        dbg.open('a');
+        dbg.writeln('[' + new Date().toString() + '] audio convert resp=' + String(resp));
+        dbg.close();
+      } catch(_){ }
       if (j && j.ok && j.path) {
-        try { var f2 = new File(String(j.path)); if (f2 && f2.exists) { try{ aif.remove(); }catch(_){ } return _respond({ ok:true, path: f2.fsName, note:'node convert '+want }); } } catch(_){ }
+        try { var f2 = new File(String(j.path)); if (f2 && f2.exists && f2.length>0) { try{ aif.remove(); }catch(_){ } return _respond({ ok:true, path: f2.fsName, note:'node convert '+want }); } } catch(_){ }
       }
     } catch(_){ }
     // Fallback: return AIFF directly
@@ -721,6 +751,35 @@ function AEFT_revealFile(payloadJson) {
     }
   } catch (e) {
     return _respond({ ok:false, error:String(e) });
+  }
+}
+
+function AEFT_startBackend() {
+  try {
+    var isWindows = false; 
+    try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+
+    // Check if server is already running
+    try {
+      var url = "http://127.0.0.1:3000/health";
+      var cmd;
+      if (isWindows) {
+        cmd = 'cmd.exe /c curl -s -m 1 "' + url + '" >NUL 2>&1';
+      } else {
+        cmd = "/bin/bash -lc 'curl -s -m 1 \"" + url + "\" >/dev/null 2>&1'";
+      }
+      var result = system.callSystem(cmd);
+      // If curl succeeds, server is already running
+      if (result === 0) {
+        return _respond({ ok: true, message: "Backend already running on port 3000" });
+      }
+    } catch(e) {}
+
+    // Server not running, but auto-start is handled by ui/nle.js
+    // This function just confirms the status
+    return _respond({ ok: true, message: "Backend auto-start handled by UI" });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
   }
 }
 

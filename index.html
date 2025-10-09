@@ -65,7 +65,7 @@
         <!-- Bottom info container -->
         <div class="bottom-info-container">
           <div class="bottom-info-left">
-            <span id="costDisplay">cost: ~$1.35</span>
+            <span id="costDisplay">cost: n/a</span>
           </div>
           <div class="bottom-info-center">
             <span id="statusMessage">ready to lipsync</span>
@@ -205,7 +205,7 @@
         
         <div class="settings-group">
           <label class="settings-label">api key</label>
-          <input type="password" class="input-field" id="apiKey" placeholder="enter your sync.so api key">
+          <input type="password" class="input-field" id="apiKey" placeholder="enter your sync.so api key"><span id="apiKeyCheck" style="display:none;color:#16a34a;margin-left:6px;">✓</span>
         </div>
         <div class="settings-group">
           <label class="settings-label">supabase url</label>
@@ -219,7 +219,7 @@
         
         <div class="settings-group">
           <label class="settings-label">supabase bucket</label>
-          <input type="text" class="input-field" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)">
+          <input type="text" class="input-field" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)"><span id="supabaseCredsCheck" style="display:none;color:#16a34a;margin-left:6px;">✓</span>
         </div>
         
         <div class="settings-group" id="updateSection">
@@ -231,10 +231,7 @@
           </div>
           <div id="updateStatus" style="color:#7a7a7a; font-size:11px; margin-top:6px; display:none;"></div>
         </div>
-          </div>
-        </div>
     
-        <script src="ui/host-shim.js"></script>
         <script src="ui/nle.js"></script>
         <script src="ui/core.js"></script>
         <script src="ui/media.js"></script>

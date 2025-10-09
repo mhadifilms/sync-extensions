@@ -395,7 +395,7 @@ function PPRO_revealFile(payloadJson) {
       return _respond({ ok:true });
     } else {
       // macOS: reveal in Finder
-      var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"").replace(/"/g, "\\"");
+      var esc = String(f.fsName||'').replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
       var cmd2 = "/usr/bin/osascript -e 'tell application " + '"Finder"' + " to reveal POSIX file \"" + esc + "\"' -e 'tell application " + '"Finder"' + " to activate'";
       System.callSystem(cmd2);
       return _respond({ ok:true });
@@ -731,6 +731,35 @@ function _normPath(p){
 // Safely single-quote a string for bash -lc
 function _shq(s){
   try { return "'" + String(s||'').replace(/'/g, "'\\''") + "'"; } catch(e){ return "''"; }
+}
+
+function PPRO_startBackend() {
+  try {
+    var isWindows = false; 
+    try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+
+    // Check if server is already running
+    try {
+      var url = "http://127.0.0.1:3000/health";
+      var cmd;
+      if (isWindows) {
+        cmd = 'cmd.exe /c curl -s -m 1 "' + url + '" >NUL 2>&1';
+      } else {
+        cmd = "/bin/bash -lc 'curl -s -m 1 \"" + url + "\" >/dev/null 2>&1'";
+      }
+      var result = System.callSystem(cmd);
+      // If curl succeeds, server is already running
+      if (result === 0) {
+        return _respond({ ok: true, message: "Backend already running on port 3000" });
+      }
+    } catch(e) {}
+
+    // Server not running, but auto-start is handled by ui/nle.js
+    // This function just confirms the status
+    return _respond({ ok: true, message: "Backend auto-start handled by UI" });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
 }
 
 function PPRO_stopBackend() {

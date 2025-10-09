@@ -7,7 +7,7 @@ import os from 'os';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
-import { exec as _exec } from 'child_process';
+import { exec as _exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createServer } from 'net';
@@ -22,6 +22,57 @@ const DEFAULT_PORT = 3000;
 const PORT_RANGE = [3000]; // Hardcode to 3000 for panel
 
 const exec = promisify(_exec);
+
+// Better Windows PowerShell execution with spawn
+function execPowerShell(command, options = {}) {
+  return new Promise((resolve, reject) => {
+    const isWindows = process.platform === 'win32';
+    
+    if (isWindows) {
+      // Use spawn for better control on Windows
+      const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command];
+      console.log('Spawning PowerShell with args:', args);
+      console.log('Working directory:', options.cwd || process.cwd());
+      
+      const child = spawn('powershell.exe', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        ...options
+      });
+      
+      let stdout = '';
+      let stderr = '';
+      
+      child.stdout.on('data', (data) => {
+        const output = data.toString();
+        stdout += output;
+        console.log('PowerShell stdout:', output.trim());
+      });
+      
+      child.stderr.on('data', (data) => {
+        const output = data.toString();
+        stderr += output;
+        console.log('PowerShell stderr:', output.trim());
+      });
+      
+      child.on('close', (code) => {
+        console.log(`PowerShell process exited with code: ${code}`);
+        if (code === 0) {
+          resolve({ stdout, stderr });
+        } else {
+          reject(new Error(`PowerShell exited with code ${code}: ${stderr}`));
+        }
+      });
+      
+      child.on('error', (error) => {
+        console.error('PowerShell spawn error:', error);
+        reject(error);
+      });
+    } else {
+      // Use regular exec for non-Windows
+      exec(command, options).then(resolve).catch(reject);
+    }
+  });
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXT_ROOT = path.resolve(__dirname, '..', '..');
@@ -30,6 +81,12 @@ const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mha
 const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
 const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 const GH_UA = process.env.GITHUB_USER_AGENT || 'sync-extension-updater/1.0';
+
+// Debug log helper (same file as AE host logs)
+const DEBUG_LOG = process.platform === 'win32' ? path.join(os.tmpdir(), 'sync_ae_debug.log') : '/tmp/sync_ae_debug.log';
+function tlog(){
+  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(_){ }
+}
 
 function ghHeaders(extra){
   const h = Object.assign({ 'Accept': 'application/vnd.github+json', 'User-Agent': GH_UA }, extra||{});
@@ -199,13 +256,35 @@ app.get('/auth/token', (req,res)=>{
 app.post('/audio/convert', async (req, res) => {
   try{
     const { srcPath, format } = req.body || {};
+    tlog('POST /audio/convert', 'format=', format, 'srcPath=', srcPath);
     if (!srcPath || typeof srcPath !== 'string' || !path.isAbsolute(srcPath)){
+      tlog('convert invalid path');
       return res.status(400).json({ error:'invalid srcPath' });
     }
     if (!fs.existsSync(srcPath)) return res.status(404).json({ error:'source not found' });
     const fmt = String(format||'wav').toLowerCase();
     const out = await convertAudio(srcPath, fmt);
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
+    try { const sz = fs.statSync(out).size; tlog('convert ok', 'out=', out, 'bytes=', sz); } catch(_){ }
+    res.json({ ok:true, path: out });
+  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+// Also support a simple GET form to avoid body quoting issues:
+// /audio/convert?srcPath=/abs/path/file.aif&format=wav
+app.get('/audio/convert', async (req, res) => {
+  try{
+    const srcPath = String(req.query.srcPath||'');
+    const format = String(req.query.format||'wav');
+    tlog('GET /audio/convert', 'format=', format, 'srcPath=', srcPath);
+    if (!srcPath || !path.isAbsolute(srcPath)){
+      tlog('convert invalid path (GET)');
+      return res.status(400).json({ error:'invalid srcPath' });
+    }
+    if (!fs.existsSync(srcPath)) return res.status(404).json({ error:'source not found' });
+    const out = await convertAudio(srcPath, format.toLowerCase());
+    if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
+    try { const sz = fs.statSync(out).size; tlog('convert ok (GET)', 'out=', out, 'bytes=', sz); } catch(_){ }
     res.json({ ok:true, path: out });
   }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
@@ -305,6 +384,10 @@ app.post('/update/apply', async (req,res)=>{
     if (current && latestVersion && compareSemver(latestVersion, current) <= 0){
       return res.json({ ok:true, updated:false, message:'Already up to date', current, latest: latestVersion });
     }
+    
+    // Log update start for debugging
+    console.log(`Starting update process: ${current} -> ${latestVersion}`);
+    console.log(`Platform: ${process.platform}, Architecture: ${process.arch}`);
     
     // Download and extract update
     const tempDir = path.join(os.tmpdir(), 'sync_extension_update_' + Date.now());
@@ -434,10 +517,20 @@ app.post('/update/apply', async (req,res)=>{
       
       try {
         if (isWindows) {
-          // Windows: Use PowerShell
-          const installCmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${updateScript}" ${installArgs}`;
+          // Windows: Use PowerShell with timeout and proper execution policy
+          const installCmd = `& "${updateScript}" ${installArgs}`;
           console.log('Windows install command:', installCmd);
-          await exec(installCmd);
+          
+          // Add timeout wrapper for Windows PowerShell execution
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('PowerShell script timeout after 4 minutes')), 240000); // 4 minutes
+          });
+          
+          console.log('Executing PowerShell command with timeout...');
+          console.log('Command:', installCmd);
+          console.log('Working directory:', extractedDir);
+          
+          await Promise.race([execPowerShell(installCmd, { cwd: extractedDir }), timeoutPromise]);
         } else {
           // macOS/Linux: Use shell script
           const installCmd = `cd "${extractedDir}" && chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`;
@@ -542,8 +635,13 @@ app.post('/update/apply', async (req,res)=>{
     // Cleanup
     try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch(_){}
     
+    console.log(`Update completed successfully: ${current} -> ${latestVersion}`);
     res.json({ ok:true, updated:true, message:'Update applied successfully', current, latest: latestVersion });
-  }catch(e){ res.status(500).json({ error:String(e?.message||e) }); }
+  }catch(e){ 
+    console.error('Update failed:', e.message);
+    console.error('Update error stack:', e.stack);
+    res.status(500).json({ error:String(e?.message||e) }); 
+  }
 });
 
 function guessMime(p){
@@ -556,6 +654,7 @@ function guessMime(p){
   if (ext === 'wav') return 'audio/wav';
   if (ext === 'mp3') return 'audio/mpeg';
   if (ext === 'aac' || ext==='m4a') return 'audio/aac';
+  if (ext === 'aif' || ext === 'aiff') return 'audio/aiff';
   return 'application/octet-stream';
 }
 
@@ -986,6 +1085,7 @@ async function startServer() {
   const srv = app.listen(PORT, HOST, () => {
     console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
     console.log(`Jobs file: ${jobsFile}`);
+    try { tlog('server started on', `${HOST}:${PORT}`); } catch(_){ }
   });
   srv.on('error', async (err) => {
     if (err && err.code === 'EADDRINUSE') {

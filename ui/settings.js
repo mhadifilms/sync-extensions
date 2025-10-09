@@ -53,6 +53,8 @@
           const ra = document.getElementById('renderAudio');
           if (ra) ra.value = settings.renderAudio;
         }
+        try { var ak = document.getElementById('apiKeyCheck'); if (ak) ak.style.display = (settings.apiKey && settings.apiKey.trim()) ? 'inline' : 'none'; } catch(_){ }
+        try { var sck = document.getElementById('supabaseCredsCheck'); if (sck) sck.style.display = (settings.supabaseUrl && settings.supabaseKey && settings.supabaseBucket) ? 'inline' : 'none'; } catch(_){ }
       }
 
       function saveSettings() {
@@ -71,6 +73,8 @@
           renderAudio: document.getElementById('renderAudio').value || 'wav'
         };
         try { localStorage.setItem('syncSettings', JSON.stringify(settings)); } catch(_){ }
+        try { var ak = document.getElementById('apiKeyCheck'); if (ak) ak.style.display = (settings.apiKey && settings.apiKey.trim()) ? 'inline' : 'none'; } catch(_){ }
+        try { var sck = document.getElementById('supabaseCredsCheck'); if (sck) sck.style.display = (settings.supabaseUrl && settings.supabaseKey && settings.supabaseBucket) ? 'inline' : 'none'; } catch(_){ }
         // Persist to backend as a secondary store in case localStorage resets on AE reload
         try {
           const port = getServerPort();
@@ -137,15 +141,26 @@
       async function applyUpdate(){
         const btn = document.getElementById('applyUpdateBtn');
         const status = document.getElementById('updateStatus'); if (status) { status.style.display='block'; status.textContent = 'downloading and applying update…'; }
+        
+        // Add timeout to prevent infinite hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Update timeout after 5 minutes')), 300000); // 5 minutes
+        });
+        
         try{
           const tag = (btn && btn.dataset && btn.dataset.tag) ? btn.dataset.tag : undefined;
-          const r = await api('/update/apply', { method:'POST', body: JSON.stringify(tag ? { tag } : {}) });
+          const updatePromise = api('/update/apply', { method:'POST', body: JSON.stringify(tag ? { tag } : {}) });
+          
+          const r = await Promise.race([updatePromise, timeoutPromise]);
           const j = await r.json().catch(()=>({}));
           if (!r.ok) throw new Error(j && j.error ? j.error : 'update failed');
           if (status) status.textContent = 'update applied successfully — restart Adobe app to complete';
           if (btn) btn.style.display = 'none';
           setTimeout(() => { refreshCurrentVersion(); }, 1000);
-        }catch(e){ if (status) status.textContent = 'update failed: ' + String(e && e.message || e); }
+        }catch(e){ 
+          if (status) status.textContent = 'update failed: ' + String(e && e.message || e);
+          console.error('Update failed:', e);
+        }
       }
 
       // Initialize version display on load

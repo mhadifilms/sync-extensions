@@ -230,6 +230,17 @@
         if (tabName === 'history') {
           try { updateHistory(); } catch(_) {}
           try { loadJobsFromServer(); } catch(_) {}
+          // Reset scroll to top to avoid landing mid-list after job submit
+          try {
+            setTimeout(function(){
+              try {
+                var container = document.querySelector('#history .tab-container') || document.getElementById('history');
+                if (container && typeof container.scrollTop === 'number') { container.scrollTop = 0; }
+              } catch(_) { }
+              try { if (document.scrollingElement) { document.scrollingElement.scrollTop = 0; } } catch(_) { }
+              try { window.scrollTo(0, 0); } catch(_) { }
+            }, 0);
+          } catch(_) { }
         }
       }
 
