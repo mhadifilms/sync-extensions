@@ -734,6 +734,27 @@
         font-family: 'Satoshi', 'Satoshi-Variable', sans-serif;
         font-weight: 500;
         transition: all 0.2s ease;
+        position: relative;
+      }
+      
+      .input-field.with-checkmark {
+        padding-right: 40px;
+      }
+      
+      .input-checkmark {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #16a34a;
+        font-size: 16px;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        pointer-events: none;
+      }
+      
+      .input-checkmark.visible {
+        opacity: 1;
       }
       
       .input-field:focus {

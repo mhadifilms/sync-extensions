@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="11.0" ExtensionBundleId="com.sync.extension" ExtensionBundleVersion="0.5.10" ExtensionBundleName="sync. extension">
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="11.0" ExtensionBundleId="com.sync.extension" ExtensionBundleVersion="0.5.12" ExtensionBundleName="sync. extension">
   <ExtensionList>
-    <Extension Id="com.sync.extension.ppro.panel" Version="0.5.11"/>
-    <Extension Id="com.sync.extension.ae.panel" Version="0.5.11"/>
+    <Extension Id="com.sync.extension.ppro.panel" Version="0.5.13"/>
+    <Extension Id="com.sync.extension.ae.panel" Version="0.5.13"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -17,7 +17,7 @@
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="com.sync.extension.ppro.panel" Version="0.5.11">
+    <Extension Id="com.sync.extension.ppro.panel" Version="0.5.13">
       <HostList>
         <Host Name="PPRO" Version="[24.0,99.9]"/>
       </HostList>
@@ -62,7 +62,7 @@
       </DispatchInfo>
     </Extension>
 
-    <Extension Id="com.sync.extension.ae.panel" Version="0.5.11">
+    <Extension Id="com.sync.extension.ae.panel" Version="0.5.13">
       <HostList>
         <Host Name="AEFT" Version="[24.0,99.9]"/>
       </HostList>

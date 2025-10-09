@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 // Minimal AIFF (AIFF/AIFC PCM) -> WAV converter implemented in pure Node.
 const DEBUG_LOG = (process.platform === 'win32')
@@ -146,7 +146,21 @@ function swapEndianInPlace(buf, bytesPerSample){
   return out;
 }
 
-export async function convertAiffToWav(srcPath, destPath){
+function pcmToInt16Array(buf, bytesPerSample) {
+  if (bytesPerSample === 1) {
+    const out = new Int16Array(buf.length);
+    for (let i = 0; i < buf.length; i++) {
+      out[i] = (buf[i] - 128) * 256;
+    }
+    return out;
+  } else if (bytesPerSample === 2) {
+    return new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2);
+  } else {
+    throw new Error('Unsupported sample size: ' + bytesPerSample);
+  }
+}
+
+async function convertAiffToWav(srcPath, destPath){
   tlog('convertAiffToWav start', srcPath, '->', destPath||'(auto)');
   const fd = fs.openSync(srcPath, 'r');
   try{
@@ -192,83 +206,121 @@ export async function convertAiffToWav(srcPath, destPath){
   } finally { fs.closeSync(fd); }
 }
 
-export async function convertAiffToMp3(srcPath, destPath){
+async function convertAiffToMp3(srcPath, destPath){
   tlog('convertAiffToMp3 start', srcPath, '->', destPath||'(auto)');
-  // Prefer encoding directly from AIFF sample stream using lamejs (pure JS)
-  let lamejs = null;
-  try { const mod = await import('lamejs'); lamejs = mod && (mod.default || mod); } catch(_){ }
-  if (!lamejs) throw new Error('MP3 encoder not available (lamejs not installed)');
-
+  const finalPath = destPath || srcPath.replace(/\.[^.]+$/, '.mp3');
+  
+  // Load lamejs for MP3 encoding
+  let lamejs;
+  try {
+    // Load MPEGMode and make it global (required by Mp3Encoder)
+    const MPEGMode = require('lamejs/src/js/MPEGMode.js');
+    global.MPEGMode = MPEGMode;
+    tlog('MPEGMode loaded and made global');
+    
+    // Load other required dependencies
+    global.Lame = require('lamejs/src/js/Lame.js');
+    global.BitStream = require('lamejs/src/js/BitStream.js');
+    global.Presets = require('lamejs/src/js/Presets.js');
+    global.GainAnalysis = require('lamejs/src/js/GainAnalysis.js');
+    global.QuantizePVT = require('lamejs/src/js/QuantizePVT.js');
+    global.Quantize = require('lamejs/src/js/Quantize.js');
+    global.Takehiro = require('lamejs/src/js/Takehiro.js');
+    global.Reservoir = require('lamejs/src/js/Reservoir.js');
+    global.Version = require('lamejs/src/js/Version.js');
+    global.VBRTag = require('lamejs/src/js/VBRTag.js');
+    global.Encoder = require('lamejs/src/js/Encoder.js');
+    global.common = require('lamejs/src/js/common.js');
+    
+    lamejs = require('lamejs');
+    tlog('lamejs loaded successfully');
+  } catch(e) {
+    tlog('Failed to load lamejs:', e.message);
+    throw new Error('MP3 encoding requires lamejs dependency');
+  }
+  
+  // Parse AIFF header to get audio metadata
   const fd = fs.openSync(srcPath, 'r');
-  try{
-    const meta = parseAiffHeader(fd);
-    if (!(meta.compressionType === 'NONE' || meta.compressionType === 'sowt')){
+  let meta;
+  try {
+    meta = parseAiffHeader(fd);
+    tlog('AIFF meta for MP3:', meta);
+    
+    if (!(meta.compressionType === 'NONE' || meta.compressionType === 'sowt')) {
       throw new Error('Unsupported AIFF compression: ' + meta.compressionType);
     }
-    const out = destPath || srcPath.replace(/\.[^.]+$/, '.mp3');
-    const ofd = fs.openSync(out, 'w');
-    try{
-      const { numChannels, sampleRate, bytesPerSample } = meta;
-      if (!(bytesPerSample === 1 || bytesPerSample === 2)){
-        throw new Error('MP3 encoder supports 8/16-bit PCM only');
+    if (!(meta.bytesPerSample === 1 || meta.bytesPerSample === 2)) {
+      throw new Error('MP3 encoder supports 8/16-bit PCM only');
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  
+  // Create MP3 encoder
+  const mp3enc = new lamejs.Mp3Encoder(meta.numChannels, Math.round(meta.sampleRate), 128);
+  const mp3Data = [];
+  
+  // Convert AIFF to MP3
+  const fd2 = fs.openSync(srcPath, 'r');
+  try {
+    const chunkSize = 32 * 1024;
+    let remaining = meta.dataBytes;
+    let pos = meta.ssndDataStart;
+    let leftover = Buffer.alloc(0);
+    
+    while (remaining > 0) {
+      const toRead = Math.min(remaining, chunkSize);
+      const buf = Buffer.alloc(toRead);
+      const n = fs.readSync(fd2, buf, 0, toRead, pos);
+      if (!n) break;
+      pos += n; remaining -= n;
+      let work = buf.slice(0, n);
+      if (leftover.length) {
+        work = Buffer.concat([leftover, work]);
+        leftover = Buffer.alloc(0);
       }
-      const mp3enc = new lamejs.Mp3Encoder(numChannels, Math.round(sampleRate), 128);
-      const chunkSize = 32 * 1024;
-      let remaining = meta.dataBytes;
-      let pos = meta.ssndDataStart;
-      let leftover = Buffer.alloc(0);
-      function pcmToInt16LE(buf){
-        if (bytesPerSample === 2) return buf;
-        // 8-bit unsigned PCM to 16-bit signed
-        const out = Buffer.alloc(buf.length * 2);
-        for (let i=0;i<buf.length;i++){
-          const v = (buf[i] - 128) << 8; // scale
-          out.writeInt16LE(v, i*2);
-        }
-        return out;
-      }
-      let totalFrames = 0; let totalBytes = 0;
-      while (remaining > 0){
-        const toRead = Math.min(remaining, chunkSize);
-        const buf = Buffer.alloc(toRead);
-        const n = fs.readSync(fd, buf, 0, toRead, pos);
-        if (!n) break;
-        pos += n; remaining -= n;
-        let work = buf.slice(0, n);
-        if (leftover.length){ work = Buffer.concat([leftover, buf]); leftover = Buffer.alloc(0); }
-        const aligned = Math.floor(work.length / bytesPerSample) * bytesPerSample;
-        const body = work.slice(0, aligned);
-        leftover = work.slice(aligned);
-        const le = (meta.compressionType === 'NONE') ? swapEndianInPlace(body, bytesPerSample) : body;
-        const pcm16 = pcmToInt16LE(le);
-        // Interleave handling: AIFF PCM is already interleaved per channels.
-        // lamejs expects Int16Array per channel or interleaved? Using encodeBuffer expects left/right Int16Array.
-        const samples = new Int16Array(pcm16.buffer, pcm16.byteOffset, Math.floor(pcm16.length / 2));
-        if (numChannels === 2){
-          // deinterleave
-          const L = new Int16Array(samples.length/2);
-          const R = new Int16Array(samples.length/2);
-          for (let i=0,j=0;i<samples.length;i+=2,j++){ L[j]=samples[i]; R[j]=samples[i+1]; }
-          const mp3buf = mp3enc.encodeBuffer(L, R);
-          if (mp3buf && mp3buf.length) { fs.writeSync(ofd, Buffer.from(mp3buf)); totalBytes += mp3buf.length; totalFrames += L.length; }
+      const aligned = Math.floor(work.length / meta.bytesPerSample) * meta.bytesPerSample;
+      const body = work.slice(0, aligned);
+      leftover = work.slice(aligned);
+      const payload = (meta.compressionType === 'NONE') ? swapEndianInPlace(body, meta.bytesPerSample) : body;
+      if (payload.length) {
+        const samples = pcmToInt16Array(payload, meta.bytesPerSample);
+        if (meta.numChannels === 1) {
+          const mp3buf = mp3enc.encodeBuffer(samples, samples);
+          if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
         } else {
-          const mp3buf = mp3enc.encodeBuffer(samples);
-          if (mp3buf && mp3buf.length) { fs.writeSync(ofd, Buffer.from(mp3buf)); totalBytes += mp3buf.length; totalFrames += samples.length; }
+          const left = new Int16Array(samples.length / 2);
+          const right = new Int16Array(samples.length / 2);
+          for (let i = 0; i < samples.length; i += 2) {
+            left[i/2] = samples[i];
+            right[i/2] = samples[i+1];
+          }
+          const mp3buf = mp3enc.encodeBuffer(left, right);
+          if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
         }
       }
-      const end = mp3enc.flush();
-      if (end && end.length) { fs.writeSync(ofd, Buffer.from(end)); totalBytes += end.length; }
-      try { const sz = fs.statSync(out).size; tlog('convertAiffToMp3 done frames=', totalFrames, 'bytes=', totalBytes, 'fileSize=', sz); } catch(_){ }
-    } finally { fs.closeSync(ofd); }
-    return out;
-  } finally { fs.closeSync(fd); }
+    }
+    
+    const mp3buf = mp3enc.flush();
+    if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
+    
+    const mp3Buffer = Buffer.concat(mp3Data);
+    fs.writeFileSync(finalPath, mp3Buffer);
+    tlog('convertAiffToMp3 done bytesWritten=', mp3Buffer.length, 'fileSize=', fs.statSync(finalPath).size);
+  } finally {
+    fs.closeSync(fd2);
+  }
+
+  return finalPath;
 }
 
-export async function convertAudio(srcPath, format){
+async function convertAudio(srcPath, format){
   const ext = String(format||'').toLowerCase();
   if (ext === 'wav') return await convertAiffToWav(srcPath);
-  if (ext === 'mp3') return await convertAiffToMp3(srcPath);
+  if (ext === 'mp3') return await convertAiffToMp3(srcPath, null);
   throw new Error('Unsupported target format: ' + format);
 }
+
+module.exports = { convertAudio, convertAiffToWav, convertAiffToMp3 };
 
 

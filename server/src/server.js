@@ -11,7 +11,9 @@ import { exec as _exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createServer } from 'net';
-import { convertAudio } from './audio.js';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { convertAudio } = require('./audio.cjs');
 
 dotenv.config();
 
@@ -252,7 +254,7 @@ app.get('/auth/token', (req,res)=>{
   res.json({ token: AUTH_TOKEN });
 });
 
-// Public: AIFF -> WAV/MP3 conversion (pure Node)
+// Public: AIFF -> WAV conversion (pure Node) - MP3 now handled directly in ExtendScript
 app.post('/audio/convert', async (req, res) => {
   try{
     const { srcPath, format } = req.body || {};
@@ -263,6 +265,18 @@ app.post('/audio/convert', async (req, res) => {
     }
     if (!fs.existsSync(srcPath)) return res.status(404).json({ error:'source not found' });
     const fmt = String(format||'wav').toLowerCase();
+    if (fmt === 'mp3') {
+      try {
+        const out = await convertAudio(srcPath, fmt);
+        if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
+        try { const sz = fs.statSync(out).size; tlog('convert mp3 ok', 'out=', out, 'bytes=', sz); } catch(_){ }
+        res.json({ ok:true, path: out });
+        return;
+      } catch(e) {
+        tlog('convert mp3 error:', e.message);
+        return res.status(500).json({ error: String(e?.message||e) });
+      }
+    }
     const out = await convertAudio(srcPath, fmt);
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
     try { const sz = fs.statSync(out).size; tlog('convert ok', 'out=', out, 'bytes=', sz); } catch(_){ }
@@ -282,7 +296,20 @@ app.get('/audio/convert', async (req, res) => {
       return res.status(400).json({ error:'invalid srcPath' });
     }
     if (!fs.existsSync(srcPath)) return res.status(404).json({ error:'source not found' });
-    const out = await convertAudio(srcPath, format.toLowerCase());
+    const fmt = String(format||'wav').toLowerCase();
+    if (fmt === 'mp3') {
+      try {
+        const out = await convertAudio(srcPath, fmt);
+        if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
+        try { const sz = fs.statSync(out).size; tlog('convert mp3 ok', 'out=', out, 'bytes=', sz); } catch(_){ }
+        res.json({ ok:true, path: out });
+        return;
+      } catch(e) {
+        tlog('convert mp3 error:', e.message);
+        return res.status(500).json({ error: String(e?.message||e) });
+      }
+    }
+    const out = await convertAudio(srcPath, fmt);
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
     try { const sz = fs.statSync(out).size; tlog('convert ok (GET)', 'out=', out, 'bytes=', sz); } catch(_){ }
     res.json({ ok:true, path: out });
@@ -499,14 +526,14 @@ app.post('/update/apply', async (req,res)=>{
       const pproInstalled = fs.existsSync(pproDestDir);
       
       if (aeInstalled && pproInstalled) {
-        installArgs = '--both';
+        installArgs = '--app both';
       } else if (aeInstalled) {
-        installArgs = '--ae';
+        installArgs = '--app ae';
       } else if (pproInstalled) {
-        installArgs = '--premiere';
+        installArgs = '--app premiere';
       } else {
         // Default to both if neither is detected (shouldn't happen)
-        installArgs = '--both';
+        installArgs = '--app both';
       }
       
       console.log('Running install script for update...');
@@ -658,6 +685,19 @@ function guessMime(p){
   return 'application/octet-stream';
 }
 
+async function convertIfAiff(p){
+  try{
+    if (!p || typeof p !== 'string') return p;
+    const lower = p.toLowerCase();
+    if (!(lower.endsWith('.aif') || lower.endsWith('.aiff'))) return p;
+    tlog('convertIfAiff', p);
+    const out = await convertAudio(p, 'wav');
+    if (out && fs.existsSync(out)) { tlog('convertIfAiff ok', out); return out; }
+    tlog('convertIfAiff failed');
+    return p;
+  }catch(e){ tlog('convertIfAiff error', e && e.message ? e.message : String(e)); return p; }
+}
+
 async function supabaseUpload(localPath, job){
   const U = getSupabaseUrl(job);
   const K = getSupabaseKey(job);
@@ -742,6 +782,8 @@ app.post('/jobs', async (req, res) => {
   try{
     let { videoPath, audioPath, videoUrl, audioUrl, isTempVideo, isTempAudio, model, temperature, activeSpeakerOnly, detectObstructions, options = {}, apiKey, outputDir, supabaseUrl, supabaseKey, supabaseBucket } = req.body || {};
     ({ videoPath, audioPath } = normalizePaths({ videoPath, audioPath }));
+    // Auto-convert AIFF from AE to WAV so the rest of the pipeline can read it
+    try { if (audioPath) { audioPath = await convertIfAiff(audioPath); } } catch(_){}
     const vStat = safeStat(videoPath); const aStat = safeStat(audioPath);
     const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
     slog('[jobs:create]', 'model=', model||'lipsync-2-pro', 'overLimit=', overLimit, 'v=', vStat&&vStat.size, 'a=', aStat&&aStat.size, 'supaUrl=', Boolean(supabaseUrl||SUPA_URL), 'bucket=', (supabaseBucket||SUPA_BUCKET));

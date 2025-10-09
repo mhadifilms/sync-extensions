@@ -159,6 +159,7 @@ if $AE; then
     exit 1
   fi
   
+  
   # Verify critical dependencies
   CURRENT_STEP=$((CURRENT_STEP + 1))
   show_progress $CURRENT_STEP $TOTAL_STEPS "Verifying dependencies..."
@@ -240,6 +241,7 @@ if $PR; then
     echo "Please check your Node.js installation and try again"
     exit 1
   fi
+  
   
   # Verify critical dependencies
   CURRENT_STEP=$((CURRENT_STEP + 1))

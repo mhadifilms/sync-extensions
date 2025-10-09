@@ -115,6 +115,11 @@
                     extPath = decodeURIComponent(extPath);
                     updateDebugStatus('Decoded extension path: ' + extPath);
                     
+                    // Fix Windows path format: /C:/ -> C:\
+                    if (isWindows && extPath.startsWith('/') && extPath.charAt(2) === ':') {
+                      extPath = extPath.charAt(1) + ':' + extPath.substring(2);
+                    }
+                    
                     var serverPath;
                     if (isWindows) {
                       serverPath = extPath.replace(/\//g, '\\') + '\\server\\src\\server.js';

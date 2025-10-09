@@ -421,9 +421,20 @@ function _extensionRoot() {
     var extPath = $.eval('cs.getSystemPath(cs.SystemPath.EXTENSION)');
     if (extPath) return extPath;
   } catch(e) {}
-  var userHome = Folder.userDocuments.parent.fsName;
-  var fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.panel";
-  return fallback;
+  try {
+    var userHome = Folder.userDocuments.parent.fsName;
+    var isWindows = false; 
+    try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+    
+    var fallback;
+    if (isWindows) {
+      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro.panel";
+    } else {
+      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro.panel";
+    }
+    return fallback;
+  } catch(e2) {}
+  return '';
 }
 
 function _respond(data) {

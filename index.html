@@ -205,21 +205,33 @@
         
         <div class="settings-group">
           <label class="settings-label">api key</label>
-          <input type="password" class="input-field" id="apiKey" placeholder="enter your sync.so api key"><span id="apiKeyCheck" style="display:none;color:#16a34a;margin-left:6px;">✓</span>
+          <div style="position: relative;">
+            <input type="password" class="input-field with-checkmark" id="apiKey" placeholder="enter your sync.so api key">
+            <span class="input-checkmark" id="apiKeyCheck">✓</span>
+          </div>
         </div>
         <div class="settings-group">
           <label class="settings-label">supabase url</label>
-          <input type="text" class="input-field" id="supabaseUrl" placeholder="https://xxxxx.supabase.co">
+          <div style="position: relative;">
+            <input type="text" class="input-field with-checkmark" id="supabaseUrl" placeholder="https://xxxxx.supabase.co">
+            <span class="input-checkmark" id="supabaseUrlCheck">✓</span>
+          </div>
         </div>
         
         <div class="settings-group">
           <label class="settings-label">supabase key</label>
-          <input type="password" class="input-field" id="supabaseKey" placeholder="service or anon key">
+          <div style="position: relative;">
+            <input type="password" class="input-field with-checkmark" id="supabaseKey" placeholder="service or anon key">
+            <span class="input-checkmark" id="supabaseKeyCheck">✓</span>
+          </div>
         </div>
         
         <div class="settings-group">
           <label class="settings-label">supabase bucket</label>
-          <input type="text" class="input-field" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)"><span id="supabaseCredsCheck" style="display:none;color:#16a34a;margin-left:6px;">✓</span>
+          <div style="position: relative;">
+            <input type="text" class="input-field with-checkmark" id="supabaseBucket" placeholder="bucket name (e.g. sync-labs-public)">
+            <span class="input-checkmark" id="supabaseCredsCheck">✓</span>
+          </div>
         </div>
         
         <div class="settings-group" id="updateSection">

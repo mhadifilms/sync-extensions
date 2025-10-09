@@ -2,6 +2,46 @@
         return window.__syncServerPort || 3000;
       }
       
+      // Checkmark management functions
+      function showCheckmark(checkmarkId) {
+        const checkmark = document.getElementById(checkmarkId);
+        if (checkmark) {
+          checkmark.classList.add('visible');
+          // Hide after 5 seconds
+          setTimeout(() => {
+            checkmark.classList.remove('visible');
+          }, 5000);
+        }
+      }
+      
+      function setupCheckmarkEvents(inputId, checkmarkId) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        
+        let hasContent = false;
+        
+        // Track content changes
+        input.addEventListener('input', function() {
+          hasContent = this.value.trim().length > 0;
+        });
+        
+        // Show checkmark on paste
+        input.addEventListener('paste', function() {
+          setTimeout(() => {
+            if (this.value.trim().length > 0) {
+              showCheckmark(checkmarkId);
+            }
+          }, 10); // Small delay to ensure paste content is processed
+        });
+        
+        // Show checkmark on blur if content exists
+        input.addEventListener('blur', function() {
+          if (hasContent && this.value.trim().length > 0) {
+            showCheckmark(checkmarkId);
+          }
+        });
+      }
+      
       function updateModelDisplay() {
         const modelEl = document.getElementById('currentModel');
         if (modelEl) {
@@ -53,8 +93,11 @@
           const ra = document.getElementById('renderAudio');
           if (ra) ra.value = settings.renderAudio;
         }
-        try { var ak = document.getElementById('apiKeyCheck'); if (ak) ak.style.display = (settings.apiKey && settings.apiKey.trim()) ? 'inline' : 'none'; } catch(_){ }
-        try { var sck = document.getElementById('supabaseCredsCheck'); if (sck) sck.style.display = (settings.supabaseUrl && settings.supabaseKey && settings.supabaseBucket) ? 'inline' : 'none'; } catch(_){ }
+        // Initialize checkmark events for all input fields
+        setupCheckmarkEvents('apiKey', 'apiKeyCheck');
+        setupCheckmarkEvents('supabaseUrl', 'supabaseUrlCheck');
+        setupCheckmarkEvents('supabaseKey', 'supabaseKeyCheck');
+        setupCheckmarkEvents('supabaseBucket', 'supabaseCredsCheck');
       }
 
       function saveSettings() {
@@ -73,8 +116,6 @@
           renderAudio: document.getElementById('renderAudio').value || 'wav'
         };
         try { localStorage.setItem('syncSettings', JSON.stringify(settings)); } catch(_){ }
-        try { var ak = document.getElementById('apiKeyCheck'); if (ak) ak.style.display = (settings.apiKey && settings.apiKey.trim()) ? 'inline' : 'none'; } catch(_){ }
-        try { var sck = document.getElementById('supabaseCredsCheck'); if (sck) sck.style.display = (settings.supabaseUrl && settings.supabaseKey && settings.supabaseBucket) ? 'inline' : 'none'; } catch(_){ }
         // Persist to backend as a secondary store in case localStorage resets on AE reload
         try {
           const port = getServerPort();

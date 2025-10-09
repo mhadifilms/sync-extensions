@@ -74,7 +74,7 @@ Write-Host ""
 $repoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 
 # GNU-style flag normalization to support --app usage
-# Example: .\install.ps1 --app premiere
+# Example: .\install.ps1 --app premiere or .\install.ps1 --both
 try {
   for ($i = 0; $i -lt $args.Count; $i++) {
     switch -Regex ($args[$i]) {
@@ -85,6 +85,15 @@ try {
           elseif ($AppCandidate -in @('premiere','ppro','premierepro')) { $App = 'premiere' }
           elseif ($AppCandidate -in @('both','all')) { $App = 'both' }
         }
+      }
+      '^--both$' {
+        $App = 'both'
+      }
+      '^--ae$' {
+        $App = 'ae'
+      }
+      '^--premiere$' {
+        $App = 'premiere'
       }
     }
   }
@@ -302,22 +311,20 @@ function Install-AE {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
-            # Test npm first to avoid "pm" error
-            try {
-              $testResult = & npm --version 2>$null
-              if ($LASTEXITCODE -ne 0 -or -not $testResult) {
-                continue
-              }
-            } catch {
-              continue
-            }
+            # Skip npm test to avoid hanging - go straight to install
             
-            # Try standard install first (silent)
+            # Try standard install first (silent) with timeout
             try {
-              & npm install --omit=dev --silent 2>$null
-              if ($LASTEXITCODE -eq 0) {
+              $job = Start-Job -ScriptBlock { npm install --silent }
+              $result = Wait-Job -Job $job -Timeout 120
+              if ($result) {
+                $output = Receive-Job -Job $job
+                Remove-Job -Job $job
                 $npmInstalled = $true
                 break
+              } else {
+                Stop-Job -Job $job
+                Remove-Job -Job $job
               }
             } catch {
               # Continue to next attempt
@@ -325,35 +332,46 @@ function Install-AE {
             
             # If that fails, try with flags for Windows compatibility
             try {
-              & npm install --no-optional --ignore-scripts --silent 2>$null
-              if ($LASTEXITCODE -eq 0) {
+              $job = Start-Job -ScriptBlock { npm install --no-optional --ignore-scripts --silent }
+              $result = Wait-Job -Job $job -Timeout 120
+              if ($result) {
+                $output = Receive-Job -Job $job
+                Remove-Job -Job $job
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-                & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
+                $rebuildJob = Start-Job -ScriptBlock { param($arch) npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi } -ArgumentList $arch
+                $rebuildResult = Wait-Job -Job $rebuildJob -Timeout 60
+                if ($rebuildResult) {
+                  Remove-Job -Job $rebuildJob
+                } else {
+                  Stop-Job -Job $rebuildJob
+                  Remove-Job -Job $rebuildJob
+                }
                 $npmInstalled = $true
                 break
+              } else {
+                Stop-Job -Job $job
+                Remove-Job -Job $job
               }
             } catch {
               # Continue to next path
             }
           } else {
             if (Test-Path $npmPath) {
-              # Test npm first to avoid "pm" error
-              try {
-                $testResult = & $npmPath --version 2>$null
-                if ($LASTEXITCODE -ne 0 -or -not $testResult) {
-                  continue
-                }
-              } catch {
-                continue
-              }
+              # Skip npm test to avoid hanging - go straight to install
               
-              # Try standard install first (silent)
+              # Try standard install first (silent) with timeout
               try {
-                & $npmPath install --omit=dev --silent 2>$null
-                if ($LASTEXITCODE -eq 0) {
+                $job = Start-Job -ScriptBlock { param($path) & $path install --silent } -ArgumentList $npmPath
+                $result = Wait-Job -Job $job -Timeout 120
+                if ($result) {
+                  $output = Receive-Job -Job $job
+                  Remove-Job -Job $job
                   $npmInstalled = $true
                   break
+                } else {
+                  Stop-Job -Job $job
+                  Remove-Job -Job $job
                 }
               } catch {
                 # Continue to next attempt
@@ -361,13 +379,26 @@ function Install-AE {
               
               # If that fails, try with flags for Windows compatibility
               try {
-                & $npmPath install --no-optional --ignore-scripts --silent 2>$null
-                if ($LASTEXITCODE -eq 0) {
+                $job = Start-Job -ScriptBlock { param($path) & $path install --no-optional --ignore-scripts --silent } -ArgumentList $npmPath
+                $result = Wait-Job -Job $job -Timeout 120
+                if ($result) {
+                  $output = Receive-Job -Job $job
+                  Remove-Job -Job $job
                   # Detect Windows architecture and set appropriate flags
                   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-                  & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
+                  $rebuildJob = Start-Job -ScriptBlock { param($path, $arch) & $path rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi } -ArgumentList $npmPath, $arch
+                  $rebuildResult = Wait-Job -Job $rebuildJob -Timeout 60
+                  if ($rebuildResult) {
+                    Remove-Job -Job $rebuildJob
+                  } else {
+                    Stop-Job -Job $rebuildJob
+                    Remove-Job -Job $rebuildJob
+                  }
                   $npmInstalled = $true
                   break
+                } else {
+                  Stop-Job -Job $job
+                  Remove-Job -Job $job
                 }
               } catch {
                 # Continue to next path
@@ -381,9 +412,12 @@ function Install-AE {
       
       if (-not $npmInstalled) {
         Write-Host ""
-        Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
-        Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
-        Write-Host "This may be due to network issues or npm registry problems" -ForegroundColor Yellow
+        Write-Host "⚠️  Failed to install server dependencies automatically" -ForegroundColor Yellow
+        Write-Host "The extension will still work, but some features may be limited." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "To fix this later, run these commands manually:" -ForegroundColor Cyan
+        Write-Host "cd `"$serverDir`"" -ForegroundColor White
+        Write-Host "npm install --omit=dev" -ForegroundColor White
         Write-Host ""
         Write-Host "Common fixes:" -ForegroundColor Cyan
         Write-Host "• Reinstall Node.js from https://nodejs.org" -ForegroundColor Yellow
@@ -393,6 +427,7 @@ function Install-AE {
         Write-Host "• Check Windows PATH includes Node.js directory" -ForegroundColor Yellow
       } else {
         Write-Host "✅ Server dependencies installed successfully" -ForegroundColor Green
+        
       }
     } finally {
       Pop-Location
@@ -470,22 +505,20 @@ function Install-Premiere {
       foreach ($npmPath in $npmPaths) {
         try {
           if ($npmPath -eq "npm") {
-            # Test npm first to avoid "pm" error
-            try {
-              $testResult = & npm --version 2>$null
-              if ($LASTEXITCODE -ne 0 -or -not $testResult) {
-                continue
-              }
-            } catch {
-              continue
-            }
+            # Skip npm test to avoid hanging - go straight to install
             
-            # Try standard install first (silent)
+            # Try standard install first (silent) with timeout
             try {
-              & npm install --omit=dev --silent 2>$null
-              if ($LASTEXITCODE -eq 0) {
+              $job = Start-Job -ScriptBlock { npm install --silent }
+              $result = Wait-Job -Job $job -Timeout 120
+              if ($result) {
+                $output = Receive-Job -Job $job
+                Remove-Job -Job $job
                 $npmInstalled = $true
                 break
+              } else {
+                Stop-Job -Job $job
+                Remove-Job -Job $job
               }
             } catch {
               # Continue to next attempt
@@ -493,35 +526,46 @@ function Install-Premiere {
             
             # If that fails, try with flags for Windows compatibility
             try {
-              & npm install --no-optional --ignore-scripts --silent 2>$null
-              if ($LASTEXITCODE -eq 0) {
+              $job = Start-Job -ScriptBlock { npm install --no-optional --ignore-scripts --silent }
+              $result = Wait-Job -Job $job -Timeout 120
+              if ($result) {
+                $output = Receive-Job -Job $job
+                Remove-Job -Job $job
                 # Detect Windows architecture and set appropriate flags
                 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-                & npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
+                $rebuildJob = Start-Job -ScriptBlock { param($arch) npm rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi } -ArgumentList $arch
+                $rebuildResult = Wait-Job -Job $rebuildJob -Timeout 60
+                if ($rebuildResult) {
+                  Remove-Job -Job $rebuildJob
+                } else {
+                  Stop-Job -Job $rebuildJob
+                  Remove-Job -Job $rebuildJob
+                }
                 $npmInstalled = $true
                 break
+              } else {
+                Stop-Job -Job $job
+                Remove-Job -Job $job
               }
             } catch {
               # Continue to next path
             }
           } else {
             if (Test-Path $npmPath) {
-              # Test npm first to avoid "pm" error
-              try {
-                $testResult = & $npmPath --version 2>$null
-                if ($LASTEXITCODE -ne 0 -or -not $testResult) {
-                  continue
-                }
-              } catch {
-                continue
-              }
+              # Skip npm test to avoid hanging - go straight to install
               
-              # Try standard install first (silent)
+              # Try standard install first (silent) with timeout
               try {
-                & $npmPath install --omit=dev --silent 2>$null
-                if ($LASTEXITCODE -eq 0) {
+                $job = Start-Job -ScriptBlock { param($path) & $path install --silent } -ArgumentList $npmPath
+                $result = Wait-Job -Job $job -Timeout 120
+                if ($result) {
+                  $output = Receive-Job -Job $job
+                  Remove-Job -Job $job
                   $npmInstalled = $true
                   break
+                } else {
+                  Stop-Job -Job $job
+                  Remove-Job -Job $job
                 }
               } catch {
                 # Continue to next attempt
@@ -529,13 +573,26 @@ function Install-Premiere {
               
               # If that fails, try with flags for Windows compatibility
               try {
-                & $npmPath install --no-optional --ignore-scripts --silent 2>$null
-                if ($LASTEXITCODE -eq 0) {
+                $job = Start-Job -ScriptBlock { param($path) & $path install --no-optional --ignore-scripts --silent } -ArgumentList $npmPath
+                $result = Wait-Job -Job $job -Timeout 120
+                if ($result) {
+                  $output = Receive-Job -Job $job
+                  Remove-Job -Job $job
                   # Detect Windows architecture and set appropriate flags
                   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-                  & $npmPath rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi 2>$null
+                  $rebuildJob = Start-Job -ScriptBlock { param($path, $arch) & $path rebuild sharp --platform=win32 --arch=$arch --libc= --target=7 --runtime=napi } -ArgumentList $npmPath, $arch
+                  $rebuildResult = Wait-Job -Job $rebuildJob -Timeout 60
+                  if ($rebuildResult) {
+                    Remove-Job -Job $rebuildJob
+                  } else {
+                    Stop-Job -Job $rebuildJob
+                    Remove-Job -Job $rebuildJob
+                  }
                   $npmInstalled = $true
                   break
+                } else {
+                  Stop-Job -Job $job
+                  Remove-Job -Job $job
                 }
               } catch {
                 # Continue to next path
@@ -549,9 +606,12 @@ function Install-Premiere {
       
       if (-not $npmInstalled) {
         Write-Host ""
-        Write-Host "❌ Failed to install server dependencies" -ForegroundColor Red
-        Write-Host "Please ensure Node.js and npm are properly installed" -ForegroundColor Yellow
-        Write-Host "This may be due to network issues or npm registry problems" -ForegroundColor Yellow
+        Write-Host "⚠️  Failed to install server dependencies automatically" -ForegroundColor Yellow
+        Write-Host "The extension will still work, but some features may be limited." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "To fix this later, run these commands manually:" -ForegroundColor Cyan
+        Write-Host "cd `"$serverDir`"" -ForegroundColor White
+        Write-Host "npm install --omit=dev" -ForegroundColor White
         Write-Host ""
         Write-Host "Common fixes:" -ForegroundColor Cyan
         Write-Host "• Reinstall Node.js from https://nodejs.org" -ForegroundColor Yellow
@@ -561,6 +621,7 @@ function Install-Premiere {
         Write-Host "• Check Windows PATH includes Node.js directory" -ForegroundColor Yellow
       } else {
         Write-Host "✅ Server dependencies installed successfully" -ForegroundColor Green
+        
       }
     } finally {
       Pop-Location
