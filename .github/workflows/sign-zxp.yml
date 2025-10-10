@@ -71,33 +71,83 @@ jobs:
         shell: pwsh
         run: |
           git clone --depth=1 https://github.com/Adobe-CEP/CEP-Resources.git
-          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
-          if (-not (Test-Path $Exe)) { throw "ZXPSignCmd.exe not found at $Exe" }
+          
+          # Try multiple versions
+          $versions = @("4.1.103", "4.1.102", "4.1.101", "4.1.100")
+          $Exe = $null
+          
+          foreach ($version in $versions) {
+            $testPath = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\$version\win64\ZXPSignCmd.exe"
+            if (Test-Path $testPath) {
+              $Exe = $testPath
+              echo "Using ZXPSignCmd version: $version"
+              break
+            }
+          }
+          
+          if (-not $Exe) { throw "ZXPSignCmd.exe not found in any version" }
           echo "ZXPSignCmd at: $Exe"
+          
+          # Test ZXPSignCmd
+          & $Exe -help
+          if ($LASTEXITCODE -ne 0) { echo "ZXPSignCmd help failed, but continuing..." }
 
       - name: Restore signing cert
         shell: pwsh
         run: |
           [IO.File]::WriteAllBytes("cert.p12",[Convert]::FromBase64String($env:P12_BASE64))
+          $certSize = (Get-Item "cert.p12").Length
+          echo "Certificate file size: $certSize bytes"
+          if ($certSize -lt 1000) { throw "Certificate file too small, likely corrupted" }
+          
+          # Test certificate with OpenSSL if available
+          if (Get-Command openssl -ErrorAction SilentlyContinue) {
+            echo "Testing certificate with OpenSSL..."
+            echo $env:ZXP_P12_PASSWORD | openssl pkcs12 -in cert.p12 -noout -info
+            if ($LASTEXITCODE -ne 0) { echo "OpenSSL test failed, but continuing..." }
+          }
         env:
           P12_BASE64: ${{ secrets.ZXP_P12_BASE64 }}
+          ZXP_P12_PASSWORD: ${{ secrets.ZXP_P12_PASSWORD }}
 
       - name: Sign ZXP packages
         shell: pwsh
         run: |
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           
+          # Test certificate first
+          echo "Testing certificate..."
+          & $Exe -verify "$env:GITHUB_WORKSPACE\cert.p12" -certinfo
+          if ($LASTEXITCODE -ne 0) { 
+            echo "Certificate test failed, trying without password..."
+            & $Exe -verify "$env:GITHUB_WORKSPACE\cert.p12" -certinfo -pwd ""
+            if ($LASTEXITCODE -ne 0) { throw "Certificate verification failed with exit $LASTEXITCODE" }
+          }
+          
           # Sign AE extension
           $aeIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel"
           $aeOut = "$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"
+          echo "Signing AE extension..."
+          echo "Input: $aeIn"
+          echo "Output: $aeOut"
+          echo "Certificate: $env:GITHUB_WORKSPACE\cert.p12"
           & $Exe -sign "$aeIn" "$aeOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
-          if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for AE with exit $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { 
+            echo "AE signing failed, trying without timestamp..."
+            & $Exe -sign "$aeIn" "$aeOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}"
+            if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for AE with exit $LASTEXITCODE" }
+          }
           
           # Sign Premiere extension
           $pproIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ppro.panel"
           $pproOut = "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"
+          echo "Signing Premiere extension..."
           & $Exe -sign "$pproIn" "$pproOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
-          if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for Premiere with exit $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { 
+            echo "Premiere signing failed, trying without timestamp..."
+            & $Exe -sign "$pproIn" "$pproOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}"
+            if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for Premiere with exit $LASTEXITCODE" }
+          }
 
       - name: Verify signatures (prints cert/timestamp info)
         shell: pwsh
