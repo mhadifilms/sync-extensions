@@ -149,7 +149,6 @@ jobs:
           "$Exe" -help
           echo "ZXPSignCmd help completed (exit code $? is normal)"
           # Reset error state - help command exit codes are expected
-          exit 0 # Exit with 0 to prevent workflow failure due to help command exit code
 
       - name: Restore signing cert
         shell: pwsh
