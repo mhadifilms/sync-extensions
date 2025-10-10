@@ -17,7 +17,7 @@ on:
 
 jobs:
   sign:
-    runs-on: macos-latest
+    runs-on: windows-latest
     permissions:
       contents: write
     steps:
@@ -25,200 +25,180 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build CEP folders for all platforms
+        shell: pwsh
         run: |
           # Create separate build roots for windows and mac packages
-          WIN_ROOT="build/win"
-          MAC_ROOT="build/mac"
-          AE_WIN="$WIN_ROOT/com.sync.extension.ae.panel"
-          PP_WIN="$WIN_ROOT/com.sync.extension.ppro.panel"
-          AE_MAC="$MAC_ROOT/com.sync.extension.ae.panel"
-          PP_MAC="$MAC_ROOT/com.sync.extension.ppro.panel"
+          $winRoot = "build/win"
+          $macRoot = "build/mac"
+          $ae_win  = Join-Path $winRoot "com.sync.extension.ae.panel"
+          $pp_win  = Join-Path $winRoot "com.sync.extension.ppro.panel"
+          $ae_mac  = Join-Path $macRoot "com.sync.extension.ae.panel"
+          $pp_mac  = Join-Path $macRoot "com.sync.extension.ppro.panel"
           
           # Clean existing folders
-          rm -rf "$WIN_ROOT" "$MAC_ROOT" "$AE_WIN" "$PP_WIN" "$AE_MAC" "$PP_MAC"
+          foreach ($p in @($winRoot,$macRoot,$ae_win,$pp_win,$ae_mac,$pp_mac)) {
+            if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+          }
           
           # Create build directories
-          mkdir -p "$WIN_ROOT" "$MAC_ROOT"
+          New-Item -ItemType Directory -Force -Path $winRoot | Out-Null
+          New-Item -ItemType Directory -Force -Path $macRoot | Out-Null
           
           # Helper to copy a panel skeleton
-          copy_panel() {
-            local dest="$1"
-            local ext_src="$2"
-            
+          function Copy-Panel($dest, $extSrc) {
             # Create destination directory
-            mkdir -p "$dest"
-            
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
             # Copy extension contents into destination
-            cp -R "$ext_src"/* "$dest/"
-            
+            Copy-Item "$extSrc/*" $dest -Recurse
             # Then add shared files
-            cp -R ui "$dest/ui"
-            cp -R server "$dest/server"
-            cp -R icons "$dest/icons"
-            cp -R lib "$dest/lib"
-            cp -R bin "$dest/bin"
-            cp index.html "$dest/"
-            cp -R host "$dest/host"
-            
-            # Set execute permissions on Node.js binaries
-            if [ -f "$dest/bin/darwin-arm64/node" ]; then
-              chmod +x "$dest/bin/darwin-arm64/node"
-            fi
-            if [ -f "$dest/bin/darwin-x64/node" ]; then
-              chmod +x "$dest/bin/darwin-x64/node"
-            fi
+            Copy-Item "ui" "$dest/ui" -Recurse
+            Copy-Item "server" "$dest/server" -Recurse
+            Copy-Item "icons" "$dest/icons" -Recurse
+            Copy-Item "lib" "$dest/lib" -Recurse
+            Copy-Item "bin" "$dest/bin" -Recurse
+            Copy-Item "index.html" "$dest/"
+            Copy-Item "host" "$dest/host" -Recurse
           }
           
           # Build Windows variants (strip darwin bins)
-          copy_panel "$AE_WIN" "extensions/ae-extension"
-          copy_panel "$PP_WIN" "extensions/premiere-extension"
-          rm -rf "$AE_WIN/bin/darwin-arm64" "$AE_WIN/bin/darwin-x64"
-          rm -rf "$PP_WIN/bin/darwin-arm64" "$PP_WIN/bin/darwin-x64"
+          Copy-Panel $ae_win  "extensions/ae-extension"
+          Copy-Panel $pp_win  "extensions/premiere-extension"
+          foreach ($dest in @($ae_win,$pp_win)) {
+            Remove-Item "$dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item "$dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
+          }
           
           # Build macOS variants (strip win bins)
-          copy_panel "$AE_MAC" "extensions/ae-extension"
-          copy_panel "$PP_MAC" "extensions/premiere-extension"
-          rm -rf "$AE_MAC/bin/win32-x64" "$PP_MAC/bin/win32-x64"
+          Copy-Panel $ae_mac  "extensions/ae-extension"
+          Copy-Panel $pp_mac  "extensions/premiere-extension"
+          foreach ($dest in @($ae_mac,$pp_mac)) {
+            Remove-Item "$dest/bin/win32-x64" -Recurse -Force -ErrorAction SilentlyContinue
+          }
           
-          echo "Created CEP folders: $AE_WIN, $PP_WIN, $AE_MAC, $PP_MAC"
+          echo "Created CEP folders: $ae_win, $pp_win, $ae_mac, $pp_mac"
 
       - name: Fetch ZXPSignCmd
+        shell: pwsh
         run: |
           git clone --depth=1 https://github.com/Adobe-CEP/CEP-Resources.git
           
           # Try multiple versions
-          versions=("4.1.103" "4.1.102" "4.1.101" "4.1.100")
-          exe=""
+          $versions = @("4.1.103", "4.1.102", "4.1.101", "4.1.100")
+          $Exe = $null
           
-          for version in "${versions[@]}"; do
-            test_path="$GITHUB_WORKSPACE/CEP-Resources/ZXPSignCMD/$version/mac64/ZXPSignCmd"
-            if [ -f "$test_path" ]; then
-              exe="$test_path"
+          foreach ($version in $versions) {
+            $testPath = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\$version\win64\ZXPSignCmd.exe"
+            if (Test-Path $testPath) {
+              $Exe = $testPath
               echo "Using ZXPSignCmd version: $version"
               break
-            fi
-          done
+            }
+          }
           
-          if [ -z "$exe" ]; then
-            echo "ZXPSignCmd not found in any version"
-            exit 1
-          fi
-          echo "ZXPSignCmd at: $exe"
-          
-          # Verify executable permissions and properties
-          ls -la "$exe"
+          if (-not $Exe) { throw "ZXPSignCmd.exe not found in any version" }
+          echo "ZXPSignCmd at: $Exe"
           
           # Test ZXPSignCmd (help command always returns non-zero, that's normal)
-          "$exe" -help || true
-          echo "ZXPSignCmd help completed (exit code $? is normal)"
+          & $Exe -help
+          echo "ZXPSignCmd help completed (exit code $LASTEXITCODE is normal)"
+          # Reset error state - help command exit codes are expected
+          $Error.Clear()
+          $LASTEXITCODE = 0
 
       - name: Restore signing cert
+        shell: pwsh
         run: |
-          echo "$P12_BASE64" | base64 -d > cert.p12
-          cert_size=$(wc -c < cert.p12)
-          echo "Certificate file size: $cert_size bytes"
-          if [ "$cert_size" -lt 1000 ]; then
-            echo "Certificate file too small, likely corrupted"
-            exit 1
-          fi
+          [IO.File]::WriteAllBytes("cert.p12",[Convert]::FromBase64String($env:P12_BASE64))
+          $certSize = (Get-Item "cert.p12").Length
+          echo "Certificate file size: $certSize bytes"
+          if ($certSize -lt 1000) { throw "Certificate file too small, likely corrupted" }
           
-          echo "Certificate restored successfully ($cert_size bytes)"
+          echo "Certificate restored successfully ($certSize bytes)"
         env:
           P12_BASE64: ${{ secrets.ZXP_P12_BASE64 }}
           ZXP_P12_PASSWORD: ${{ secrets.ZXP_P12_PASSWORD }}
 
       - name: Sign all ZXP packages
+        shell: pwsh
         run: |
           echo "=== Starting ZXP Signing Process ==="
-          exe="$GITHUB_WORKSPACE/CEP-Resources/ZXPSignCMD/4.1.103/mac64/ZXPSignCmd"
+          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           
           # Test certificate first
-          echo "Certificate file exists: $(test -f "$GITHUB_WORKSPACE/cert.p12" && echo "true" || echo "false")"
-          echo "Certificate size: $(wc -c < "$GITHUB_WORKSPACE/cert.p12") bytes"
+          echo "Certificate file exists: $(Test-Path "$env:GITHUB_WORKSPACE\cert.p12")"
+          echo "Certificate size: $((Get-Item "$env:GITHUB_WORKSPACE\cert.p12").Length) bytes"
           
           # Check if CEP folders exist
-          echo "AE Windows folder exists: $(test -d "$GITHUB_WORKSPACE/build/win/com.sync.extension.ae.panel" && echo "true" || echo "false")"
-          echo "Premiere Windows folder exists: $(test -d "$GITHUB_WORKSPACE/build/win/com.sync.extension.ppro.panel" && echo "true" || echo "false")"
-          echo "AE macOS folder exists: $(test -d "$GITHUB_WORKSPACE/build/mac/com.sync.extension.ae.panel" && echo "true" || echo "false")"
-          echo "Premiere macOS folder exists: $(test -d "$GITHUB_WORKSPACE/build/mac/com.sync.extension.ppro.panel" && echo "true" || echo "false")"
+          echo "AE Windows folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel")"
+          echo "Premiere Windows folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel")"
+          echo "AE macOS folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel")"
+          echo "Premiere macOS folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel")"
           
-          cert_path="$GITHUB_WORKSPACE/cert.p12"
-          password="${{ secrets.ZXP_P12_PASSWORD }}"
+          $certPath = "$env:GITHUB_WORKSPACE\cert.p12"
+          $password = "${{ secrets.ZXP_P12_PASSWORD }}"
           
           # Create separate directories for each ZXP (each should contain only one panel)
-          mkdir -p build/zxp-ae-win build/zxp-ppro-win build/zxp-ae-mac build/zxp-ppro-mac
+          New-Item -ItemType Directory -Force -Path "build\zxp-ae-win" | Out-Null
+          New-Item -ItemType Directory -Force -Path "build\zxp-ppro-win" | Out-Null
+          New-Item -ItemType Directory -Force -Path "build\zxp-ae-mac" | Out-Null
+          New-Item -ItemType Directory -Force -Path "build\zxp-ppro-mac" | Out-Null
           
           # Move each panel to its own ZXP directory
-          mv "$GITHUB_WORKSPACE/build/win/com.sync.extension.ae.panel" build/zxp-ae-win/
-          mv "$GITHUB_WORKSPACE/build/win/com.sync.extension.ppro.panel" build/zxp-ppro-win/
-          mv "$GITHUB_WORKSPACE/build/mac/com.sync.extension.ae.panel" build/zxp-ae-mac/
-          mv "$GITHUB_WORKSPACE/build/mac/com.sync.extension.ppro.panel" build/zxp-ppro-mac/
+          Move-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel" "build\zxp-ae-win\" -Force
+          Move-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel" "build\zxp-ppro-win\" -Force
+          Move-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel" "build\zxp-ae-mac\" -Force
+          Move-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel" "build\zxp-ppro-mac\" -Force
           
           # Define all packages to sign
-          packages=(
-            "build/zxp-ae-win:sync-extension-ae-windows-signed.zxp:AE Windows:com.sync.extension.ae.panel"
-            "build/zxp-ppro-win:sync-extension-premiere-windows-signed.zxp:Premiere Windows:com.sync.extension.ppro.panel"
-            "build/zxp-ae-mac:sync-extension-ae-mac-signed.zxp:AE macOS:com.sync.extension.ae.panel"
-            "build/zxp-ppro-mac:sync-extension-premiere-mac-signed.zxp:Premiere macOS:com.sync.extension.ppro.panel"
+          $packages = @(
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-win"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"; Name="AE Windows"; PanelDir="com.sync.extension.ae.panel"},
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ppro-win"; Output="$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"; Name="Premiere Windows"; PanelDir="com.sync.extension.ppro.panel"},
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-mac"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-mac-signed.zxp"; Name="AE macOS"; PanelDir="com.sync.extension.ae.panel"},
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ppro-mac"; Output="$env:GITHUB_WORKSPACE\sync-extension-premiere-mac-signed.zxp"; Name="Premiere macOS"; PanelDir="com.sync.extension.ppro.panel"}
           )
           
           # Sign each package
-          for pkg in "${packages[@]}"; do
-            IFS=':' read -r input output name panel_dir <<< "$pkg"
-            echo "Signing $name..."
-            echo "Input: $input"
-            echo "Output: $output"
+          foreach ($pkg in $packages) {
+            echo "Signing $($pkg.Name)..."
+            echo "Input: $($pkg.Input)"
+            echo "Output: $($pkg.Output)"
             
             # Validate all required arguments are present
-            if [ ! -d "$input" ]; then
-              echo "Input directory not found: $input"
-              exit 1
-            fi
-            if [ ! -d "$input/$panel_dir" ]; then
-              echo "Panel directory not found: $input/$panel_dir"
-              exit 1
-            fi
-            if [ ! -f "$cert_path" ]; then
-              echo "Certificate file not found: $cert_path"
-              exit 1
-            fi
-            if [ -z "$password" ]; then
-              echo "Password is empty"
-              exit 1
-            fi
+            if (-not (Test-Path $pkg.Input)) { throw "Input directory not found: $($pkg.Input)" }
+            if (-not (Test-Path "$($pkg.Input)\$($pkg.PanelDir)")) { throw "Panel directory not found: $($pkg.Input)\$($pkg.PanelDir)" }
+            if (-not (Test-Path $certPath)) { throw "Certificate file not found: $certPath" }
+            if ([string]::IsNullOrEmpty($password)) { throw "Password is empty" }
             
-            echo "All required arguments validated successfully for $name"
+            echo "All required arguments validated successfully for $($pkg.Name)"
             
             # Try signing with timestamp first
-            if ! "$exe" -sign "$input" "$output" "$cert_path" "$password" -tsa "${{ github.event.inputs.tsa_url }}"; then
-              echo "$name signing with timestamp failed, trying without timestamp..."
-              if ! "$exe" -sign "$input" "$output" "$cert_path" "$password"; then
-                echo "ZXPSignCmd failed for $name"
-                exit 1
-              fi
-            fi
-            echo "$name signed successfully"
-          done
+            & $Exe -sign $pkg.Input $pkg.Output $certPath $password -tsa "${{ github.event.inputs.tsa_url }}"
+            if ($LASTEXITCODE -ne 0) { 
+              echo "$($pkg.Name) signing with timestamp failed (exit $LASTEXITCODE), trying without timestamp..."
+              & $Exe -sign $pkg.Input $pkg.Output $certPath $password
+              if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for $($pkg.Name) with exit $LASTEXITCODE" }
+            }
+            echo "$($pkg.Name) signed successfully"
+          }
 
       - name: Verify signatures
+        shell: pwsh
         run: |
-          exe="$GITHUB_WORKSPACE/CEP-Resources/ZXPSignCMD/4.1.103/mac64/ZXPSignCmd"
+          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           
-          zxps=(
-            "sync-extension-ae-windows-signed.zxp"
-            "sync-extension-premiere-windows-signed.zxp"
-            "sync-extension-ae-mac-signed.zxp"
+          $zxps = @(
+            "sync-extension-ae-windows-signed.zxp",
+            "sync-extension-premiere-windows-signed.zxp", 
+            "sync-extension-ae-mac-signed.zxp",
             "sync-extension-premiere-mac-signed.zxp"
           )
           
-          for zxp in "${zxps[@]}"; do
+          foreach ($zxp in $zxps) {
             echo "Verifying $zxp..."
-            if ! "$exe" -verify "$GITHUB_WORKSPACE/$zxp" -certinfo; then
-              echo "$zxp verify failed"
-              exit 1
-            fi
+            & $Exe -verify "$env:GITHUB_WORKSPACE\$zxp" -certinfo
+            if ($LASTEXITCODE -ne 0) { throw "$zxp verify failed" }
             echo "$zxp verified successfully"
-          done
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -233,11 +213,12 @@ jobs:
       - name: Get tag message
         if: startsWith(github.ref, 'refs/tags/')
         id: tag_message
+        shell: pwsh
         run: |
-          tag_message=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "$tag_message" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          $TAG_MESSAGE = git tag -l --format='%(contents)' ${{ github.ref_name }}
+          echo "message<<EOF" >> $env:GITHUB_OUTPUT
+          echo "$TAG_MESSAGE" >> $env:GITHUB_OUTPUT
+          echo "EOF" >> $env:GITHUB_OUTPUT
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
