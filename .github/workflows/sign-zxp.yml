@@ -46,8 +46,9 @@ jobs:
           
           # Helper to copy a panel skeleton
           function Copy-Panel($dest, $extSrc) {
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            # Copy the extension directory structure first
             Copy-Item $extSrc $dest -Recurse
+            # Then add shared files
             Copy-Item "ui" "$dest/ui" -Recurse
             Copy-Item "server" "$dest/server" -Recurse
             Copy-Item "icons" "$dest/icons" -Recurse
