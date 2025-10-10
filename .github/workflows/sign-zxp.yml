@@ -253,7 +253,7 @@ jobs:
             sync-extension-premiere-${{ matrix.os == 'windows-latest' && 'windows' || 'mac' }}-signed.zxp
 
       - name: Get tag message
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         id: tag_message
         run: |
           TAG_MESSAGE=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
@@ -262,7 +262,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Upload to GitHub Release (tag builds)
-        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest'
+        if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && matrix.os == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -283,7 +283,7 @@ jobs:
           generate_release_notes: true
 
       - name: Upload macOS ZXPs to Release
-        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest'
+        if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && matrix.os == 'macos-latest'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
