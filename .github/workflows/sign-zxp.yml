@@ -72,18 +72,6 @@ jobs:
           
           echo "Created CEP folders: $ae_win, $pp_win, $ae_mac, $pp_mac"
 
-      - name: Verify panel folders and clean macOS cruft
-        shell: pwsh
-        run: |
-          $Panel = Join-Path $env:GITHUB_WORKSPACE '${{ github.event.inputs.panel_path }}'
-          if (-not (Test-Path (Join-Path $Panel 'CSXS/manifest.xml'))) {
-            throw "CSXS/manifest.xml not found under: $Panel"
-          }
-          # remove .DS_Store / __MACOSX
-          Get-ChildItem -LiteralPath $Panel -Recurse -Force -Include '.DS_Store' | Remove-Item -Force -ErrorAction SilentlyContinue
-          Get-ChildItem -LiteralPath $Panel -Recurse -Directory -Force -Filter '__MACOSX' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          echo "Panel OK: $Panel"
-
       - name: Fetch ZXPSignCmd
         shell: pwsh
         run: |
