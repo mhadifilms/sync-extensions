@@ -1,12 +1,29 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+// Use the same app-data logs directory as the server
+function platformAppData(appName){
+  const home = os.homedir();
+  if (process.platform === 'win32') return require('path').join(home, 'AppData', 'Roaming', appName);
+  if (process.platform === 'darwin') return require('path').join(home, 'Library', 'Application Support', appName);
+  return require('path').join(home, '.config', appName);
+}
 
 // Minimal AIFF (AIFF/AIFC PCM) -> WAV converter implemented in pure Node.
-const DEBUG_LOG = (process.platform === 'win32')
-  ? path.join(os.tmpdir(), 'sync_ae_debug.log')
-  : '/tmp/sync_ae_debug.log';
+const BASE_DIR = process.env.SYNC_EXTENSIONS_DIR || platformAppData('sync. extensions');
+const LOGS_DIR = require('path').join(BASE_DIR, 'logs');
+try { require('fs').mkdirSync(LOGS_DIR, { recursive: true }); } catch(_){ }
+// Flag file only (shared with server)
+const DEBUG = (function(){
+  try{
+    const fs2 = require('fs');
+    const flag = require('path').join(LOGS_DIR, 'debug.enabled');
+    return fs2.existsSync(flag);
+  }catch(_){ return false; }
+})();
+const DEBUG_LOG = require('path').join(LOGS_DIR, 'sync_ae_debug.log');
 function tlog(){
+  if (!DEBUG) return;
   try{
     const line = `[${new Date().toISOString()}] [audio.js] ` + Array.from(arguments).map(a=>String(a)).join(' ') + '\n';
     fs.appendFileSync(DEBUG_LOG, line);

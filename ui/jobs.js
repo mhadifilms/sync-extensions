@@ -271,13 +271,21 @@
             // File logging for debugging
             function logToFile(msg) {
               try {
-                var logPath = '/tmp/sync_save_debug.log';
-                try {
-                  // Windows compatibility
-                  if (navigator.platform && navigator.platform.indexOf('Win') !== -1) {
-                    logPath = 'C:\\temp\\sync_save_debug.log';
-                  }
-                } catch(_) {}
+                var logPath = (function(){
+                  try {
+                    var dir = '';
+                    if (window.CSInterface) {
+                      var cs2 = new CSInterface();
+                      cs2.evalScript('(typeof SYNC_getLogDir===\'function\'?SYNC_getLogDir():\'\')', function(r){ dir = r||''; });
+                    }
+                    if (dir) return dir + ((navigator.platform && navigator.platform.indexOf('Win') !== -1) ? '\\' : '/') + 'sync_save_debug.log';
+                  } catch(_){ }
+                  if (navigator.platform && navigator.platform.indexOf('Win') !== -1) return 'C:\\temp\\sync_save_debug.log';
+                  try{ if (typeof require !== 'undefined'){ return require('os').tmpdir() + '/sync_save_debug.log'; } }catch(_){ }
+                  return '/tmp/sync_save_debug.log';
+                })();
+                // Only write when debug flag file exists
+                try{ if (typeof require !== 'undefined'){ var fs2=require('fs'); var path2=require('path'); var base=logPath.replace(/(\\|\/)sync_save_debug\.log$/,''); if(!fs2.existsSync(path2.join(base,'debug.enabled'))){ return; } } }catch(_){ }
                 var logFile = new File(logPath);
                 logFile.open('a');
                 logFile.write('[' + new Date().toISOString() + '] ' + msg + '\n');
@@ -399,15 +407,23 @@
           const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
           
           // File logging for debugging
-          function logToFile(msg) {
+            function logToFile(msg) {
             try {
-              var logPath = '/tmp/sync_insert_debug.log';
-              try {
-                // Windows compatibility
-                if (navigator.platform && navigator.platform.indexOf('Win') !== -1) {
-                  logPath = 'C:\\temp\\sync_insert_debug.log';
-                }
-              } catch(_) {}
+              var logPath = (function(){
+                try {
+                  var dir = '';
+                  if (window.CSInterface) {
+                    var cs3 = new CSInterface();
+                    cs3.evalScript('(typeof SYNC_getLogDir===\'function\'?SYNC_getLogDir():\'\')', function(r){ dir = r||''; });
+                  }
+                  if (dir) return dir + ((navigator.platform && navigator.platform.indexOf('Win') !== -1) ? '\\' : '/') + 'sync_insert_debug.log';
+                } catch(_){ }
+                if (navigator.platform && navigator.platform.indexOf('Win') !== -1) return 'C:\\temp\\sync_insert_debug.log';
+                try{ if (typeof require !== 'undefined'){ return require('os').tmpdir() + '/sync_insert_debug.log'; } }catch(_){ }
+                return '/tmp/sync_insert_debug.log';
+              })();
+              // Only write when debug flag file exists
+              try{ if (typeof require !== 'undefined'){ var fs3=require('fs'); var path3=require('path'); var base=logPath.replace(/(\\|\/)sync_insert_debug\.log$/,''); if(!fs3.existsSync(path3.join(base,'debug.enabled'))){ return; } } }catch(_){ }
               var logFile = new File(logPath);
               logFile.open('a');
               logFile.write('[' + new Date().toISOString() + '] ' + msg + '\n');

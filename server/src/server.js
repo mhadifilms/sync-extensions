@@ -84,9 +84,34 @@ const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases'
 const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 const GH_UA = process.env.GITHUB_USER_AGENT || 'sync-extension-updater/1.0';
 
-// Debug log helper (same file as AE host logs)
-const DEBUG_LOG = process.platform === 'win32' ? path.join(os.tmpdir(), 'sync_ae_debug.log') : '/tmp/sync_ae_debug.log';
+// Central app-data directory resolver and subfolders
+function platformAppData(appName){
+  const home = os.homedir();
+  if (process.platform === 'win32') return path.join(home, 'AppData', 'Roaming', appName);
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', appName);
+  return path.join(home, '.config', appName);
+}
+const BASE_DIR = process.env.SYNC_EXTENSIONS_DIR || platformAppData('sync. extensions');
+const DIRS = {
+  logs: path.join(BASE_DIR, 'logs'),
+  cache: path.join(BASE_DIR, 'cache'),
+  state: path.join(BASE_DIR, 'state'),
+  outputs: path.join(BASE_DIR, 'outputs'),
+  updates: path.join(BASE_DIR, 'updates')
+};
+try { fs.mkdirSync(DIRS.logs, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.cache, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.state, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.outputs, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.updates, { recursive: true }); } catch(_){ }
+
+// Debug flag and log helper to logs directory (flag file only)
+const DEBUG_FLAG_FILE = path.join(DIRS.logs, 'debug.enabled');
+let DEBUG = false;
+try { DEBUG = fs.existsSync(DEBUG_FLAG_FILE); } catch(_){ DEBUG = false; }
+const DEBUG_LOG = path.join(DIRS.logs, 'sync_ae_debug.log');
 function tlog(){
+  if (!DEBUG) return;
   try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(_){ }
 }
 
@@ -205,8 +230,8 @@ app.use(cors({
 
 let jobs = [];
 let jobCounter = 0;
-// Store state in OS temp, not visible in Documents
-const STATE_DIR = path.join(os.tmpdir(), 'sync_extension_state');
+// Store state in per-user app-data
+const STATE_DIR = DIRS.state;
 if (!fs.existsSync(STATE_DIR)) { try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch(_) {} }
 const jobsFile = path.join(STATE_DIR, 'jobs.json');
 const tokenFile = path.join(STATE_DIR, 'auth_token');
@@ -234,7 +259,7 @@ function saveJobs(){
 }
 loadJobs();
 // Helper to make a temp-readable copy when macOS places file in TemporaryItems (EPERM)
-const COPY_DIR = path.join(os.tmpdir(), 'sync_extension_cache');
+const COPY_DIR = DIRS.cache;
 function toReadableLocalPath(p){
   try{
     if (!p || typeof p !== 'string') return '';
@@ -395,7 +420,7 @@ const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_K
 const SUPA_BUCKET = process.env.SUPABASE_BUCKET || '';
 const SUPA_PREFIX = 'sync. extension/';
 const DOCS_DEFAULT_DIR = path.join(os.homedir(), 'Documents', 'sync. outputs');
-const TEMP_DEFAULT_DIR = path.join(os.tmpdir(), 'sync_extension_outputs');
+const TEMP_DEFAULT_DIR = DIRS.outputs;
 
 // Simple settings persistence for the panel (to help AE retain keys between reloads)
 let PANEL_SETTINGS = null;
@@ -424,7 +449,7 @@ app.post('/update/apply', async (req,res)=>{
     console.log(`Platform: ${process.platform}, Architecture: ${process.arch}`);
     
     // Download and extract update
-    const tempDir = path.join(os.tmpdir(), 'sync_extension_update_' + Date.now());
+    const tempDir = path.join(DIRS.updates, 'sync_extension_update_' + Date.now());
     try { fs.mkdirSync(tempDir, { recursive: true }); } catch(_){}
     
     const zipPath = path.join(tempDir, 'update.zip');

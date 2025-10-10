@@ -5,15 +5,32 @@
           debugEl.style.display = 'none';
         }
         
-        // Windows-compatible log path
-        var logFilePath = (process.platform === 'win32') ? 
-          process.env.TEMP + '\\sync_nle_autostart.log' : 
-          '/tmp/sync_nle_autostart.log';
+        // Prefer Node-based app-data logs directory
+        var logFilePath = (function(){
+          try{
+            if (typeof require !== 'undefined'){
+              var fs = require('fs');
+              var os = require('os');
+              var path = require('path');
+              var home = os.homedir();
+              var base = (process.platform === 'win32') ? path.join(home, 'AppData', 'Roaming', 'sync. extensions') : (process.platform === 'darwin') ? path.join(home, 'Library', 'Application Support', 'sync. extensions') : path.join(home, '.config', 'sync. extensions');
+              var logs = path.join(base, 'logs');
+              try { fs.mkdirSync(logs, { recursive: true }); } catch(_){ }
+              return path.join(logs, 'sync_nle_autostart.log');
+            }
+          }catch(_){ }
+          if (process && process.platform === 'win32') return (process.env.TEMP||'C:\\temp') + '\\sync_nle_autostart.log';
+          try{ if (typeof require !== 'undefined'){ var os2=require('os'); return os2.tmpdir()+ '/sync_nle_autostart.log'; } }catch(_){ }
+          return '/tmp/sync_nle_autostart.log';
+        })();
         
-        // Debug: Log the actual log file path
+        // Debug: Log the actual log file path (only when SYNC_DEBUG enabled)
         try {
           if (typeof require !== 'undefined') {
             var fs = require('fs');
+            var on = false;
+            try { var path2=require('path'); var flagPath = path2.join(path2.dirname(logFilePath), 'debug.enabled'); on = fs.existsSync(flagPath); } catch(_){ }
+            if (!on) { throw new Error('debug disabled'); }
             fs.writeFileSync(logFilePath, '=== AUTO-START DEBUG LOG ===\n');
             fs.appendFileSync(logFilePath, 'Log file: ' + logFilePath + '\n');
             fs.appendFileSync(logFilePath, 'Platform: ' + (process.platform || 'unknown') + '\n');

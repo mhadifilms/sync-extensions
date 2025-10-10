@@ -12,6 +12,33 @@ function _callSystem(cmd) {
   } catch(e2) { /* ignore */ }
   return '';
 }
+// Central app-data directory resolver for ExtendScript (Premiere)
+function SYNC_getBaseDirs(){
+  try{
+    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+    var root = Folder.userData.fsName;
+    var base = new Folder(root + (isWindows ? "\\sync. extensions" : "/sync. extensions"));
+    if (!base.exists) { try{ base.create(); }catch(_){ } }
+    function ensure(name){ var f = new Folder(base.fsName + (isWindows ? ('\\' + name) : ('/' + name))); if(!f.exists){ try{ f.create(); }catch(_){ } } return f.fsName; }
+    return { base: base.fsName, logs: ensure('logs'), cache: ensure('cache'), state: ensure('state'), outputs: ensure('outputs'), updates: ensure('updates') };
+  }catch(e){ try{ return { base: Folder.userData.fsName, logs: Folder.userData.fsName, cache: Folder.userData.fsName, state: Folder.userData.fsName, outputs: Folder.userData.fsName, updates: Folder.userData.fsName }; }catch(_){ return { base:'', logs:'', cache:'', state:'', outputs:'', updates:'' }; } }
+}
+function SYNC_getLogDir(){ try{ return SYNC_getBaseDirs().logs; }catch(_){ return ''; } }
+function _pproDebugLogPath(){
+  try{
+    var isWindows=false; try{ isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); }catch(_){ isWindows=false; }
+    var dir=SYNC_getLogDir(); if(!dir){ dir = Folder.temp.fsName; }
+    // Respect debug flag file in logs (no UI toggle / env required)
+    try{
+      var flag = new File(dir + (isWindows?'\\':'/') + 'debug.enabled');
+      var enabled = false;
+      try{ enabled = flag && flag.exists; }catch(_){ enabled = false; }
+      if (!enabled) { return ''; }
+    }catch(_){ }
+    return dir + (isWindows?'\\':'/') + 'sync_ppro_debug.log';
+  }catch(e){ try{ return Folder.temp.fsName + '/sync_ppro_debug.log'; }catch(_){ return 'sync_ppro_debug.log'; } }
+}
+function _pproDebugLogFile(){ try{ return new File(_pproDebugLogPath()); }catch(e){ try{ return new File(Folder.temp.fsName + '/sync_ppro_debug.log'); }catch(_){ return new File('sync_ppro_debug.log'); } } }
 
 // Auto-start is now handled by ui/nle.js
 
@@ -141,7 +168,7 @@ function PPRO_insertAtPlayhead(jobId) {
     
     // Log to temp file for debugging
     try {
-      var logFile = new File("/tmp/sync_ppro_debug.log");
+      var logFile = _pproDebugLogFile();
       logFile.open("a");
       logFile.writeln("[" + new Date().toString() + "] PPRO_insertAtPlayhead called with jobId: " + jobId);
       logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
@@ -178,7 +205,7 @@ function PPRO_insertFileAtPlayhead(payloadJson) {
     
     // Log to temp file for debugging
     try {
-      var logFile = new File("/tmp/sync_ppro_debug.log");
+      var logFile = _pproDebugLogFile();
       logFile.open("a");
       logFile.writeln("[" + new Date().toString() + "] PPRO_insertFileAtPlayhead called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
@@ -276,7 +303,7 @@ function PPRO_importIntoBin(jobId) {
     
     // Log to temp file for debugging
     try {
-      var logFile = new File("/tmp/sync_ppro_debug.log");
+      var logFile = _pproDebugLogFile();
       logFile.open("a");
       logFile.writeln("[" + new Date().toString() + "] PPRO_importIntoBin called with jobId: " + jobId);
       logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
@@ -329,7 +356,7 @@ function PPRO_importFileToBin(payloadJson) {
     
     // Log to temp file for debugging
     try {
-      var logFile = new File("/tmp/sync_ppro_debug.log");
+      var logFile = _pproDebugLogFile();
       logFile.open("a");
       logFile.writeln("[" + new Date().toString() + "] PPRO_importFileToBin called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
@@ -645,7 +672,7 @@ function PPRO_exportInOutVideo(payloadJson){
     
     // Log to temp file for debugging
     try {
-      var logFile = new File("/tmp/sync_ppro_debug.log");
+      var logFile = _pproDebugLogFile();
       logFile.open("a");
       logFile.writeln("[" + new Date().toString() + "] PPRO_exportInOutVideo called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
@@ -676,7 +703,7 @@ function PPRO_exportInOutAudio(payloadJson){
     
     // Log to temp file for debugging
     try {
-      var logFile = new File("/tmp/sync_ppro_debug.log");
+      var logFile = _pproDebugLogFile();
       logFile.open("a");
       logFile.writeln("[" + new Date().toString() + "] PPRO_exportInOutAudio called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
