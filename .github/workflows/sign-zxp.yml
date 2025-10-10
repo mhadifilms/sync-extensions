@@ -115,37 +115,39 @@ jobs:
         run: |
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           
-          # Test certificate first
-          echo "Testing certificate..."
-          & $Exe -verify "$env:GITHUB_WORKSPACE\cert.p12" -certinfo
-          if ($LASTEXITCODE -ne 0) { 
-            echo "Certificate test failed, trying without password..."
-            & $Exe -verify "$env:GITHUB_WORKSPACE\cert.p12" -certinfo -pwd ""
-            if ($LASTEXITCODE -ne 0) { throw "Certificate verification failed with exit $LASTEXITCODE" }
-          }
+          # Test certificate first (ZXPSignCmd doesn't verify .p12 files directly)
+          echo "Certificate file exists: $(Test-Path "$env:GITHUB_WORKSPACE\cert.p12")"
+          echo "Certificate size: $((Get-Item "$env:GITHUB_WORKSPACE\cert.p12").Length) bytes"
           
           # Sign AE extension
           $aeIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel"
           $aeOut = "$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"
+          $certPath = "$env:GITHUB_WORKSPACE\cert.p12"
+          $password = "${{ secrets.ZXP_P12_PASSWORD }}"
+          
           echo "Signing AE extension..."
           echo "Input: $aeIn"
           echo "Output: $aeOut"
-          echo "Certificate: $env:GITHUB_WORKSPACE\cert.p12"
-          & $Exe -sign "$aeIn" "$aeOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
+          echo "Certificate: $certPath"
+          echo "Password length: $($password.Length)"
+          
+          # Try signing with timestamp first
+          & $Exe -sign "$aeIn" "$aeOut" "$certPath" "$password" -tsa "${{ github.event.inputs.tsa_url }}"
           if ($LASTEXITCODE -ne 0) { 
-            echo "AE signing failed, trying without timestamp..."
-            & $Exe -sign "$aeIn" "$aeOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}"
+            echo "AE signing with timestamp failed (exit $LASTEXITCODE), trying without timestamp..."
+            & $Exe -sign "$aeIn" "$aeOut" "$certPath" "$password"
             if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for AE with exit $LASTEXITCODE" }
           }
           
           # Sign Premiere extension
           $pproIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ppro.panel"
           $pproOut = "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"
+          
           echo "Signing Premiere extension..."
-          & $Exe -sign "$pproIn" "$pproOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
+          & $Exe -sign "$pproIn" "$pproOut" "$certPath" "$password" -tsa "${{ github.event.inputs.tsa_url }}"
           if ($LASTEXITCODE -ne 0) { 
-            echo "Premiere signing failed, trying without timestamp..."
-            & $Exe -sign "$pproIn" "$pproOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}"
+            echo "Premiere signing with timestamp failed (exit $LASTEXITCODE), trying without timestamp..."
+            & $Exe -sign "$pproIn" "$pproOut" "$certPath" "$password"
             if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for Premiere with exit $LASTEXITCODE" }
           }
 
