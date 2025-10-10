@@ -88,9 +88,9 @@ jobs:
           if (-not $Exe) { throw "ZXPSignCmd.exe not found in any version" }
           echo "ZXPSignCmd at: $Exe"
           
-          # Test ZXPSignCmd
+          # Test ZXPSignCmd (help command always returns non-zero, that's normal)
           & $Exe -help
-          if ($LASTEXITCODE -ne 0) { echo "ZXPSignCmd help failed, but continuing..." }
+          echo "ZXPSignCmd help completed (exit code $LASTEXITCODE is normal)"
 
       - name: Restore signing cert
         shell: pwsh
@@ -113,11 +113,16 @@ jobs:
       - name: Sign ZXP packages
         shell: pwsh
         run: |
+          echo "=== Starting ZXP Signing Process ==="
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           
           # Test certificate first (ZXPSignCmd doesn't verify .p12 files directly)
           echo "Certificate file exists: $(Test-Path "$env:GITHUB_WORKSPACE\cert.p12")"
           echo "Certificate size: $((Get-Item "$env:GITHUB_WORKSPACE\cert.p12").Length) bytes"
+          
+          # Check if CEP folders exist
+          echo "AE folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel")"
+          echo "Premiere folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\com.sync.extension.ppro.panel")"
           
           # Sign AE extension
           $aeIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel"
