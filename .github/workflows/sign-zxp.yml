@@ -97,6 +97,9 @@ jobs:
           # Test ZXPSignCmd (help command always returns non-zero, that's normal)
           & $Exe -help
           echo "ZXPSignCmd help completed (exit code $LASTEXITCODE is normal)"
+          # Reset error state - help command exit codes are expected
+          $Error.Clear()
+          $LASTEXITCODE = 0
 
       - name: Restore signing cert
         shell: pwsh
