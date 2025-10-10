@@ -44,21 +44,21 @@ jobs:
           New-Item -ItemType Directory -Force -Path $winRoot | Out-Null
           New-Item -ItemType Directory -Force -Path $macRoot | Out-Null
           
-          # Helper to copy a panel skeleton
-          function Copy-Panel($dest, $extSrc) {
-            # Create destination directory
-            New-Item -ItemType Directory -Force -Path $dest | Out-Null
-            # Copy extension contents into destination
-            Copy-Item "$extSrc/*" $dest -Recurse
-            # Then add shared files
-            Copy-Item "ui" "$dest/ui" -Recurse
-            Copy-Item "server" "$dest/server" -Recurse
-            Copy-Item "icons" "$dest/icons" -Recurse
-            Copy-Item "lib" "$dest/lib" -Recurse
-            Copy-Item "bin" "$dest/bin" -Recurse
-            Copy-Item "index.html" "$dest/"
-            Copy-Item "host" "$dest/host" -Recurse
-          }
+              # Helper to copy a panel skeleton
+              function Copy-Panel($dest, $extSrc) {
+                # Create destination directory
+                New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                # Copy extension contents into destination using robocopy to preserve permissions
+                & robocopy "$extSrc" "$dest" /E /COPY:DAT
+                # Then add shared files
+                & robocopy "ui" "$dest/ui" /E /COPY:DAT
+                & robocopy "server" "$dest/server" /E /COPY:DAT
+                & robocopy "icons" "$dest/icons" /E /COPY:DAT
+                & robocopy "lib" "$dest/lib" /E /COPY:DAT
+                & robocopy "bin" "$dest/bin" /E /COPY:DAT
+                Copy-Item "index.html" "$dest/"
+                & robocopy "host" "$dest/host" /E /COPY:DAT
+              }
           
           # Build Windows variants (strip darwin bins)
           Copy-Panel $ae_win  "extensions/ae-extension"
@@ -68,12 +68,13 @@ jobs:
             Remove-Item "$dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
           }
           
-          # Build macOS variants (strip win bins)
-          Copy-Panel $ae_mac  "extensions/ae-extension"
-          Copy-Panel $pp_mac  "extensions/premiere-extension"
-          foreach ($dest in @($ae_mac,$pp_mac)) {
-            Remove-Item "$dest/bin/win32-x64" -Recurse -Force -ErrorAction SilentlyContinue
-          }
+              # Build macOS variants (strip win bins)
+              Copy-Panel $ae_mac  "extensions/ae-extension"
+              Copy-Panel $pp_mac  "extensions/premiere-extension"
+              foreach ($dest in @($ae_mac,$pp_mac)) {
+                Remove-Item "$dest/bin/win32-x64" -Recurse -Force -ErrorAction SilentlyContinue
+                # Execute permissions are set on source binaries
+              }
           
           echo "Created CEP folders: $ae_win, $pp_win, $ae_mac, $pp_mac"
 

@@ -188,34 +188,62 @@
                       updateDebugStatus('Error checking server file: ' + e.message);
                     }
                     
-                    // Find actual Node.js executable - try multiple paths
+                    // Use bundled Node.js executable
                     var nodePath = null;
                     var fs = require('fs');
+                    var path = require('path');
+                    
+                    // Determine platform and architecture
+                    var platform = process.platform; // 'darwin' | 'win32'
+                    var arch = process.arch; // 'arm64' | 'x64'
+                    var nodeBin = platform === 'win32' ? 'node.exe' : 'node';
+                    
+                    // Construct path to bundled Node.js binary
+                    var bundledNodePath = path.join(extPath, 'bin', platform + '-' + arch, nodeBin);
+                    
+                    updateDebugStatus('Looking for bundled Node.js at: ' + bundledNodePath);
                     
                     var candidates = [];
-                    if (isWindows) {
-                      candidates = [
-                        'C:\\Program Files\\nodejs\\node.exe',
-                        'C:\\Program Files (x86)\\nodejs\\node.exe',
-                        'C:\\nodejs\\node.exe',
-                        'node.exe'  // Try PATH
-                      ];
-                      updateDebugStatus('Windows detected, trying Node.js paths: ' + candidates.join(', '));
+                    if (fs.existsSync(bundledNodePath)) {
+                      candidates = [bundledNodePath];
+                      updateDebugStatus('Found bundled Node.js binary');
                     } else {
-                      candidates = [
-                        '/opt/homebrew/bin/node',
-                        '/usr/local/bin/node',
-                        '/usr/bin/node',
-                        '/usr/local/opt/node/bin/node',
-                        '/Applications/Node.js.app/Contents/MacOS/node',
-                        'node'  // Try PATH
-                      ];
+                      // Fallback to system Node.js if bundled binary not found
+                      if (isWindows) {
+                        candidates = [
+                          'C:\\Program Files\\nodejs\\node.exe',
+                          'C:\\Program Files (x86)\\nodejs\\node.exe',
+                          'C:\\nodejs\\node.exe',
+                          'node.exe'  // Try PATH
+                        ];
+                        updateDebugStatus('Windows detected, trying system Node.js paths: ' + candidates.join(', '));
+                      } else {
+                        candidates = [
+                          '/opt/homebrew/bin/node',
+                          '/usr/local/bin/node',
+                          '/usr/bin/node',
+                          '/usr/local/opt/node/bin/node',
+                          '/Applications/Node.js.app/Contents/MacOS/node',
+                          'node'  // Try PATH
+                        ];
+                        updateDebugStatus('macOS detected, trying system Node.js paths: ' + candidates.join(', '));
+                      }
                     }
                     
                     // Try each candidate synchronously
                     for (var i = 0; i < candidates.length; i++) {
                       try {
                         var candidate = candidates[i];
+                        
+                        // For bundled Node.js on macOS, ensure it has execute permissions
+                        if (candidate === bundledNodePath && platform === 'darwin') {
+                          try {
+                            fs.chmodSync(candidate, 0o755);
+                            updateDebugStatus('Set execute permissions on bundled Node.js binary');
+                          } catch (chmodError) {
+                            updateDebugStatus('Warning: Could not set execute permissions: ' + chmodError.message);
+                          }
+                        }
                         updateDebugStatus('Trying Node.js path: ' + candidate);
                         
                         // For PATH-based candidates, try execSync
