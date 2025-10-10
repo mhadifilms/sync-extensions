@@ -199,6 +199,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "$zxp verify failed" }
             echo "$zxp verified successfully"
           }
+          
+          # Note: Quarantine attributes are added by macOS when files are downloaded
+          # Users need to remove them manually: xattr -d com.apple.provenance *.zxp
+          echo "Note: If ZXP installer rejects the extension, remove quarantine attributes:"
+          echo "xattr -d com.apple.provenance *.zxp"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

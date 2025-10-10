@@ -93,6 +93,10 @@ The panel communicates with a local Node.js server on port 3000. The server entr
 
 ## Troubleshooting
 
+### Installation Issues
+- **ZXP installer rejects extension** → Remove quarantine attributes: `xattr -d com.apple.provenance *.zxp`
+- **macOS Gatekeeper blocks installation** → Remove quarantine attributes: `xattr -d com.apple.provenance *.zxp`
+
 ### Extension Issues
 - **Extension not visible** → For dev builds, ensure PlayerDebugMode is enabled. Restart Adobe app.
 - **Backend not responding** → Port 3000 may be blocked by another process. Restart the Adobe app.
