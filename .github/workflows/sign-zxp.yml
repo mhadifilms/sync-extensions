@@ -68,7 +68,7 @@ jobs:
           
           echo "Created CEP folders: $ae_dest, $ppro_dest for $os"
 
-      - name: Verify panel folder + clean macOS cruft
+      - name: Verify panel folder and clean macOS cruft
         shell: pwsh
         run: |
           $Panel = Join-Path $env:GITHUB_WORKSPACE 'com.sync.extension.ppro.panel' # This input is for manual trigger, for matrix we check both
@@ -228,7 +228,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for Premiere with exit $LASTEXITCODE" }
           }
 
-      - name: Verify signatures (prints cert/timestamp info)
+      - name: Verify signatures and print cert info
         shell: pwsh
         run: |
           if ("${{ matrix.os }}" -eq "macos-latest") {
