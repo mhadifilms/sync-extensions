@@ -11,3 +11,6 @@ release.sh
 # CEP build artifacts (created by GitHub Actions)
 com.sync.extension.ae.panel/
 com.sync.extension.ppro.panel/
+
+# Legacy release artifacts (now handled by GitHub Actions)
+dist/releases/
