@@ -78,6 +78,8 @@ function execPowerShell(command, options = {}) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXT_ROOT = path.resolve(__dirname, '..', '..');
+const EXT_FOLDER = path.basename(EXT_ROOT);
+const APP_ID = EXT_FOLDER.indexOf('.ae.') !== -1 ? 'ae' : (EXT_FOLDER.indexOf('.ppro.') !== -1 ? 'premiere' : 'unknown');
 const MANIFEST_PATH = path.join(EXT_ROOT, 'CSXS', 'manifest.xml');
 const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-extensions';
 const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
@@ -165,24 +167,39 @@ async function getLatestReleaseInfo(){
     const tag = j.tag_name || j.name || '';
     if (!tag) return null;
     
-    // Look for platform-specific release asset (ZXP preferred, ZIP fallback)
+    // Look for platform+app-specific release asset (ZXP preferred, ZIP fallback)
     const isWindows = process.platform === 'win32';
-    const zxpName = isWindows ? `sync-extensions-windows-${tag}.zxp` : `sync-extensions-mac-${tag}.zxp`;
-    const zipName = isWindows ? `sync-extensions-windows-${tag}.zip` : `sync-extensions-mac-${tag}.zip`;
-    
-    // Prefer ZXP over ZIP
-    let asset = j.assets?.find(a => a.name === zxpName);
-    if (!asset) {
-      asset = j.assets?.find(a => a.name === zipName);
+    const osName = isWindows ? 'windows' : 'mac';
+    const appName = (APP_ID === 'ae' || APP_ID === 'premiere') ? APP_ID : 'premiere';
+    const preferredPatterns = [
+      // New naming (signed ZXP per app/os)
+      new RegExp(`^sync-extension-${appName}-${osName}-signed\\.zxp$`, 'i'),
+      // Fallbacks: any zxp for our os
+      new RegExp(`^sync-extension-([a-z]+)-${osName}-signed\\.zxp$`, 'i'),
+      // Older naming (single asset per os)
+      new RegExp(`^sync-extensions-${osName}-${tag}\\.zxp$`, 'i'),
+      new RegExp(`^sync-extensions-${osName}-${tag}\\.zip$`, 'i')
+    ];
+
+    let asset = null;
+    if (Array.isArray(j.assets)){
+      for (const pat of preferredPatterns){
+        asset = j.assets.find(a => pat.test(String(a.name||'')));
+        if (asset) break;
+      }
+      // Final fallback: any .zxp for our os
+      if (!asset) asset = j.assets.find(a => new RegExp(`${osName}.*\\.zxp$`, 'i').test(String(a.name||'')));
+      // Last resort: any asset
+      if (!asset) asset = j.assets[0];
     }
     
     if (asset) {
-      return { 
-        tag, 
-        version: normalizeVersion(tag), 
-        html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`, 
+      return {
+        tag,
+        version: normalizeVersion(tag),
+        html_url: j.html_url || `https://github.com/${repo}/releases/tag/${tag}`,
         zip_url: asset.browser_download_url,
-        is_zxp: asset.name.endsWith('.zxp')
+        is_zxp: String(asset.name||'').toLowerCase().endsWith('.zxp')
       };
     }
     
@@ -544,9 +561,9 @@ app.post('/update/apply', async (req,res)=>{
     }
     console.log('Using extracted directory:', extractedDir);
     
-    // Look for install script in the extracted directory
+    // Look for install script in the extracted directory (disabled; always use manual copy)
     const updateScript = path.join(extractedDir, 'scripts', isWindows ? 'install.ps1' : 'install.sh');
-    if (fs.existsSync(updateScript)) {
+    if (false && fs.existsSync(updateScript)) {
       // Detect which extensions are currently installed
       let aeDestDir, pproDestDir;
       

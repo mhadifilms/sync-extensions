@@ -11,32 +11,28 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 - **After Effects & Premiere Pro support**: Works natively in both AE and PPro, with host-specific import and bin management.
 - **Batch job history**: Save and insert previous jobs from the built-in history tab directly into your project.
 - **Automatic backend management**: Local Node.js server auto-starts and handles all file operations, transcoding, and API communication.
-- **Pure Node.js audio conversion**: Handles AIFF to WAV/MP3 conversion without external dependencies.
+ - **Automatic backend management (bundled Node)**: A private Node.js runtime is bundled per-OS and started by the panel. No system Node or npm install required.
+ - **Pure Node.js audio conversion**: Handles AIFF to WAV/MP3 conversion without external tools.
 
 ## Limitations
-- Uses Supabase for file storage on files above 20MB, and for files up to 1GB. Files above 1GB are automatically rejected.
-- Uses port 300 for local server communication, but currently kills any existing server processes when starting a new one.
-- ProRes videos show up as black in the preview, but work fine due to a Chromium limitation.
-- Currently no support for in-app audio generation.
+- Uses Supabase for file storage on files above 20MB, and for files up to 1GB. Files above 1GB are rejected.
+- Local server runs on fixed port 3000. If an instance is already healthy on 3000, the panel reuses it.
+- ProRes videos appear black in the preview due to a Chromium limitation, but export is unaffected.
+- No in‑app audio generation yet.
 
 ## System Requirements
 
 ### Operating Systems
 - **macOS**: 10.15 (Catalina) or later
-- **Windows**: Windows 10 version 1903 or later
+- **Windows**: Windows 10 or later
 
 ### Adobe Applications
 - **Premiere Pro**: 2024 (24.0) or later
 - **After Effects**: 2024 (24.0) or later
 
 ### Dependencies
-- **Node.js**: 16.0 or later (auto-detected from common install locations)
-- **Node.js**: Required for audio conversion and server functionality (auto-installed via Homebrew on macOS)
-- **CEP Runtime**: 11.0+ (automatically enabled by install script)
-
-### Package Managers (for automated installation)
-- **macOS**: Homebrew (https://brew.sh/) - Required for automatic Node.js installation
-- **Windows**: No additional package manager required (uses built-in PowerShell)
+- **Bundled Node runtime**: Included in the extension (`bin/`) for macOS (arm64, x64) and Windows (x64). The panel spawns this runtime; no system Node is required.
+- **CEP Runtime**: 11.0+
 
 ### Network
 - Local server runs on port 3000 (auto-starts with extension)
@@ -44,68 +40,41 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 
 ### Repository layout
 - `CSXS/manifest.xml` — CEP manifest (ExtensionBundleId, hosts, icons)
-- `index.html` — panel UI and logic
-- `host/ppro.jsx` — ExtendScript bridge to Premiere (exports, import/insert, dialogs)
+- `index.html` — panel entry
+- `ui/` — panel UI logic (spawns bundled Node)
+- `host/` — ExtendScript bridges for AE/PPro
 - `lib/CSInterface.js` — CEP host bridge
-- `extensions/premiere-extension/epr/` — Adobe Media Encoder export presets used for In/Out renders (Premiere only)
 - `server/` — local Node helper (jobs, costs, file operations)
-- `icons/` — panel icons
-- `scripts/` — helper scripts (dev install, package ZXP)
+- `bin/` — bundled Node runtimes (`darwin-arm64`, `darwin-x64`, `win32-x64`)
+- `extensions/premiere-extension/epr/` — AME export presets (Premiere only)
+- `scripts/release.sh` — builds CEP folders for signing
+- `.github/workflows/sign-zxp.yml` — CI for signing ZXP packages
 
 ## Installation
 
-### Quick Install (Recommended)
+### Recommended (signed ZXP)
+1. Download the platform/app ZXP from the latest [Release](https://github.com/mhadifilms/sync-extensions/releases):
+   - `sync-extension-ae-windows-signed.zxp`
+   - `sync-extension-premiere-windows-signed.zxp`
+   - `sync-extension-ae-mac-signed.zxp`
+   - `sync-extension-premiere-mac-signed.zxp`
+2. Install with a ZXP installer (e.g., aescripts ZXP Installer or Anastasiy’s Extension Manager).
+3. Restart Adobe app and open the panel from Window → Extensions.
 
-**macOS:**
-```bash
-# Download and extract the ZIP, then run:
-cd com.sync.extension.premiere.panel  # or .ae.panel for After Effects
-./scripts/install.sh --premiere
-```
-
-**Windows:**
-```powershell
-# Download and extract the ZIP, then run:
-cd com.sync.extension.premiere.panel  # or .ae.panel for After Effects
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -App premiere
-```
-
-**Manual Install (if scripts fail):**
-1. Download ZIP from [releases](https://github.com/mhadifilms/sync-extensions/releases)
-2. Extract and move `com.sync.extension.premiere.panel` to:
+### Developer install (unzipped folder)
+1. Extract the ZXP (it’s a ZIP) and copy `com.sync.extension.*.panel` to CEP extensions:
    - macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
    - Windows: `%APPDATA%\Adobe\CEP\extensions\`
-3. Enable debug mode:
+2. If needed for dev builds, enable PlayerDebugMode:
    - macOS: `defaults write com.adobe.CSXS.11 PlayerDebugMode 1`
-   - Windows: Set registry `HKEY_CURRENT_USER\Software\Adobe\CSXS.11\PlayerDebugMode = 1`
-4. Restart Premiere Pro → Window → Extensions → "sync. for Premiere"
+   - Windows: `HKEY_CURRENT_USER\Software\Adobe\CSXS.11\PlayerDebugMode = 1`
+3. Restart the host app.
 
 ## Local Server
-The panel communicates with a local Node.js server on port 3000. The server is bundled in `server/` and starts automatically when the extension loads.
+The panel communicates with a local Node.js server on port 3000. The server entry is `server/dist/server.js` (falls back to `server/src/server.js`) and is started by the bundled Node runtime under `bin/`.
 
-**Auto-start**: Server launches automatically via `PPRO_startBackend` or `AEFT_startBackend` functions  
-**Manual start** (if auto-start fails):
-```bash
-# Navigate to extension folder
-cd ~/Library/Application\ Support/Adobe/CEP/extensions/com.sync.extension.ppro.panel/server
-
-# Install dependencies (if needed)
-npm install --omit=dev
-
-# Start server manually
-npm start
-```
-
-**For After Effects:**
-```bash
-cd ~/Library/Application\ Support/Adobe/CEP/extensions/com.sync.extension.ae.panel/server
-npm install --omit=dev
-npm start
-```
-
-**Node.js Detection**: The extension automatically finds Node.js in common locations:
-- macOS: `/opt/homebrew/bin/node`, `/usr/local/bin/node`, `/usr/bin/node`
-- Windows: PATH environment variable
+**Auto-start**: The panel spawns the bundled Node per‑OS and starts the server automatically.  
+**No npm install**: All runtime dependencies are shipped; users never run npm.
 
 ## Settings supported
 - Model selection
@@ -113,7 +82,6 @@ npm start
 - Temperature
 - Active speaker detection
 - Occlusion detection
-- Supabase URL / Key / Bucket, Save location
 
 ## Features
 - **Model Selection**: Choose from available sync models
@@ -121,15 +89,14 @@ npm start
 - **Temperature Control**: Adjust sync sensitivity
 - **Active Speaker Detection**: Automatic speaker identification
 - **Occlusion Detection**: Handle visual obstructions
-- **Supabase Integration**: Cloud storage for large files
 - **Auto Updates**: Built-in update system via GitHub releases
 
 ## Troubleshooting
 
 ### Extension Issues
-- **Extension not visible** → Ensure PlayerDebugMode is enabled (install script sets this). Restart Adobe app.
-- **Backend not responding** → Port 3000 might be blocked. Quit conflicting apps or restart Adobe app.
-- **Version shows "unknown"** → Server may not be running. Check extension logs.
+- **Extension not visible** → For dev builds, ensure PlayerDebugMode is enabled. Restart Adobe app.
+- **Backend not responding** → Port 3000 may be blocked by another process. Restart the Adobe app.
+- **Version shows "unknown"** → Server may not be running. Check extension logs (Help → Developer Tools).
 
 ### Media Issues
 - **ProRes preview shows black** → Chromium won't decode ProRes; preview uses H.264.
@@ -137,13 +104,12 @@ npm start
 - **Audio conversion failed** → Check Node.js installation and server status
 
 ### System Issues
-- **Node.js not found** → Install Node.js 16+ from nodejs.org or via Homebrew (`brew install node`)
-- **Homebrew not found (macOS)** → Install Homebrew: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-- **Permission errors** → Run install script with appropriate permissions
-- **Windows compatibility** → Ensure Windows 10 1903+ and Adobe 2024+
+- **ZXP installation failed** → Use a modern ZXP installer and ensure the ZXP is signed.
+- **macOS Gatekeeper** → If blocked, allow the installer in System Settings → Privacy & Security.
+- **Windows compatibility** → Windows 10 1903+ and Adobe 2024+ recommended.
 
 ## Updates
 The extension includes an automatic update system:
-- Click "check updates" in the extension settings
-- Updates are downloaded from GitHub releases
-- Restart Adobe app after update installation
+- Click "Check updates" in the panel settings.
+- The server downloads the appropriate ZXP asset based on OS (mac/windows) and app (AE/PPro).
+- After the download, the panel installs the new version and prompts for restart.

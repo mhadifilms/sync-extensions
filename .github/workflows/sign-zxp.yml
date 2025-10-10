@@ -11,6 +11,9 @@ on:
         description: "Timestamp server URL"
         required: true
         default: "http://timestamp.digicert.com"
+  push:
+    tags:
+      - "v*"
 
 jobs:
   sign:
@@ -19,25 +22,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build CEP folders
+      - name: Build CEP folders (Windows + macOS variants)
         shell: pwsh
         run: |
-          # Create CEP-ready extension folders
-          $ae_dest = "com.sync.extension.ae.panel"
-          $ppro_dest = "com.sync.extension.ppro.panel"
-          
-          # Clean existing folders
-          if (Test-Path $ae_dest) { Remove-Item $ae_dest -Recurse -Force }
-          if (Test-Path $ppro_dest) { Remove-Item $ppro_dest -Recurse -Force }
-          
-          # Copy AE extension files
-          Copy-Item "extensions/ae-extension" $ae_dest -Recurse
-          
-          # Copy Premiere extension files  
-          Copy-Item "extensions/premiere-extension" $ppro_dest -Recurse
-          
-          # Copy shared files to both extensions
-          foreach ($dest in @($ae_dest, $ppro_dest)) {
+          # Create separate build roots for windows and mac packages
+          $winRoot = "build/win"
+          $macRoot = "build/mac"
+          $ae_win  = Join-Path $winRoot "com.sync.extension.ae.panel"
+          $pp_win  = Join-Path $winRoot "com.sync.extension.ppro.panel"
+          $ae_mac  = Join-Path $macRoot "com.sync.extension.ae.panel"
+          $pp_mac  = Join-Path $macRoot "com.sync.extension.ppro.panel"
+
+          foreach ($p in @($winRoot,$macRoot,$ae_win,$pp_win,$ae_mac,$pp_mac)) {
+            if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+          }
+
+          # Helper to copy a panel skeleton
+          function Copy-Panel($dest, $extSrc) {
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            Copy-Item $extSrc $dest -Recurse
             Copy-Item "ui" "$dest/ui" -Recurse
             Copy-Item "server" "$dest/server" -Recurse
             Copy-Item "icons" "$dest/icons" -Recurse
@@ -46,16 +49,25 @@ jobs:
             Copy-Item "index.html" "$dest/"
             Copy-Item "host" "$dest/host" -Recurse
           }
-          
-          # Remove macOS binaries for Windows package
-          Remove-Item "$ae_dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item "$ae_dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item "$ppro_dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item "$ppro_dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
-          
-          echo "Created CEP folders: $ae_dest, $ppro_dest"
 
-      - name: Verify panel folder + clean macOS cruft
+          # Build Windows variants (strip darwin bins)
+          Copy-Panel $ae_win  "extensions/ae-extension"
+          Copy-Panel $pp_win  "extensions/premiere-extension"
+          foreach ($dest in @($ae_win,$pp_win)) {
+            Remove-Item "$dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item "$dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # Build macOS variants (strip win bins)
+          Copy-Panel $ae_mac  "extensions/ae-extension"
+          Copy-Panel $pp_mac  "extensions/premiere-extension"
+          foreach ($dest in @($ae_mac,$pp_mac)) {
+            Remove-Item "$dest/bin/win32-x64" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          echo "Created CEP folders: $ae_win, $pp_win, $ae_mac, $pp_mac"
+
+      - name: Verify panel folder + clean macOS cruft (requested panel)
         shell: pwsh
         run: |
           $Panel = Join-Path $env:GITHUB_WORKSPACE '${{ github.event.inputs.panel_path }}'
@@ -115,22 +127,24 @@ jobs:
           P12_BASE64: ${{ secrets.ZXP_P12_BASE64 }}
           ZXP_P12_PASSWORD: ${{ secrets.ZXP_P12_PASSWORD }}
 
-      - name: Sign ZXP packages
+      - name: Sign ZXP packages (Windows + macOS variants)
         shell: pwsh
         run: |
           echo "=== Starting ZXP Signing Process ==="
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           
-          # Test certificate first (ZXPSignCmd doesn't verify .p12 files directly)
+          # Test certificate first
           echo "Certificate file exists: $(Test-Path "$env:GITHUB_WORKSPACE\cert.p12")"
           echo "Certificate size: $((Get-Item "$env:GITHUB_WORKSPACE\cert.p12").Length) bytes"
           
           # Check if CEP folders exist
-          echo "AE folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel")"
-          echo "Premiere folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\com.sync.extension.ppro.panel")"
+          echo "AE (win) folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel")"
+          echo "Premiere (win) folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel")"
+          echo "AE (mac) folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel")"
+          echo "Premiere (mac) folder exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel")"
           
-          # Sign AE extension
-          $aeIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel"
+          # Sign AE extension (Windows)
+          $aeIn = "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel"
           $aeOut = "$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"
           $certPath = "$env:GITHUB_WORKSPACE\cert.p12"
           $password = "${{ secrets.ZXP_P12_PASSWORD }}"
@@ -156,10 +170,33 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for AE with exit $LASTEXITCODE" }
           }
           
-          # Sign Premiere extension
-          $pproIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ppro.panel"
+          # Sign Premiere extension (Windows)
+          $pproIn = "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel"
           $pproOut = "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"
           
+          # Sign AE extension (macOS)
+          $aeInMac = "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel"
+          $aeOutMac = "$env:GITHUB_WORKSPACE\sync-extension-ae-mac-signed.zxp"
+          echo "Signing AE (mac) extension..."
+          if (-not (Test-Path $aeInMac)) { throw "Input directory not found: $aeInMac" }
+          & $Exe -sign "$aeInMac" "$aeOutMac" "$certPath" "$password" -tsa "${{ github.event.inputs.tsa_url }}"
+          if ($LASTEXITCODE -ne 0) {
+            echo "AE (mac) signing with timestamp failed (exit $LASTEXITCODE), trying without timestamp..."
+            & $Exe -sign "$aeInMac" "$aeOutMac" "$certPath" "$password"
+            if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for AE (mac) with exit $LASTEXITCODE" }
+          }
+
+          # Sign Premiere extension (macOS)
+          $pproInMac = "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel"
+          $pproOutMac = "$env:GITHUB_WORKSPACE\sync-extension-premiere-mac-signed.zxp"
+          echo "Signing Premiere (mac) extension..."
+          if (-not (Test-Path $pproInMac)) { throw "Input directory not found: $pproInMac" }
+          & $Exe -sign "$pproInMac" "$pproOutMac" "$certPath" "$password" -tsa "${{ github.event.inputs.tsa_url }}"
+          if ($LASTEXITCODE -ne 0) {
+            echo "Premiere (mac) signing with timestamp failed (exit $LASTEXITCODE), trying without timestamp..."
+            & $Exe -sign "$pproInMac" "$pproOutMac" "$certPath" "$password"
+            if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for Premiere (mac) with exit $LASTEXITCODE" }
+          }
           echo "Signing Premiere extension..."
           echo "Input: $pproIn"
           echo "Output: $pproOut"
@@ -188,6 +225,14 @@ jobs:
           & $Exe -verify "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp" -certinfo
           if ($LASTEXITCODE -ne 0) { throw "Premiere verify failed" }
 
+          echo "Verifying AE (mac) extension..."
+          & $Exe -verify "$env:GITHUB_WORKSPACE\sync-extension-ae-mac-signed.zxp" -certinfo
+          if ($LASTEXITCODE -ne 0) { throw "AE (mac) verify failed" }
+
+          echo "Verifying Premiere (mac) extension..."
+          & $Exe -verify "$env:GITHUB_WORKSPACE\sync-extension-premiere-mac-signed.zxp" -certinfo
+          if ($LASTEXITCODE -ne 0) { throw "Premiere (mac) verify failed" }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -195,3 +240,35 @@ jobs:
           path: |
             sync-extension-ae-windows-signed.zxp
             sync-extension-premiere-windows-signed.zxp
+            sync-extension-ae-mac-signed.zxp
+            sync-extension-premiere-mac-signed.zxp
+
+      - name: Get tag message
+        if: startsWith(github.ref, 'refs/tags/')
+        id: tag_message
+        run: |
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAG_MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload to GitHub Release (tag builds)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ${{ steps.tag_message.outputs.message }}
+            
+            **Downloads:**
+            - After Effects: `sync-extension-ae-${{ matrix.os == 'windows-latest' && 'windows' || 'mac' }}-signed.zxp`
+            - Premiere Pro: `sync-extension-premiere-${{ matrix.os == 'windows-latest' && 'windows' || 'mac' }}-signed.zxp`
+            
+            Choose the appropriate package for your platform and application.
+          files: |
+            sync-extension-ae-${{ matrix.os == 'windows-latest' && 'windows' || 'mac' }}-signed.zxp
+            sync-extension-premiere-${{ matrix.os == 'windows-latest' && 'windows' || 'mac' }}-signed.zxp
+          draft: false
+          prerelease: false
+          generate_release_notes: true
