@@ -50,14 +50,21 @@ jobs:
                 New-Item -ItemType Directory -Force -Path $dest | Out-Null
                 # Copy extension contents into destination using robocopy to preserve permissions
                 & robocopy "$extSrc" "$dest" /E /COPY:DAT
+                $LASTEXITCODE = 0  # Robocopy returns 1 for success, ignore it
                 # Then add shared files
                 & robocopy "ui" "$dest/ui" /E /COPY:DAT
+                $LASTEXITCODE = 0
                 & robocopy "server" "$dest/server" /E /COPY:DAT
+                $LASTEXITCODE = 0
                 & robocopy "icons" "$dest/icons" /E /COPY:DAT
+                $LASTEXITCODE = 0
                 & robocopy "lib" "$dest/lib" /E /COPY:DAT
+                $LASTEXITCODE = 0
                 & robocopy "bin" "$dest/bin" /E /COPY:DAT
+                $LASTEXITCODE = 0
                 Copy-Item "index.html" "$dest/"
                 & robocopy "host" "$dest/host" /E /COPY:DAT
+                $LASTEXITCODE = 0
               }
           
           # Build Windows variants (strip darwin bins)
