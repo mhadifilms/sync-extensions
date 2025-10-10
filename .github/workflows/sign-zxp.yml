@@ -169,9 +169,10 @@ jobs:
         shell: pwsh
         run: |
           echo "=== Starting ZXP Signing Process ==="
-          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           if ("${{ matrix.os }}" -eq "macos-latest") {
             $Exe = "$env:GITHUB_WORKSPACE/CEP-Resources/ZXPSignCMD/4.1.103/mac/ZXPSignCmd"
+          } else {
+            $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           }
           
           # Test certificate first (ZXPSignCmd doesn't verify .p12 files directly)
@@ -231,9 +232,10 @@ jobs:
       - name: Verify signatures (prints cert/timestamp info)
         shell: pwsh
         run: |
-          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           if ("${{ matrix.os }}" -eq "macos-latest") {
             $Exe = "$env:GITHUB_WORKSPACE/CEP-Resources/ZXPSignCMD/4.1.103/mac/ZXPSignCmd"
+          } else {
+            $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
           }
           
           echo "Verifying AE extension..."
