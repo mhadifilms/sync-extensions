@@ -1,0 +1,69 @@
+name: Build & Sign ZXP
+
+on:
+  workflow_dispatch:
+    inputs:
+      panel_path:
+        description: "Path (in repo) to extension root containing CSXS/manifest.xml"
+        required: true
+        default: "com.sync.extension.ppro.panel"
+      tsa_url:
+        description: "Timestamp server URL"
+        required: true
+        default: "http://timestamp.digicert.com"
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify panel folder + clean macOS cruft
+        shell: pwsh
+        run: |
+          $Panel = Join-Path $env:GITHUB_WORKSPACE '${{ github.event.inputs.panel_path }}'
+          if (-not (Test-Path (Join-Path $Panel 'CSXS/manifest.xml'))) {
+            throw "CSXS/manifest.xml not found under: $Panel"
+          }
+          # remove .DS_Store / __MACOSX
+          Get-ChildItem -LiteralPath $Panel -Recurse -Force -Include '.DS_Store' | Remove-Item -Force -ErrorAction SilentlyContinue
+          Get-ChildItem -LiteralPath $Panel -Recurse -Directory -Force -Filter '__MACOSX' | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          echo "Panel OK: $Panel"
+
+      - name: Fetch ZXPSignCmd (Windows)
+        shell: pwsh
+        run: |
+          git clone --depth=1 https://github.com/Adobe-CEP/CEP-Resources.git
+          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
+          if (-not (Test-Path $Exe)) { throw "ZXPSignCmd.exe not found at $Exe" }
+          echo "ZXPSignCmd at: $Exe"
+
+      - name: Restore signing cert
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("cert.p12",[Convert]::FromBase64String($env:P12_BASE64))
+        env:
+          P12_BASE64: ${{ secrets.ZXP_P12_BASE64 }}
+
+      - name: Sign ZXP
+        shell: pwsh
+        run: |
+          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
+          $In  = "$env:GITHUB_WORKSPACE\${{ github.event.inputs.panel_path }}"
+          $Out = "$env:GITHUB_WORKSPACE\sync_ppro.zxp"
+          & $Exe -sign "$In" "$Out" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
+          if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed with exit $LASTEXITCODE" }
+
+      - name: Verify signature (prints cert/timestamp info)
+        shell: pwsh
+        run: |
+          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
+          & $Exe -verify "$env:GITHUB_WORKSPACE\sync_ppro.zxp" -certinfo
+          if ($LASTEXITCODE -ne 0) { throw "Verify failed" }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync_ppro.zxp
+          path: sync_ppro.zxp
