@@ -48,23 +48,18 @@ jobs:
               function Copy-Panel($dest, $extSrc) {
                 # Create destination directory
                 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-                # Copy extension contents into destination using robocopy to preserve permissions
-                & robocopy "$extSrc" "$dest" /E /COPY:DAT
-                $LASTEXITCODE = 0  # Robocopy returns 1 for success, ignore it
+                # Copy extension contents into destination
+                Copy-Item "$extSrc/*" $dest -Recurse
                 # Then add shared files
-                & robocopy "ui" "$dest/ui" /E /COPY:DAT
-                $LASTEXITCODE = 0
-                & robocopy "server" "$dest/server" /E /COPY:DAT
-                $LASTEXITCODE = 0
-                & robocopy "icons" "$dest/icons" /E /COPY:DAT
-                $LASTEXITCODE = 0
-                & robocopy "lib" "$dest/lib" /E /COPY:DAT
-                $LASTEXITCODE = 0
-                & robocopy "bin" "$dest/bin" /E /COPY:DAT
-                $LASTEXITCODE = 0
+                Copy-Item "ui" "$dest/ui" -Recurse
+                Copy-Item "server" "$dest/server" -Recurse
+                Copy-Item "icons" "$dest/icons" -Recurse
+                Copy-Item "lib" "$dest/lib" -Recurse
+                Copy-Item "bin" "$dest/bin" -Recurse
                 Copy-Item "index.html" "$dest/"
-                & robocopy "host" "$dest/host" /E /COPY:DAT
-                $LASTEXITCODE = 0
+                Copy-Item "host" "$dest/host" -Recurse
+                
+                # Execute permissions will be set after ZXP creation
               }
           
           # Build Windows variants (strip darwin bins)
@@ -193,8 +188,55 @@ jobs:
               & $Exe -sign $pkg.Input $pkg.Output $certPath $password
               if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for $($pkg.Name) with exit $LASTEXITCODE" }
             }
-            echo "$($pkg.Name) signed successfully"
-          }
+              echo "$($pkg.Name) signed successfully"
+            }
+            
+            # Set execute permissions on Node.js binaries in signed ZXPs
+            echo "Setting execute permissions on Node.js binaries..."
+            $zxpFiles = @(
+              "sync-extension-ae-windows-signed.zxp",
+              "sync-extension-premiere-windows-signed.zxp", 
+              "sync-extension-ae-mac-signed.zxp",
+              "sync-extension-premiere-mac-signed.zxp"
+            )
+            
+            foreach ($zxpFile in $zxpFiles) {
+              if (Test-Path $zxpFile) {
+                echo "Processing $zxpFile..."
+                # Extract ZXP temporarily
+                $tempDir = "temp_$([System.IO.Path]::GetFileNameWithoutExtension($zxpFile))"
+                if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+                New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+                
+                # Extract ZXP
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                [System.IO.Compression.ZipFile]::ExtractToDirectory($zxpFile, $tempDir)
+                
+                # Set execute permissions on Node.js binaries
+                $nodeFiles = @(
+                  "$tempDir/com.sync.extension.ae.panel/bin/darwin-arm64/node",
+                  "$tempDir/com.sync.extension.ae.panel/bin/darwin-x64/node",
+                  "$tempDir/com.sync.extension.ppro.panel/bin/darwin-arm64/node",
+                  "$tempDir/com.sync.extension.ppro.panel/bin/darwin-x64/node"
+                )
+                
+                foreach ($nodeFile in $nodeFiles) {
+                  if (Test-Path $nodeFile) {
+                    echo "Setting execute permission on $nodeFile"
+                    # Use icacls to set full control (equivalent to execute permission)
+                    & icacls $nodeFile /grant Everyone:F
+                  }
+                }
+                
+                # Recreate ZXP with updated permissions
+                if (Test-Path $zxpFile) { Remove-Item $zxpFile -Force }
+                [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $zxpFile)
+                
+                # Cleanup
+                Remove-Item $tempDir -Recurse -Force
+                echo "Updated $zxpFile with execute permissions"
+              }
+            }
 
       - name: Verify signatures
         shell: pwsh
