@@ -201,6 +201,76 @@ EOT
   echo "  Created $out"
 }
 
+# Create CEP folders for ZXP signing
+create_cep_folders(){
+  local os="$1"  # mac or windows
+  
+  # Create CEP-ready extension folders
+  local ae_dest="$REPO_DIR/com.sync.extension.ae.panel"
+  local ppro_dest="$REPO_DIR/com.sync.extension.ppro.panel"
+  
+  # Clean existing folders
+  rm -rf "$ae_dest" "$ppro_dest"
+  mkdir -p "$ae_dest" "$ppro_dest"
+
+  # Copy AE extension files
+  rsync -a --delete \
+    --exclude ".git/" \
+    --exclude "dist/" \
+    --exclude "node_modules/" \
+    --exclude ".DS_Store" \
+    --exclude "*.log" \
+    --exclude ".env" \
+    --exclude ".vscode/" \
+    --exclude "README.md" \
+    --exclude ".gitignore" \
+    --exclude "scripts/" \
+    "$REPO_DIR/extensions/ae-extension/" "$ae_dest/"
+
+  # Copy Premiere extension files
+  rsync -a --delete \
+    --exclude ".git/" \
+    --exclude "dist/" \
+    --exclude "node_modules/" \
+    --exclude ".DS_Store" \
+    --exclude "*.log" \
+    --exclude ".env" \
+    --exclude ".vscode/" \
+    --exclude "README.md" \
+    --exclude ".gitignore" \
+    --exclude "scripts/" \
+    "$REPO_DIR/extensions/premiere-extension/" "$ppro_dest/"
+
+  # Copy shared files to both extensions
+  for dest in "$ae_dest" "$ppro_dest"; do
+    cp -r "$REPO_DIR/ui" "$dest/"
+    cp -r "$REPO_DIR/server" "$dest/"
+    cp -r "$REPO_DIR/icons" "$dest/"
+    cp -r "$REPO_DIR/lib" "$dest/"
+    cp -r "$REPO_DIR/bin" "$dest/"
+    cp "$REPO_DIR/index.html" "$dest/"
+    cp "$REPO_DIR/host" "$dest/" -r
+  done
+
+  # Platform-specific binary filtering
+  if [ "$os" = "windows" ]; then
+    # Remove macOS binaries for Windows package
+    rm -rf "$ae_dest/bin/darwin-arm64"
+    rm -rf "$ae_dest/bin/darwin-x64"
+    rm -rf "$ppro_dest/bin/darwin-arm64"
+    rm -rf "$ppro_dest/bin/darwin-x64"
+  else
+    # Remove Windows binaries for macOS package
+    rm -rf "$ae_dest/bin/win32-x64"
+    rm -rf "$ppro_dest/bin/win32-x64"
+  fi
+  
+  echo "Created CEP folders: $ae_dest, $ppro_dest"
+}
+
+# Create CEP folders for ZXP signing
+create_cep_folders "windows" || exit 1
+
 bundle_os "mac" "macOS" || exit 1
 bundle_os "windows" "Windows" || exit 1
 

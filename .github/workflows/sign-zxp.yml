@@ -19,6 +19,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build CEP folders
+        shell: pwsh
+        run: |
+          # Create CEP-ready extension folders
+          $ae_dest = "com.sync.extension.ae.panel"
+          $ppro_dest = "com.sync.extension.ppro.panel"
+          
+          # Clean existing folders
+          if (Test-Path $ae_dest) { Remove-Item $ae_dest -Recurse -Force }
+          if (Test-Path $ppro_dest) { Remove-Item $ppro_dest -Recurse -Force }
+          
+          # Copy AE extension files
+          Copy-Item "extensions/ae-extension" $ae_dest -Recurse
+          
+          # Copy Premiere extension files  
+          Copy-Item "extensions/premiere-extension" $ppro_dest -Recurse
+          
+          # Copy shared files to both extensions
+          foreach ($dest in @($ae_dest, $ppro_dest)) {
+            Copy-Item "ui" "$dest/ui" -Recurse
+            Copy-Item "server" "$dest/server" -Recurse
+            Copy-Item "icons" "$dest/icons" -Recurse
+            Copy-Item "lib" "$dest/lib" -Recurse
+            Copy-Item "bin" "$dest/bin" -Recurse
+            Copy-Item "index.html" "$dest/"
+            Copy-Item "host" "$dest/host" -Recurse
+          }
+          
+          # Remove macOS binaries for Windows package
+          Remove-Item "$ae_dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "$ae_dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "$ppro_dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "$ppro_dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          echo "Created CEP folders: $ae_dest, $ppro_dest"
+
       - name: Verify panel folder + clean macOS cruft
         shell: pwsh
         run: |
@@ -46,24 +82,40 @@ jobs:
         env:
           P12_BASE64: ${{ secrets.ZXP_P12_BASE64 }}
 
-      - name: Sign ZXP
+      - name: Sign ZXP packages
         shell: pwsh
         run: |
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
-          $In  = "$env:GITHUB_WORKSPACE\${{ github.event.inputs.panel_path }}"
-          $Out = "$env:GITHUB_WORKSPACE\sync_ppro.zxp"
-          & $Exe -sign "$In" "$Out" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
-          if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed with exit $LASTEXITCODE" }
+          
+          # Sign AE extension
+          $aeIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ae.panel"
+          $aeOut = "$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"
+          & $Exe -sign "$aeIn" "$aeOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
+          if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for AE with exit $LASTEXITCODE" }
+          
+          # Sign Premiere extension
+          $pproIn = "$env:GITHUB_WORKSPACE\com.sync.extension.ppro.panel"
+          $pproOut = "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"
+          & $Exe -sign "$pproIn" "$pproOut" "$env:GITHUB_WORKSPACE\cert.p12" "${{ secrets.ZXP_P12_PASSWORD }}" -tsa "${{ github.event.inputs.tsa_url }}"
+          if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for Premiere with exit $LASTEXITCODE" }
 
-      - name: Verify signature (prints cert/timestamp info)
+      - name: Verify signatures (prints cert/timestamp info)
         shell: pwsh
         run: |
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
-          & $Exe -verify "$env:GITHUB_WORKSPACE\sync_ppro.zxp" -certinfo
-          if ($LASTEXITCODE -ne 0) { throw "Verify failed" }
+          
+          echo "Verifying AE extension..."
+          & $Exe -verify "$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp" -certinfo
+          if ($LASTEXITCODE -ne 0) { throw "AE verify failed" }
+          
+          echo "Verifying Premiere extension..."
+          & $Exe -verify "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp" -certinfo
+          if ($LASTEXITCODE -ne 0) { throw "Premiere verify failed" }
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sync_ppro.zxp
-          path: sync_ppro.zxp
+          name: signed-zxp-packages
+          path: |
+            sync-extension-ae-windows-signed.zxp
+            sync-extension-premiere-windows-signed.zxp
