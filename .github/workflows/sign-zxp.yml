@@ -88,6 +88,12 @@ jobs:
           if (-not $Exe) { throw "ZXPSignCmd.exe not found in any version" }
           echo "ZXPSignCmd at: $Exe"
           
+          # Verify executable permissions and properties
+          $fileInfo = Get-Item $Exe
+          echo "ZXPSignCmd file size: $($fileInfo.Length) bytes"
+          echo "ZXPSignCmd last modified: $($fileInfo.LastWriteTime)"
+          echo "ZXPSignCmd attributes: $($fileInfo.Attributes)"
+          
           # Test ZXPSignCmd (help command always returns non-zero, that's normal)
           & $Exe -help
           echo "ZXPSignCmd help completed (exit code $LASTEXITCODE is normal)"
@@ -136,6 +142,13 @@ jobs:
           echo "Certificate: $certPath"
           echo "Password length: $($password.Length)"
           
+          # Validate all required arguments are present
+          if (-not (Test-Path $aeIn)) { throw "Input directory not found: $aeIn" }
+          if (-not (Test-Path $certPath)) { throw "Certificate file not found: $certPath" }
+          if ([string]::IsNullOrEmpty($password)) { throw "Password is empty" }
+          
+          echo "All required arguments validated successfully"
+          
           # Try signing with timestamp first
           & $Exe -sign "$aeIn" "$aeOut" "$certPath" "$password" -tsa "${{ github.event.inputs.tsa_url }}"
           if ($LASTEXITCODE -ne 0) { 
@@ -149,6 +162,13 @@ jobs:
           $pproOut = "$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"
           
           echo "Signing Premiere extension..."
+          echo "Input: $pproIn"
+          echo "Output: $pproOut"
+          
+          # Validate all required arguments are present
+          if (-not (Test-Path $pproIn)) { throw "Input directory not found: $pproIn" }
+          echo "Premiere extension arguments validated successfully"
+          
           & $Exe -sign "$pproIn" "$pproOut" "$certPath" "$password" -tsa "${{ github.event.inputs.tsa_url }}"
           if ($LASTEXITCODE -ne 0) { 
             echo "Premiere signing with timestamp failed (exit $LASTEXITCODE), trying without timestamp..."
