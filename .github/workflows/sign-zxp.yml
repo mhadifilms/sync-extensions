@@ -172,7 +172,7 @@ jobs:
           }
           
           # Create Python script to ensure mimetype is first
-          $pythonScript = @"
+          $pythonScript = @'
 import zipfile
 import os
 import tempfile
@@ -219,7 +219,7 @@ for zxp_dir in zxp_dirs:
         os.remove(temp_zip)
         
         print(f"Reordered files in: {zxp_dir} (mimetype first)")
-"@
+'@
           
           # Write Python script and execute it
           [IO.File]::WriteAllText("reorder_zip.py", $pythonScript)
