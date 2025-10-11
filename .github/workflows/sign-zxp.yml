@@ -160,9 +160,48 @@ jobs:
           # The ZXP installer should still work even if mimetype isn't first
           echo "Mimetype files created in all ZXP directories"
           
-          # Note: Execute permissions for Node.js binaries will be set post-signing
-          # Windows ACLs don't translate to Unix execute permissions
-          echo "Node.js binaries will need execute permissions set post-signing"
+          # Create ZIP with proper Unix permissions for Node.js binaries
+          foreach ($zxpDir in @("build\zxp-ae-mac", "build\zxp-ppro-mac")) {
+            $tempZip = "$zxpDir_temp.zip"
+            echo "Creating ZIP with Unix permissions for: $zxpDir"
+            
+            # Use PowerShell to create ZIP with Unix file attributes
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            
+            # Create ZIP file
+            $zipFile = [System.IO.Compression.ZipFile]::Open($tempZip, [System.IO.Compression.ZipArchiveMode]::Create)
+            
+            # Add all files, setting execute permissions for Node.js binaries
+            Get-ChildItem -Path $zxpDir -Recurse | ForEach-Object {
+              $relativePath = $_.FullName.Substring($zxpDir.Length + 1)
+              $entry = $zipFile.CreateEntry($relativePath.Replace('\', '/'))
+              
+              # Set Unix permissions (755 for executables, 644 for regular files)
+              if ($_.Name -eq "node") {
+                $entry.ExternalAttributes = 0x81ED0000  # 755 permissions
+                echo "Set execute permissions for: $relativePath"
+              } else {
+                $entry.ExternalAttributes = 0x81A40000  # 644 permissions
+              }
+              
+              if (-not $_.PSIsContainer) {
+                $entryStream = $entry.Open()
+                $fileStream = [System.IO.File]::OpenRead($_.FullName)
+                $fileStream.CopyTo($entryStream)
+                $fileStream.Close()
+                $entryStream.Close()
+              }
+            }
+            
+            $zipFile.Dispose()
+            
+            # Replace directory with extracted ZIP contents
+            Remove-Item $zxpDir -Recurse -Force
+            Expand-Archive -Path $tempZip -DestinationPath $zxpDir -Force
+            Remove-Item $tempZip -Force
+            
+            echo "Recreated $zxpDir with Unix permissions"
+          }
           
           # Define all packages to sign
           $packages = @(
@@ -196,12 +235,6 @@ jobs:
               echo "$($pkg.Name) signed successfully"
             }
 
-          - name: Note about execute permissions
-            shell: pwsh
-            run: |
-              echo "Note: macOS ZXPs may require execute permissions to be set manually after download"
-              echo "Users can run: chmod +x ~/Library/Application\ Support/Adobe/CEP/extensions/com.sync.extension.*.panel/bin/darwin-*/node"
-              echo "Or extract ZXP and set permissions before installing"
 
           - name: Verify signatures
         shell: pwsh

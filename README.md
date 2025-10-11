@@ -96,15 +96,6 @@ The panel communicates with a local Node.js server on port 3000. The server entr
 ### Installation Issues
 - **ZXP installer rejects extension** → Remove quarantine attributes: `xattr -d com.apple.provenance *.zxp`
 - **macOS Gatekeeper blocks installation** → Remove quarantine attributes: `xattr -d com.apple.provenance *.zxp`
-- **ZXP installer rejects extension with Node.js binaries** → Extract ZXP manually and set execute permissions:
-  ```bash
-  # Extract ZXP
-  unzip sync-extension-ae-mac-signed.zxp
-  # Set execute permissions on Node.js binaries
-  chmod +x com.sync.extension.ae.panel/bin/darwin-*/node
-  # Copy to extensions directory
-  cp -r com.sync.extension.ae.panel ~/Library/Application\ Support/Adobe/CEP/extensions/
-  ```
 
 ### Extension Issues
 - **Extension not visible** → For dev builds, ensure PlayerDebugMode is enabled. Restart Adobe app.
