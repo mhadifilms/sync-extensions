@@ -378,7 +378,7 @@ function AEFT_exportInOutAudio(payloadJson) {
         if (!nodePath) {
           if (isWindows) {
             nodePath = 'node.exe';
-            try { if (new File('C\\\\Program Files\\\\nodejs\\\\node.exe').exists) nodePath = 'C\\\u005cProgram Files\\\u005cnodejs\\\u005cnode.exe'; } catch(_){ }
+            try { if (new File('C:\\Program Files\\nodejs\\node.exe').exists) nodePath = 'C:\\Program Files\\nodejs\\node.exe'; } catch(_){ }
           } else {
             nodePath = '/usr/bin/node';
             try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
@@ -514,12 +514,21 @@ function AEFT_exportInOutAudio(payloadJson) {
         
         // Find Node.js executable
         if (isWindows) {
-          nodePath = 'node';
-          try { if (!new File('C:\\Program Files\\nodejs\\node.exe').exists) nodePath = 'node.exe'; } catch(_){ }
+          nodePath = 'node.exe';
+          try { if (new File('C:\\Program Files\\nodejs\\node.exe').exists) nodePath = 'C:\\Program Files\\nodejs\\node.exe'; } catch(_){ }
         } else {
-          nodePath = '/usr/bin/node';
-          try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
-          try { if (!new File(nodePath).exists) nodePath = 'node'; } catch(_){ }
+          // Prefer bundled node when available on macOS
+          try {
+            var extRoot2 = _extensionRoot();
+            var cand2 = extRoot2 ? (extRoot2 + '/bin/darwin-arm64/node') : '';
+            var fn2 = cand2 ? new File(cand2) : null;
+            if (fn2 && fn2.exists) { nodePath = fn2.fsName; }
+          } catch(_){ }
+          if (!nodePath) {
+            nodePath = '/usr/bin/node';
+            try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
+            try { if (!new File(nodePath).exists) nodePath = 'node'; } catch(_){ }
+          }
         }
         
         // Create a simple inline Node.js script for WAV conversion

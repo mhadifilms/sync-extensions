@@ -443,7 +443,7 @@
               // Use HOST_CONFIG for reliable host detection
               const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
               const insertFunc = isAE ? 'AEFT_insertFileAtPlayhead' : 'PPRO_insertFileAtPlayhead';
-              cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${insertFunc}(\"${fp}\")`, function(r){
+              cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${insertFunc}(\"${fp.replace(/\\/g,'\\\\')}\")`, function(r){
                 logToFile('[AE Insert] Raw response: ' + String(r));
                 let out = null;
                 try { 

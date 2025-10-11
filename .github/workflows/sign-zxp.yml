@@ -55,7 +55,17 @@ jobs:
             cp -a index.html "$dest/"
             cp -a host "$dest/host"
             mkdir -p "$dest/ui"
-            cp -a ui/. "$dest/ui/"
+            # Copy shared UI but do NOT overwrite per-extension host-detection.js
+            if command -v rsync >/dev/null 2>&1; then
+              rsync -a --exclude 'host-detection.js' ui/ "$dest/ui/"
+            else
+              # Fallback if rsync is unavailable
+              find ui -type f ! -name 'host-detection.js' -print0 | while IFS= read -r -d '' f; do
+                rel="${f#ui/}"; mkdir -p "$(dirname "$dest/ui/$rel")"; cp -a "$f" "$dest/ui/$rel";
+              done
+            fi
+            # Ensure the extension's own host-detection.js remains
+            if [ -f "$src/ui/host-detection.js" ]; then cp -a "$src/ui/host-detection.js" "$dest/ui/host-detection.js"; fi
           }
 
           copy_panel "$ae_mac"  "extensions/ae-extension"
@@ -122,6 +132,10 @@ jobs:
             Copy-Item "host" "$dest/host" -Recurse
             # Copy main UI files to the existing ui directory (merge, don't replace)
             Copy-Item "ui/*" "$dest/ui/" -Recurse -Force
+            # Restore per-extension host-detection.js after shared UI copy
+            $extHost = Join-Path $extSrc "ui/host-detection.js"
+            $destHost = Join-Path $dest "ui/host-detection.js"
+            if (Test-Path $extHost) { Copy-Item $extHost $destHost -Force }
           }
           
           # Build Windows variants (strip darwin bins)
