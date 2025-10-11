@@ -605,72 +605,30 @@ app.post('/update/apply', async (req,res)=>{
         pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
       }
       
-      let installArgs = '';
-      const aeInstalled = fs.existsSync(aeDestDir);
-      const pproInstalled = fs.existsSync(pproDestDir);
-      
-      if (aeInstalled && pproInstalled) {
-        installArgs = '--app both';
-      } else if (aeInstalled) {
-        installArgs = '--app ae';
-      } else if (pproInstalled) {
-        installArgs = '--app premiere';
-      } else {
-        // Default to both if neither is detected (shouldn't happen)
-        installArgs = '--app both';
-      }
-      
-      console.log('Running install script for update...');
-      console.log('Install args:', installArgs);
-      console.log('Update script path:', updateScript);
-      console.log('Current working directory:', process.cwd());
-      console.log('Extracted directory:', extractedDir);
-      
+      // If a previous installer created folders without the .panel suffix, migrate them to the correct names
       try {
-        if (isWindows) {
-          // Windows: Use PowerShell with timeout and proper execution policy
-          const installCmd = `& "${updateScript}" ${installArgs}`;
-          console.log('Windows install command:', installCmd);
-          
-          // Add timeout wrapper for Windows PowerShell execution
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('PowerShell script timeout after 4 minutes')), 240000); // 4 minutes
-          });
-          
-          console.log('Executing PowerShell command with timeout...');
-          console.log('Command:', installCmd);
-          console.log('Working directory:', extractedDir);
-          
-          await Promise.race([execPowerShell(installCmd, { cwd: extractedDir }), timeoutPromise]);
-        } else {
-          // macOS/Linux: Use shell script
-          const installCmd = `cd "${extractedDir}" && chmod +x "${updateScript}" && "${updateScript}" ${installArgs}`;
-          console.log('Unix install command:', installCmd);
-          await exec(installCmd);
+        const aeWrong = path.join(path.dirname(aeDestDir), 'com.sync.extension.ae');
+        const pproWrong = path.join(path.dirname(pproDestDir), 'com.sync.extension.ppro');
+        async function migrateIfMisnamed(wrong, correct){
+          try{
+            if (!fs.existsSync(wrong)) return;
+            const wrongHas = (fs.readdirSync(wrong).filter(n=>n!=='.DS_Store').length > 0);
+            const correctExists = fs.existsSync(correct);
+            const correctHas = correctExists ? (fs.readdirSync(correct).filter(n=>n!=='.DS_Store').length > 0) : false;
+            if (!correctExists && wrongHas){
+              try { fs.renameSync(wrong, correct); try { tlog('update:migrate:rename', wrong, '->', correct); } catch(_){ } return; } catch(_){ }
+            }
+            if (wrongHas){
+              if (process.platform === 'win32') { await runRobocopy(wrong, correct); }
+              else { await exec(`mkdir -p "${correct}" && cp -R "${wrong}/." "${correct}/"`); }
+              try { fs.rmSync(wrong, { recursive: true, force: true }); } catch(_){ }
+              try { tlog('update:migrate:copy', wrong, '->', correct); } catch(_){ }
+            }
+          }catch(e){ try { tlog('update:migrate:error', wrong, '->', correct, e && e.message ? e.message : String(e)); } catch(_){ } }
         }
-        
-        console.log('Install script completed successfully');
-      } catch(installError) {
-        console.log('Install script failed:', installError.message);
-        console.log('Falling back to manual file copying...');
-        
-        // Fall back to manual installation
-        throw installError; // This will trigger the fallback logic below
-      }
-    } else {
-      // Fallback: manually install the extension files
-      console.log('Using manual file copying fallback...');
-      try { tlog('update:copy:start', 'format=', isZxp ? 'zxp' : 'zip'); } catch(_){ }
-      // Copy the extension files to the correct location
-      let aeDestDir, pproDestDir;
-      
-      if (isWindows) {
-        aeDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
-        pproDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
-      } else {
-        aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
-        pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
-      }
+        await migrateIfMisnamed(aeWrong, aeDestDir);
+        await migrateIfMisnamed(pproWrong, pproDestDir);
+      } catch(_){ }
       
       // Do not remove existing extensions; copy over into destination to avoid locking issues
       try { tlog('update:dest', 'ae=', aeDestDir, 'ppro=', pproDestDir); } catch(_){ }
@@ -679,21 +637,21 @@ app.post('/update/apply', async (req,res)=>{
       
       // Copy extensions (handle both ZXP and ZIP formats)
       if (isZxp) {
-        // ZXP format: extension folders are directly in extractedDir
-        const aeSrcDir = path.join(extractedDir, 'com.sync.extension.ae.panel');
-        const pproSrcDir = path.join(extractedDir, 'com.sync.extension.ppro.panel');
-        
-        if (fs.existsSync(aeSrcDir)) {
-          if (isWindows) { await runRobocopy(aeSrcDir, aeDestDir); }
-          else { await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`); }
-          try { tlog('update:copy:ae:zxp:ok'); } catch(_){ }
+        // ZXP format: extracted root contains extension content (CSXS, ui, server, etc.)
+        const targetApp = (APP_ID === 'ae' || APP_ID === 'premiere') ? APP_ID : 'premiere';
+        const destRoot = targetApp === 'ae' ? aeDestDir : pproDestDir;
+        try { tlog('update:copy:zxp:target', targetApp, 'dest=', destRoot); } catch(_){ }
+        try { if (!fs.existsSync(destRoot)) fs.mkdirSync(destRoot, { recursive: true }); } catch(_){ }
+        const items = fs.readdirSync(extractedDir).filter(name => name !== 'META-INF' && name !== 'update.zip');
+        for (const name of items){
+          const srcPath = path.join(extractedDir, name);
+          if (isWindows) {
+            await runRobocopy(extractedDir, destRoot, name);
+          } else {
+            await exec(`cp -R "${srcPath}" "${destRoot}/"`);
+          }
         }
-        
-        if (fs.existsSync(pproSrcDir)) {
-          if (isWindows) { await runRobocopy(pproSrcDir, pproDestDir); }
-          else { await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`); }
-          try { tlog('update:copy:ppro:zxp:ok'); } catch(_){ }
-        }
+        try { tlog('update:copy:zxp:ok', 'items=', String(items.length)); } catch(_){ }
       } else {
         // ZIP format: extensions are in extensions/ subdirectory
         const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
