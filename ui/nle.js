@@ -138,10 +138,23 @@
                     }
                     
                     var serverPath;
-                    if (isWindows) {
-                      serverPath = extPath.replace(/\//g, '\\') + '\\server\\src\\server.js';
-                    } else {
-                      serverPath = extPath + '/server/src/server.js';
+                    try {
+                      var fs = require('fs');
+                      if (isWindows) {
+                        var distWin = extPath.replace(/\//g, '\\') + '\\server\\dist\\server.js';
+                        var srcWin = extPath.replace(/\//g, '\\') + '\\server\\src\\server.js';
+                        serverPath = (fs.existsSync(distWin) ? distWin : srcWin);
+                      } else {
+                        var distMac = extPath + '/server/dist/server.js';
+                        var srcMac = extPath + '/server/src/server.js';
+                        serverPath = (fs.existsSync(distMac) ? distMac : srcMac);
+                      }
+                    } catch(_) {
+                      if (isWindows) {
+                        serverPath = extPath.replace(/\//g, '\\') + '\\server\\src\\server.js';
+                      } else {
+                        serverPath = extPath + '/server/src/server.js';
+                      }
                     }
                     updateDebugStatus('Server path: ' + serverPath);
                     
