@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.sync.extension.ae" ExtensionBundleVersion="0.7.36" ExtensionBundleName="sync. extension - After Effects">
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.sync.extension.ae" ExtensionBundleVersion="0.7.37" ExtensionBundleName="sync. extension - After Effects">
   <ExtensionList>
-    <Extension Id="com.sync.extension.ae.panel" Version="0.7.37"/>
+    <Extension Id="com.sync.extension.ae.panel" Version="0.7.38"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -15,7 +15,7 @@
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="com.sync.extension.ae.panel" Version="0.7.37">
+    <Extension Id="com.sync.extension.ae.panel" Version="0.7.38">
       <HostList>
         <Host Name="AEFT" Version="[24.0,99.9]"/>
       </HostList>
