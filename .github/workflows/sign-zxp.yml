@@ -50,8 +50,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path $dest | Out-Null
             # Copy extension contents into destination
             Copy-Item "$extSrc/*" $dest -Recurse
-            # Then add shared files
-            Copy-Item "ui" "$dest/ui" -Recurse
+            # Then add shared files (don't copy ui since extensions already have their own)
             Copy-Item "server" "$dest/server" -Recurse
             Copy-Item "icons" "$dest/icons" -Recurse
             Copy-Item "lib" "$dest/lib" -Recurse
@@ -148,6 +147,14 @@ jobs:
           Move-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel" "build\zxp-ppro-win\" -Force
           Move-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel" "build\zxp-ae-mac\" -Force
           Move-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel" "build\zxp-ppro-mac\" -Force
+          
+          # Create mimetype file (must be first file in ZXP)
+          $mimetypeContent = "application/vnd.adobe.air-ucf-package+zip"
+          foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
+            $mimetypePath = Join-Path $zxpDir "mimetype"
+            [IO.File]::WriteAllText($mimetypePath, $mimetypeContent)
+            echo "Created mimetype file: $mimetypePath"
+          }
           
           # Define all packages to sign
           $packages = @(
