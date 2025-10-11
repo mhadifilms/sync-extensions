@@ -16,7 +16,62 @@ on:
       - "v*"
 
 jobs:
+  build_mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'server/package-lock.json'
+
+      - name: Install server deps (production only)
+        working-directory: server
+        run: npm ci --omit=dev
+
+      - name: Build CEP folders for macOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          macRoot="build/mac"
+          ae_mac="$macRoot/com.sync.extension.ae.panel"
+          pp_mac="$macRoot/com.sync.extension.ppro.panel"
+
+          rm -rf "$macRoot"
+          mkdir -p "$ae_mac" "$pp_mac"
+
+          copy_panel() {
+            dest="$1"; src="$2"
+            mkdir -p "$dest"
+            cp -a "$src/." "$dest/"
+            cp -a server "$dest/server"
+            cp -a icons "$dest/icons"
+            cp -a lib "$dest/lib"
+            cp -a bin "$dest/bin"
+            cp -a index.html "$dest/"
+            cp -a host "$dest/host"
+            mkdir -p "$dest/ui"
+            cp -a ui/. "$dest/ui/"
+          }
+
+          copy_panel "$ae_mac"  "extensions/ae-extension"
+          copy_panel "$pp_mac"  "extensions/premiere-extension"
+
+          # Strip Windows bins from mac packages
+          rm -rf "$ae_mac/bin/win32-x64" "$pp_mac/bin/win32-x64" || true
+
+      - name: Upload mac build
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build
+          path: build/mac
+
   sign:
+    needs: [build_mac]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -24,25 +79,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build CEP folders for all platforms
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'server/package-lock.json'
+
+      - name: Install server deps (production only)
+        shell: bash
+        working-directory: server
+        run: npm ci --omit=dev
+
+      - name: Build CEP folders for Windows
         shell: pwsh
         run: |
-          # Create separate build roots for windows and mac packages
+          # Create build root for windows packages
           $winRoot = "build/win"
-          $macRoot = "build/mac"
           $ae_win  = Join-Path $winRoot "com.sync.extension.ae.panel"
           $pp_win  = Join-Path $winRoot "com.sync.extension.ppro.panel"
-          $ae_mac  = Join-Path $macRoot "com.sync.extension.ae.panel"
-          $pp_mac  = Join-Path $macRoot "com.sync.extension.ppro.panel"
           
           # Clean existing folders
-          foreach ($p in @($winRoot,$macRoot,$ae_win,$pp_win,$ae_mac,$pp_mac)) {
+          foreach ($p in @($winRoot,$ae_win,$pp_win)) {
             if (Test-Path $p) { Remove-Item $p -Recurse -Force }
           }
           
           # Create build directories
           New-Item -ItemType Directory -Force -Path $winRoot | Out-Null
-          New-Item -ItemType Directory -Force -Path $macRoot | Out-Null
           
           # Helper to copy a panel skeleton
           function Copy-Panel($dest, $extSrc) {
@@ -68,15 +131,14 @@ jobs:
             Remove-Item "$dest/bin/darwin-arm64" -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item "$dest/bin/darwin-x64" -Recurse -Force -ErrorAction SilentlyContinue
           }
-          
-          # Build macOS variants (strip win bins)
-          Copy-Panel $ae_mac  "extensions/ae-extension"
-          Copy-Panel $pp_mac  "extensions/premiere-extension"
-          foreach ($dest in @($ae_mac,$pp_mac)) {
-            Remove-Item "$dest/bin/win32-x64" -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          
-          echo "Created CEP folders: $ae_win, $pp_win, $ae_mac, $pp_mac"
+
+          echo "Created CEP folders (Windows): $ae_win, $pp_win"
+
+      - name: Download mac build
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-build
+          path: build/mac
 
       - name: Fetch ZXPSignCmd
         shell: pwsh
