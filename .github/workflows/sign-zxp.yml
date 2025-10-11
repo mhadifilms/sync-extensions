@@ -171,26 +171,60 @@ jobs:
             echo "Created mimetype file: $mimetypePath"
           }
           
-          # Ensure mimetype is the first file by creating a properly ordered ZIP
-          foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
-            $tempZip = "$zxpDir-temp.zip"
-            $mimetypePath = Join-Path $zxpDir "mimetype"
-            
-            # Create ZIP with mimetype first
-            Compress-Archive -Path $mimetypePath -DestinationPath $tempZip -Force
-            $allFiles = Get-ChildItem -Path $zxpDir -Recurse -File | Where-Object { $_.FullName -ne $mimetypePath }
-            foreach ($file in $allFiles) {
-              $relativePath = $file.FullName.Substring($zxpDir.Length + 1)
-              Compress-Archive -Path $file.FullName -DestinationPath $tempZip -Update
-            }
-            
-            # Replace directory with ZIP contents
-            Remove-Item $zxpDir -Recurse -Force
-            Expand-Archive -Path $tempZip -DestinationPath $zxpDir -Force
-            Remove-Item $tempZip -Force
-            
-            echo "Reordered files in: $zxpDir (mimetype first)"
-          }
+          # Create Python script to ensure mimetype is first
+          $pythonScript = @"
+import zipfile
+import os
+import tempfile
+import shutil
+
+def reorder_zip(zip_path):
+    # Create temporary directory
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Extract all files
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+        
+        # Create new ZIP with mimetype first
+        mimetype_path = os.path.join(temp_dir, 'mimetype')
+        if os.path.exists(mimetype_path):
+            # Create new ZIP
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                # Add mimetype first
+                new_zip.write(mimetype_path, 'mimetype')
+                
+                # Add all other files
+                for root, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        if file != 'mimetype':
+                            file_path = os.path.join(root, file)
+                            arc_name = os.path.relpath(file_path, temp_dir)
+                            new_zip.write(file_path, arc_name)
+
+# Reorder each ZXP directory
+zxp_dirs = ['build/zxp-ae-win', 'build/zxp-ppro-win', 'build/zxp-ae-mac', 'build/zxp-ppro-mac']
+for zxp_dir in zxp_dirs:
+    if os.path.exists(zxp_dir):
+        # Create temporary ZIP
+        temp_zip = zxp_dir + '.zip'
+        shutil.make_archive(zxp_dir, 'zip', zxp_dir)
+        
+        # Reorder the ZIP
+        reorder_zip(temp_zip)
+        
+        # Replace directory with reordered ZIP contents
+        shutil.rmtree(zxp_dir)
+        with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+            zip_ref.extractall(zxp_dir)
+        os.remove(temp_zip)
+        
+        print(f"Reordered files in: {zxp_dir} (mimetype first)")
+"@
+          
+          # Write Python script and execute it
+          [IO.File]::WriteAllText("reorder_zip.py", $pythonScript)
+          python reorder_zip.py
+          Remove-Item "reorder_zip.py" -Force
           
           # Validate required files and set permissions
           foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
