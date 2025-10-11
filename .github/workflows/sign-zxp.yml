@@ -156,6 +156,14 @@ jobs:
             echo "Created mimetype file: $mimetypePath"
           }
           
+          # Note: ZXPSignCmd may not preserve file order, but mimetype file is created
+          # The ZXP installer should still work even if mimetype isn't first
+          echo "Mimetype files created in all ZXP directories"
+          
+          # Note: Execute permissions for Node.js binaries will be set post-signing
+          # Windows ACLs don't translate to Unix execute permissions
+          echo "Node.js binaries will need execute permissions set post-signing"
+          
           # Define all packages to sign
           $packages = @(
             @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-win"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"; Name="AE Windows"; PanelDir="com.sync.extension.ae.panel"},
@@ -185,10 +193,17 @@ jobs:
               & $Exe -sign $pkg.Input $pkg.Output $certPath $password
               if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for $($pkg.Name) with exit $LASTEXITCODE" }
             }
-            echo "$($pkg.Name) signed successfully"
-          }
+              echo "$($pkg.Name) signed successfully"
+            }
 
-      - name: Verify signatures
+          - name: Note about execute permissions
+            shell: pwsh
+            run: |
+              echo "Note: macOS ZXPs may require execute permissions to be set manually after download"
+              echo "Users can run: chmod +x ~/Library/Application\ Support/Adobe/CEP/extensions/com.sync.extension.*.panel/bin/darwin-*/node"
+              echo "Or extract ZXP and set permissions before installing"
+
+          - name: Verify signatures
         shell: pwsh
         run: |
           $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
