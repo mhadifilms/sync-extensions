@@ -259,9 +259,21 @@ jobs:
             echo "Created mimetype file: $mimetypePath"
           }
           
-          # Note: ZXPSignCmd will include the mimetype file in the ZXP
-          # The mimetype file is created and will be included in the final ZXP
-          echo "Mimetype files created in all ZXP directories"
+          # Install 7-Zip for proper ZIP creation with mimetype first
+          choco install 7zip -y
+          
+          # Create temporary ZIP files with mimetype first, then sign them
+          echo "Creating temporary ZIP files with correct mimetype ordering..."
+          foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
+            $tempZip = "$zxpDir-temp.zip"
+            $mimetypePath = Join-Path $zxpDir "mimetype"
+            
+            # Use 7-Zip to create ZIP with mimetype first (uncompressed) and all other files compressed
+            # First add mimetype uncompressed, then add all other files compressed
+            & 7z a -tzip $tempZip "$mimetypePath" -mx0
+            & 7z a -tzip $tempZip "$zxpDir\*" -x!"mimetype" -mx9
+            echo "Created temporary ZIP: $tempZip"
+          }
           
           # Validate required files and set permissions
           foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
@@ -307,12 +319,12 @@ jobs:
             echo "Validation completed for: $zxpDir"
           }
           
-          # Define all packages to sign
+          # Define all packages to sign (using temporary ZIP files)
           $packages = @(
-            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-win"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"; Name="AE Windows"; PanelDir="com.sync.extension.ae.panel"},
-            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ppro-win"; Output="$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"; Name="Premiere Windows"; PanelDir="com.sync.extension.ppro.panel"},
-            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-mac"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-mac-signed.zxp"; Name="AE macOS"; PanelDir="com.sync.extension.ae.panel"},
-            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ppro-mac"; Output="$env:GITHUB_WORKSPACE\sync-extension-premiere-mac-signed.zxp"; Name="Premiere macOS"; PanelDir="com.sync.extension.ppro.panel"}
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-win-temp.zip"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-windows-signed.zxp"; Name="AE Windows"; PanelDir="com.sync.extension.ae.panel"},
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ppro-win-temp.zip"; Output="$env:GITHUB_WORKSPACE\sync-extension-premiere-windows-signed.zxp"; Name="Premiere Windows"; PanelDir="com.sync.extension.ppro.panel"},
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ae-mac-temp.zip"; Output="$env:GITHUB_WORKSPACE\sync-extension-ae-mac-signed.zxp"; Name="AE macOS"; PanelDir="com.sync.extension.ae.panel"},
+            @{Input="$env:GITHUB_WORKSPACE\build\zxp-ppro-mac-temp.zip"; Output="$env:GITHUB_WORKSPACE\sync-extension-premiere-mac-signed.zxp"; Name="Premiere macOS"; PanelDir="com.sync.extension.ppro.panel"}
           )
           
           # Sign each package
@@ -341,7 +353,6 @@ jobs:
       - name: Validate ZXP mimetype and compression
         shell: pwsh
         run: |
-          choco install 7zip -y
           $zxps = @(
             "sync-extension-ae-windows-signed.zxp",
             "sync-extension-premiere-windows-signed.zxp",
