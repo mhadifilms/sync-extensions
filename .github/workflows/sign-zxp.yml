@@ -197,12 +197,23 @@ jobs:
             echo "Validating $zxpDir..."
             
             # Check required files exist
-            $requiredFiles = @("mimetype", "index.html", "CSXS/manifest.xml")
+            $requiredFiles = @("mimetype", "index.html")
             foreach ($file in $requiredFiles) {
               $filePath = Join-Path $zxpDir $file
               if (-not (Test-Path $filePath)) { 
                 throw "Required file missing: $filePath" 
               }
+            }
+            
+            # Check manifest.xml exists in panel directory
+            $panelDir = Get-ChildItem -Path $zxpDir -Directory | Select-Object -First 1
+            if ($panelDir) {
+              $manifestPath = Join-Path $panelDir.FullName "CSXS\manifest.xml"
+              if (-not (Test-Path $manifestPath)) {
+                throw "Required manifest.xml missing: $manifestPath"
+              }
+            } else {
+              throw "No panel directory found in: $zxpDir"
             }
             
             # Check Node.js binaries exist and set permissions (macOS only)
