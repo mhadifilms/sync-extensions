@@ -365,14 +365,25 @@ function AEFT_exportInOutAudio(payloadJson) {
         var nodePath = '';
         var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
         
-        // Find Node.js executable
-        if (isWindows) {
-          nodePath = 'node';
-          try { if (!new File('C:\\Program Files\\nodejs\\node.exe').exists) nodePath = 'node.exe'; } catch(_){ }
-        } else {
-          nodePath = '/usr/bin/node';
-          try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
-          try { if (!new File(nodePath).exists) nodePath = 'node'; } catch(_){ }
+        // Prefer bundled Node inside extension /bin
+        try {
+          var extRoot = _extensionRoot();
+          if (extRoot) {
+            var cand = isWindows ? (extRoot + '\\bin\\win32-x64\\node.exe') : (extRoot + '/bin/darwin-arm64/node');
+            var f = new File(cand);
+            if (f && f.exists) { nodePath = f.fsName; }
+          }
+        } catch(_){ }
+        // Fallbacks
+        if (!nodePath) {
+          if (isWindows) {
+            nodePath = 'node.exe';
+            try { if (new File('C\\\\Program Files\\\\nodejs\\\\node.exe').exists) nodePath = 'C\\\u005cProgram Files\\\u005cnodejs\\\u005cnode.exe'; } catch(_){ }
+          } else {
+            nodePath = '/usr/bin/node';
+            try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
+            try { if (!new File(nodePath).exists) nodePath = 'node'; } catch(_){ }
+          }
         }
         
         // Use server-side MP3 conversion via HTTP request
@@ -664,10 +675,15 @@ function AEFT_exportInOutAudio(payloadJson) {
         
         var cmd = '';
         if (isWindows) {
-          cmd = 'cmd.exe /c "' + nodePath + '" "' + String(scriptFile.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(aif.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(outputFile.fsName||'').replace(/\\/g,'\\\\') + '"';
+          var np = String(nodePath||'').replace(/"/g,'');
+          cmd = 'cmd.exe /c "' + np + '" "' + String(scriptFile.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(aif.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(outputFile.fsName||'').replace(/\\/g,'\\\\') + '"';
         } else {
-          // Quote all args to survive spaces in paths
-          cmd = '"' + nodePath + '" ' + '"' + String(scriptFile.fsName||'') + '" ' + '"' + String(aif.fsName||'') + '" ' + '"' + String(outputFile.fsName||'') + '"';
+          // Use bash -lc to ensure PATH is stable; quote args
+          var np2 = String(nodePath||'');
+          var s1 = String(scriptFile.fsName||'');
+          var a1 = String(aif.fsName||'');
+          var o1 = String(outputFile.fsName||'');
+          cmd = '/bin/bash -lc ' + _shq(('"' + np2 + '" ' + '"' + s1 + '" ' + '"' + a1 + '" ' + '"' + o1 + '"') + ' >/dev/null 2>&1 || true');
         }
         
         try {
