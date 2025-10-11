@@ -668,7 +668,7 @@ function _pickAudioPresetPath(format){
 
 function PPRO_exportInOutVideo(payloadJson){
   try{
-    var p={}; try{ p=JSON.parse(payloadJson||' cloak'); }catch(e){}
+    var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){}
     
     // Log to temp file for debugging
     try {
