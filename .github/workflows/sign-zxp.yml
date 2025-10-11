@@ -157,11 +157,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path "build\zxp-ae-mac" | Out-Null
           New-Item -ItemType Directory -Force -Path "build\zxp-ppro-mac" | Out-Null
           
-          # Move each panel to its own ZXP directory
-          Move-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel" "build\zxp-ae-win\" -Force
-          Move-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel" "build\zxp-ppro-win\" -Force
-          Move-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel" "build\zxp-ae-mac\" -Force
-          Move-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel" "build\zxp-ppro-mac\" -Force
+          # Move panel contents to ZXP root (not in subdirectory)
+          Copy-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel\*" "build\zxp-ae-win\" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel\*" "build\zxp-ppro-win\" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel\*" "build\zxp-ae-mac\" -Recurse -Force
+          Copy-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel\*" "build\zxp-ppro-mac\" -Recurse -Force
           
           # Create mimetype file (must be first file in ZXP)
           $mimetypeContent = "application/vnd.adobe.air-ucf-package+zip"
@@ -185,29 +185,17 @@ jobs:
               throw "Required file missing: $mimetypePath" 
             }
             
-            # Check manifest.xml and index.html exist in panel directory
-            $panelDirs = Get-ChildItem -Path $zxpDir -Directory
-            $manifestFound = $false
-            $indexFound = $false
-            foreach ($panelDir in $panelDirs) {
-              $manifestPath = Join-Path $panelDir.FullName "CSXS\manifest.xml"
-              $indexPath = Join-Path $panelDir.FullName "index.html"
-              if (Test-Path $manifestPath) {
-                $manifestFound = $true
-                echo "Found manifest.xml at: $manifestPath"
-              }
-              if (Test-Path $indexPath) {
-                $indexFound = $true
-                echo "Found index.html at: $indexPath"
-              }
-              if ($manifestFound -and $indexFound) { break }
+            # Check manifest.xml and index.html exist at ZXP root
+            $manifestPath = Join-Path $zxpDir "CSXS\manifest.xml"
+            $indexPath = Join-Path $zxpDir "index.html"
+            if (-not (Test-Path $manifestPath)) {
+              throw "Required manifest.xml missing: $manifestPath"
             }
-            if (-not $manifestFound) {
-              throw "No manifest.xml found in any panel directory within: $zxpDir"
+            if (-not (Test-Path $indexPath)) {
+              throw "Required index.html missing: $indexPath"
             }
-            if (-not $indexFound) {
-              throw "No index.html found in any panel directory within: $zxpDir"
-            }
+            echo "Found manifest.xml at: $manifestPath"
+            echo "Found index.html at: $indexPath"
             
             # Check Node.js binaries exist and set permissions (macOS only)
             if ($zxpDir -like "*mac*") {
