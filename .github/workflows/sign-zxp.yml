@@ -206,14 +206,18 @@ jobs:
             }
             
             # Check manifest.xml exists in panel directory
-            $panelDir = Get-ChildItem -Path $zxpDir -Directory | Select-Object -First 1
-            if ($panelDir) {
+            $panelDirs = Get-ChildItem -Path $zxpDir -Directory
+            $manifestFound = $false
+            foreach ($panelDir in $panelDirs) {
               $manifestPath = Join-Path $panelDir.FullName "CSXS\manifest.xml"
-              if (-not (Test-Path $manifestPath)) {
-                throw "Required manifest.xml missing: $manifestPath"
+              if (Test-Path $manifestPath) {
+                $manifestFound = $true
+                echo "Found manifest.xml at: $manifestPath"
+                break
               }
-            } else {
-              throw "No panel directory found in: $zxpDir"
+            }
+            if (-not $manifestFound) {
+              throw "No manifest.xml found in any panel directory within: $zxpDir"
             }
             
             # Check Node.js binaries exist and set permissions (macOS only)
