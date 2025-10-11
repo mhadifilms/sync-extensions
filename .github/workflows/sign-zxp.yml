@@ -121,7 +121,20 @@ jobs:
         shell: pwsh
         run: |
           echo "=== Starting ZXP Signing Process ==="
-          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
+          # Use the detected ZXPSignCmd version
+          $versions = @("4.1.103", "4.1.102", "4.1.101", "4.1.100")
+          $Exe = $null
+          
+          foreach ($version in $versions) {
+            $testPath = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\$version\win64\ZXPSignCmd.exe"
+            if (Test-Path $testPath) {
+              $Exe = $testPath
+              echo "Using ZXPSignCmd version: $version"
+              break
+            }
+          }
+          
+          if (-not $Exe) { throw "ZXPSignCmd.exe not found in any version" }
           
           # Test certificate first
           echo "Certificate file exists: $(Test-Path "$env:GITHUB_WORKSPACE\cert.p12")"
@@ -206,14 +219,26 @@ jobs:
               & $Exe -sign $pkg.Input $pkg.Output $certPath $password
               if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for $($pkg.Name) with exit $LASTEXITCODE" }
             }
-              echo "$($pkg.Name) signed successfully"
-            }
+            echo "$($pkg.Name) signed successfully"
+          }
 
-
-          - name: Verify signatures
+      - name: Verify signatures
         shell: pwsh
         run: |
-          $Exe = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\4.1.103\win64\ZXPSignCmd.exe"
+          # Use the detected ZXPSignCmd version
+          $versions = @("4.1.103", "4.1.102", "4.1.101", "4.1.100")
+          $Exe = $null
+          
+          foreach ($version in $versions) {
+            $testPath = "$env:GITHUB_WORKSPACE\CEP-Resources\ZXPSignCMD\$version\win64\ZXPSignCmd.exe"
+            if (Test-Path $testPath) {
+              $Exe = $testPath
+              echo "Using ZXPSignCmd version: $version"
+              break
+            }
+          }
+          
+          if (-not $Exe) { throw "ZXPSignCmd.exe not found in any version" }
           
           $zxps = @(
             "sync-extension-ae-windows-signed.zxp",
