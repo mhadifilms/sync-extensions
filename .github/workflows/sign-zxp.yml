@@ -248,6 +248,35 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "ZXPSignCmd failed for $($pkg.Name) with exit $LASTEXITCODE" }
             }
             echo "$($pkg.Name) signed successfully"
+            
+            # Fix mimetype ordering - ensure it's the first file
+            echo "Fixing mimetype ordering for $($pkg.Name)..."
+            $tempDir = "temp_$($pkg.Name)_reorder"
+            New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+            
+            # Extract the signed ZXP
+            Expand-Archive -Path $pkg.Output -DestinationPath $tempDir -Force
+            
+            # Create new ZIP with mimetype first
+            $mimetypePath = Join-Path $tempDir "mimetype"
+            if (Test-Path $mimetypePath) {
+              # Create new ZIP starting with mimetype
+              Compress-Archive -Path $mimetypePath -DestinationPath $pkg.Output -Force
+              
+              # Add all other files except mimetype
+              $allFiles = Get-ChildItem -Path $tempDir -Recurse -File | Where-Object { $_.Name -ne "mimetype" }
+              foreach ($file in $allFiles) {
+                $relativePath = $file.FullName.Substring($tempDir.Length + 1)
+                Compress-Archive -Path $file.FullName -DestinationPath $pkg.Output -Update
+              }
+              
+              echo "Mimetype ordering fixed for $($pkg.Name)"
+            } else {
+              echo "Warning: mimetype file not found in $($pkg.Name), skipping reorder"
+            }
+            
+            # Cleanup temp directory
+            Remove-Item -Path $tempDir -Recurse -Force
           }
 
       - name: Verify signatures
