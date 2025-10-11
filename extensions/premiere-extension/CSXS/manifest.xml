@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.sync.extension.ppro" ExtensionBundleVersion="0.7.2" ExtensionBundleName="sync. extension - Premiere Pro">
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.sync.extension.ppro" ExtensionBundleVersion="0.7.35" ExtensionBundleName="sync. extension - Premiere Pro">
   <ExtensionList>
-    <Extension Id="com.sync.extension.ppro.panel" Version="0.7.3"/>
+    <Extension Id="com.sync.extension.ppro.panel" Version="0.7.36"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -15,7 +15,7 @@
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="com.sync.extension.ppro.panel" Version="0.7.3">
+    <Extension Id="com.sync.extension.ppro.panel" Version="0.7.36">
       <HostList>
         <Host Name="PPRO" Version="[24.0,99.9]"/>
       </HostList>
