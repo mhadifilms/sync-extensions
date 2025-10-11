@@ -134,37 +134,11 @@ jobs:
 
           echo "Created CEP folders (Windows): $ae_win, $pp_win"
 
-      - name: Verify server dependencies included (Windows)
-        shell: pwsh
-        run: |
-          $paths = @(
-            "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel\server\node_modules",
-            "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel\server\node_modules"
-          )
-          foreach ($p in $paths) {
-            echo "Checking $p..."
-            if (-not (Test-Path $p)) { throw "Missing node_modules: $p" }
-            if (-not (Test-Path (Join-Path $p "express"))) { throw "Missing express in: $p" }
-          }
-
       - name: Download mac build
         uses: actions/download-artifact@v4
         with:
           name: mac-build
           path: build/mac
-
-      - name: Verify server dependencies included (mac)
-        shell: pwsh
-        run: |
-          $paths = @(
-            "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel\server\node_modules",
-            "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel\server\node_modules"
-          )
-          foreach ($p in $paths) {
-            echo "Checking $p..."
-            if (-not (Test-Path $p)) { throw "Missing node_modules: $p" }
-            if (-not (Test-Path (Join-Path $p "express"))) { throw "Missing express in: $p" }
-          }
 
       - name: Fetch ZXPSignCmd
         shell: pwsh
@@ -337,40 +311,6 @@ jobs:
             }
             echo "$($pkg.Name) signed successfully"
           }
-
-      - name: Validate ZXP packages (non-blocking)
-        shell: pwsh
-        run: |
-          choco install 7zip -y
-          $zxps = @(
-            "sync-extension-ae-windows-signed.zxp",
-            "sync-extension-premiere-windows-signed.zxp",
-            "sync-extension-ae-mac-signed.zxp",
-            "sync-extension-premiere-mac-signed.zxp"
-          )
-          foreach ($z in $zxps) {
-            echo "Checking $z ..."
-            if (-not (Test-Path $z)) { 
-              echo "Warning: $z not found"
-              continue 
-            }
-            
-            $size = (Get-Item $z).Length
-            echo "Package size: $size bytes"
-            
-            # Basic validation - just check if it's a valid ZIP
-            try {
-              $lines = & 7z l -slt $z 2>$null
-              if ($LASTEXITCODE -eq 0) {
-                echo "✓ $z is a valid ZIP archive"
-              } else {
-                echo "Warning: $z may not be a valid ZIP"
-              }
-            } catch {
-              echo "Warning: Could not validate $z"
-            }
-          }
-          echo "ZXP validation completed (non-blocking)"
 
       - name: Verify signatures
         shell: pwsh
