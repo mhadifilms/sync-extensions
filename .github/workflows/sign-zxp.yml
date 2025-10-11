@@ -235,7 +235,6 @@ jobs:
             
             # Validate all required arguments are present
             if (-not (Test-Path $pkg.Input)) { throw "Input directory not found: $($pkg.Input)" }
-            if (-not (Test-Path "$($pkg.Input)\$($pkg.PanelDir)")) { throw "Panel directory not found: $($pkg.Input)\$($pkg.PanelDir)" }
             if (-not (Test-Path $certPath)) { throw "Certificate file not found: $certPath" }
             if ([string]::IsNullOrEmpty($password)) { throw "Password is empty" }
             
