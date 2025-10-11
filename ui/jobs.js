@@ -302,9 +302,9 @@
                 logToFile('[AE Save] File path: ' + fp);
                 
                 // Use HOST_CONFIG for reliable host detection
-                const hostFile = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT') ? 'ae.jsx' : 'ppro.jsx';
+                const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
                 const payload = JSON.stringify({ path: savedPath, binName: 'sync. outputs' }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-                const importFunc = (hostFile === 'ae.jsx') ? 'AEFT_importFileToBin' : 'PPRO_importFileToBin';
+                const importFunc = isAE ? 'AEFT_importFileToBin' : 'PPRO_importFileToBin';
                 cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\"); ${importFunc}(\"${payload}\")`, function(r){
                   logToFile('[AE Save] Raw response: ' + String(r));
                   let ok = false; let out = null;

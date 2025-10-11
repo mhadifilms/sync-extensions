@@ -392,12 +392,16 @@
 
           // Listen for panel visibility changes
           try {
-            cs.addEventListener('com.adobe.csxs.events.WindowVisibilityChanged', function(event) {
-              updateDebugStatus('Visibility changed: ' + event.data);
-              if (event.data === 'show') {
-                startServer();
-              }
-            });
+            if (cs && typeof cs.addEventListener === 'function') {
+              cs.addEventListener('com.adobe.csxs.events.WindowVisibilityChanged', function(event) {
+                updateDebugStatus('Visibility changed: ' + event.data);
+                if (event.data === 'show') {
+                  startServer();
+                }
+              });
+            } else {
+              updateDebugStatus('CSInterface addEventListener not available');
+            }
           } catch(e) {
             updateDebugStatus('Event listener error: ' + e.message);
             // Fallback: just start on timer

@@ -426,10 +426,11 @@
             try {
               if (!cs) cs = new CSInterface();
               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              const hostFile = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT') ? 'ae.jsx' : 'ppro.jsx';
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+              const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
               await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
               const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              const exportFunc = (hostFile === 'ae.jsx') ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
+              const exportFunc = isAE ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
               res = await new Promise(resolve => { cs.evalScript(`${exportFunc}(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
               triedAE = true;
             } catch(_){ }
@@ -494,10 +495,11 @@
             try {
               if (!cs) cs = new CSInterface();
               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              const hostFile = (window.nle && typeof window.nle.getHostId === 'function' && window.nle.getHostId() === 'AEFT') ? 'ae.jsx' : 'ppro.jsx';
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+              const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
               await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
               const arg = JSON.stringify({ format }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              const audioExportFunc = (hostFile === 'ae.jsx') ? 'AEFT_exportInOutAudio' : 'PPRO_exportInOutAudio';
+              const audioExportFunc = isAE ? 'AEFT_exportInOutAudio' : 'PPRO_exportInOutAudio';
               res = await new Promise(resolve => { cs.evalScript(`${audioExportFunc}(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
               triedAE = true;
             } catch(_){ }

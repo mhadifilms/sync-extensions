@@ -25,6 +25,7 @@
           <CEFCommandLine>
             <Parameter>--allow-file-access-from-files</Parameter>
             <Parameter>--allow-insecure-localhost</Parameter>
+            <Parameter>--disable-features=BlockInsecurePrivateNetworkRequests,OutOfBlinkCors</Parameter>
             <Parameter>--enable-nodejs</Parameter>
           </CEFCommandLine>
         </Resources>
