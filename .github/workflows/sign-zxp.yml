@@ -160,47 +160,21 @@ jobs:
           # The ZXP installer should still work even if mimetype isn't first
           echo "Mimetype files created in all ZXP directories"
           
-          # Create ZIP with proper Unix permissions for Node.js binaries
+          # Set execute permissions on Node.js binaries using a different approach
           foreach ($zxpDir in @("build\zxp-ae-mac", "build\zxp-ppro-mac")) {
-            $tempZip = "$zxpDir_temp.zip"
-            echo "Creating ZIP with Unix permissions for: $zxpDir"
-            
-            # Use PowerShell to create ZIP with Unix file attributes
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            
-            # Create ZIP file
-            $zipFile = [System.IO.Compression.ZipFile]::Open($tempZip, [System.IO.Compression.ZipArchiveMode]::Create)
-            
-            # Add all files, setting execute permissions for Node.js binaries
-            Get-ChildItem -Path $zxpDir -Recurse | ForEach-Object {
-              $relativePath = $_.FullName.Substring($zxpDir.Length + 1)
-              $entry = $zipFile.CreateEntry($relativePath.Replace('\', '/'))
+            $nodeBinaries = Get-ChildItem -Path $zxpDir -Recurse -Name "node" -File
+            foreach ($nodeBin in $nodeBinaries) {
+              $fullPath = Join-Path $zxpDir $nodeBin
+              echo "Setting execute permissions on: $fullPath"
               
-              # Set Unix permissions (755 for executables, 644 for regular files)
-              if ($_.Name -eq "node") {
-                $entry.ExternalAttributes = 0x81ED0000  # 755 permissions
-                echo "Set execute permissions for: $relativePath"
-              } else {
-                $entry.ExternalAttributes = 0x81A40000  # 644 permissions
-              }
+              # Use attrib command to set archive bit (Windows equivalent of execute permission)
+              attrib +A "$fullPath"
               
-              if (-not $_.PSIsContainer) {
-                $entryStream = $entry.Open()
-                $fileStream = [System.IO.File]::OpenRead($_.FullName)
-                $fileStream.CopyTo($entryStream)
-                $fileStream.Close()
-                $entryStream.Close()
-              }
+              # Also try setting via PowerShell file attributes
+              $fileInfo = Get-Item $fullPath
+              $fileInfo.Attributes = $fileInfo.Attributes -bor [System.IO.FileAttributes]::Archive
             }
-            
-            $zipFile.Dispose()
-            
-            # Replace directory with extracted ZIP contents
-            Remove-Item $zxpDir -Recurse -Force
-            Expand-Archive -Path $tempZip -DestinationPath $zxpDir -Force
-            Remove-Item $tempZip -Force
-            
-            echo "Recreated $zxpDir with Unix permissions"
+            echo "Processed Node.js binaries in: $zxpDir"
           }
           
           # Define all packages to sign
