@@ -1022,19 +1022,7 @@ app.post('/costs', async (req, res) => {
 });
 
 // Waveform helper: securely read local file bytes for the panel (same auth)
-app.get('/waveform/file', async (req, res) => {
-  try{
-    const p = String(req.query.path||'');
-    if (!p || !path.isAbsolute(p)) return res.status(400).json({ error:'invalid path' });
-    let real = '';
-    try { real = fs.realpathSync(p); } catch(_){ return res.status(404).json({ error:'not found' }); }
-    if (!fs.existsSync(real)) return res.status(404).json({ error:'not found' });
-    const stat = fs.statSync(real);
-    if (!stat.isFile()) return res.status(400).json({ error:'not a file' });
-    res.setHeader('Content-Type', 'application/octet-stream');
-    fs.createReadStream(real).pipe(res);
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
-});
+// Duplicate route removed; the public unauthenticated version above is the source of truth
 
 function pipeToFile(stream, dest){
   return new Promise((resolve, reject)=>{
