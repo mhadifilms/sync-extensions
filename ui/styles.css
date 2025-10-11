@@ -903,7 +903,7 @@
       
       .history-status.processing {
         background: var(--blue-12);
-        color: var(--accent);
+        color: var(--orange);
         border: 1px solid var(--blue-24);
       }
       

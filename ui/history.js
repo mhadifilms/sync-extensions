@@ -2,6 +2,10 @@
         const historyList = document.getElementById('historyList');
         if (!historyList) return;
         
+        // Determine if we already have visible items to avoid flashing UI
+        let hasRenderedItems = false;
+        try { hasRenderedItems = /history-item/.test(historyList.innerHTML); } catch(_){ hasRenderedItems = false; }
+        
         // Check API key first
         const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
         if (!apiKey) {
@@ -20,17 +24,21 @@
           }
           
           if (!healthy) {
-            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+            if (!hasRenderedItems) {
+              historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+            }
             try { if (window.nle && typeof window.nle.startBackend === 'function') { await window.nle.startBackend(); } } catch(_){ }
             return;
           }
         } catch(_){ 
-          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+          if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
           return;
         }
         
-        // Show loading state while fetching
-        historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
+        // Only show loading if list is empty to avoid visible refresh
+        if (!hasRenderedItems) {
+          historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
+        }
         
         // Always show last known jobs (persisted)
         const sorted = jobs.slice().sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
@@ -75,6 +83,14 @@
           copyJobId(document.activeElement);
         }
       });
+      
+      // Refresh history when backend signals readiness
+      try {
+        window.addEventListener('sync-backend-ready', function(){
+          try { updateHistory(); } catch(_){ }
+          try { if (typeof loadJobsFromServer === 'function') loadJobsFromServer(); } catch(_){ }
+        });
+      } catch(_){ }
       
       async function revealFile(jobId) {
         const job = jobs.find(j => String(j.id) === String(jobId));

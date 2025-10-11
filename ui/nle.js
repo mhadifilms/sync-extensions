@@ -104,12 +104,14 @@
             try {
               updateDebugStatus('Checking server status...');
               
-              // Health check first
-              fetch('http://localhost:3000/health')
+              // Health check first (use 127.0.0.1 to avoid IPv6/host alias issues)
+              fetch('http://127.0.0.1:3000/health')
                 .then(function(response) {
                   if (response.ok) {
                     serverStarted = true;
                     updateDebugStatus('Server already running on port 3000');
+                    try { window.__syncServerPort = 3000; } catch(_) {}
+                    try { window.dispatchEvent(new CustomEvent('sync-backend-ready', { detail: { port: 3000, source: 'nle-health' } })); } catch(_) {}
                     return;
                   }
                   throw new Error('Server not responding');
@@ -368,10 +370,12 @@
                     
                     // Verify server started
                     setTimeout(function() {
-                      fetch('http://localhost:3000/health')
+                      fetch('http://127.0.0.1:3000/health')
                         .then(function(response) {
                           if (response.ok) {
                             updateDebugStatus('Server started and healthy');
+                            try { window.__syncServerPort = 3000; } catch(_) {}
+                            try { window.dispatchEvent(new CustomEvent('sync-backend-ready', { detail: { port: 3000, source: 'nle-spawn' } })); } catch(_) {}
                           } else {
                             updateDebugStatus('Server spawned but not healthy');
                           }
@@ -421,6 +425,10 @@
         // Lightweight NLE adapter for host-agnostic calls from UI
         function detectHostId(){
           try {
+            try {
+              if (window.HOST_CONFIG && window.HOST_CONFIG.isAE) return 'AEFT';
+              if (window.HOST_CONFIG && window.HOST_CONFIG.hostId === 'PPRO') return 'PPRO';
+            } catch(_){ }
             if (!window.CSInterface) return 'PPRO';
             var cs = new CSInterface();
             var env = cs.getHostEnvironment && cs.getHostEnvironment();

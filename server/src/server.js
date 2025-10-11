@@ -124,7 +124,7 @@ try { fs.mkdirSync(DIRS.updates, { recursive: true }); } catch(_){ }
 const DEBUG_FLAG_FILE = path.join(DIRS.logs, 'debug.enabled');
 let DEBUG = false;
 try { DEBUG = fs.existsSync(DEBUG_FLAG_FILE); } catch(_){ DEBUG = false; }
-const DEBUG_LOG = path.join(DIRS.logs, 'sync_ae_debug.log');
+const DEBUG_LOG = path.join(DIRS.logs, (APP_ID === 'premiere') ? 'sync_ppro_debug.log' : (APP_ID === 'ae') ? 'sync_ae_debug.log' : 'sync_server_debug.log');
 function tlog(){
   if (!DEBUG) return;
   try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(_){ }
@@ -314,6 +314,19 @@ app.get('/auth/token', (req,res)=>{
     }
   }catch(_){ }
   res.json({ token: AUTH_TOKEN });
+});
+
+// Public: allow localhost-only shutdown for version handover
+app.post('/admin/exit', (req,res)=>{
+  try{
+    const ip = (req.socket && req.socket.remoteAddress) || '';
+    if (!(ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1')){
+      return res.status(403).json({ error:'forbidden' });
+    }
+  }catch(_){ }
+  try { tlog('admin:exit:requested'); } catch(_){ }
+  res.json({ ok:true });
+  setTimeout(()=>{ try { tlog('admin:exit:now'); } catch(_){ } process.exit(0); }, 300);
 });
 
 // Public: AIFF -> WAV conversion (pure Node) - MP3 now handled directly in ExtendScript
@@ -708,6 +721,10 @@ app.post('/update/apply', async (req,res)=>{
     
     console.log(`Update completed successfully: ${current} -> ${latestVersion}`);
     res.json({ ok:true, updated:true, message:'Update applied successfully', current, latest: latestVersion });
+    // After confirming response was sent, exit the server so a fresh instance loads the new code on next panel start
+    try {
+      setTimeout(()=>{ try { tlog('update:post:exit'); } catch(_){ } console.log('Exiting server after successful update'); process.exit(0); }, 800);
+    } catch(_){ }
   }catch(e){ 
     console.error('Update failed:', e.message);
     console.error('Update error stack:', e.stack);
@@ -1153,7 +1170,24 @@ async function startServer() {
     const r = await fetch(`http://${HOST}:${PORT}/health`, { method: 'GET' });
     if (r && r.ok) {
       console.log(`Existing Sync Extension server detected on http://${HOST}:${PORT}`);
-      return PORT;
+      // Try to determine version drift; if drift, request exit of old server
+      try {
+        const currentManifestVersion = await getCurrentVersion();
+        const vResp = await fetch(`http://${HOST}:${PORT}/update/version`, { method: 'GET' }).catch(()=>null);
+        const vJson = vResp ? await vResp.json().catch(()=>null) : null;
+        const otherVersion = vJson && vJson.version ? String(vJson.version) : '';
+        if (currentManifestVersion && otherVersion && compareSemver(currentManifestVersion, otherVersion) > 0){
+          console.log(`Existing server version ${otherVersion} older than manifest ${currentManifestVersion}, requesting shutdown...`);
+          await fetch(`http://${HOST}:${PORT}/admin/exit`, { method:'POST' }).catch(()=>{});
+          await new Promise(r2=>setTimeout(r2, 600));
+        } else {
+          console.log(`Port ${PORT} in use by healthy server; exiting child`);
+          process.exit(0);
+        }
+      } catch(_){
+        console.log(`Port ${PORT} in use by healthy server; exiting child`);
+        process.exit(0);
+      }
     }
   } catch(_) { /* ignore */ }
   const srv = app.listen(PORT, HOST, () => {
@@ -1166,8 +1200,10 @@ async function startServer() {
       try {
         const r = await fetch(`http://${HOST}:${PORT}/health`, { method: 'GET' });
         if (r && r.ok) {
-          console.log(`Port ${PORT} in use by healthy server; continuing`);
-          return;
+          console.log(`Port ${PORT} in use by healthy server; exiting child`);
+          // Another healthy instance is already serving requests on this port.
+          // Exit cleanly so any spawner (e.g., the CEP panel) doesn't leave a zombie process.
+          process.exit(0);
         }
       } catch(_) {}
       console.error(`Port ${PORT} in use and health check failed`);

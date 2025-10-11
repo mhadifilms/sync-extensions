@@ -138,12 +138,15 @@
         } catch(_){ }
       })();
 
-      // Update system functions
+      // Update system functions (reuse shared auth token/headers from core.js)
       async function api(pathname, opts){
-        const token = localStorage.getItem('syncAuthToken') || '';
-        const h = Object.assign({ 'Content-Type':'application/json' }, token ? { 'Authorization': 'Bearer ' + token } : {});
+        try { if (typeof ensureAuthToken === 'function') await ensureAuthToken(); } catch(_){ }
         const port = getServerPort();
-        return fetch(`http://127.0.0.1:${port}` + pathname, Object.assign({ headers: h }, opts||{}));
+        const baseHeaders = (typeof authHeaders === 'function') ? authHeaders({'Content-Type':'application/json'}) : { 'Content-Type':'application/json' };
+        const extra = (opts && opts.headers) || {};
+        const headers = Object.assign({}, baseHeaders, extra);
+        const init = Object.assign({}, opts||{}, { headers });
+        return fetch(`http://127.0.0.1:${port}` + pathname, init);
       }
 
       async function refreshCurrentVersion(){
@@ -206,6 +209,11 @@
 
       // Initialize version display on load
       setTimeout(refreshCurrentVersion, 1000);
+      
+      // Refresh version when backend becomes ready
+      try {
+        window.addEventListener('sync-backend-ready', function(){ setTimeout(refreshCurrentVersion, 200); });
+      } catch(_){ }
 
       // Debug functions
       function testHostScripts() {

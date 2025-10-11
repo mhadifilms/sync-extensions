@@ -517,6 +517,10 @@
         const historyList = document.getElementById('historyList');
         if (!historyList) return;
         
+        // Detect if UI already has items to prevent flashing loading state
+        let hasRenderedItems = false;
+        try { hasRenderedItems = /history-item/.test(historyList.innerHTML); } catch(_){ hasRenderedItems = false; }
+        
         try {
           const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
           if (!apiKey) {
@@ -534,12 +538,12 @@
           }
           
           if (!healthy) {
-            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+            if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
             return;
           }
           
-          // Show loading state
-          historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
+          // Show loading state only when empty
+          if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
           
           await ensureAuthToken();
           const gen = await fetch(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });

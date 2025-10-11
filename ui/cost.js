@@ -103,5 +103,12 @@
           }
         }catch(e){ if (myToken !== costToken) return; if (badge){ badge.style.display='block'; badge.textContent = 'cost: n/a'; } if (display){ display.textContent = 'cost: n/a'; } try { const below=document.getElementById('costBelow'); if (below){ below.textContent = 'cost: n/a'; } } catch(_){ } }
       }
+      
+      // When backend is ready, if both inputs were already selected, re-estimate cost
+      try {
+        window.addEventListener('sync-backend-ready', function(){
+          try { if (selectedVideo && selectedAudio) scheduleEstimate(); } catch(_){ }
+        });
+      } catch(_){ }
 
 

@@ -687,12 +687,13 @@ function AEFT_exportInOutAudio(payloadJson) {
           var np = String(nodePath||'').replace(/"/g,'');
           cmd = 'cmd.exe /c "' + np + '" "' + String(scriptFile.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(aif.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(outputFile.fsName||'').replace(/\\/g,'\\\\') + '"';
         } else {
-          // Use bash -lc to ensure PATH is stable; quote args
           var np2 = String(nodePath||'');
           var s1 = String(scriptFile.fsName||'');
           var a1 = String(aif.fsName||'');
           var o1 = String(outputFile.fsName||'');
-          cmd = '/bin/bash -lc ' + _shq(('"' + np2 + '" ' + '"' + s1 + '" ' + '"' + a1 + '" ' + '"' + o1 + '"') + ' >/dev/null 2>&1 || true');
+          try { if (np2 && np2.indexOf('/bin/darwin-arm64/node') !== -1) { system.callSystem('/bin/chmod 755 ' + _shq(np2)); } } catch(_){ }
+          var inner = '"' + np2 + '" ' + '"' + s1 + '" ' + '"' + a1 + '" ' + '"' + o1 + '"' + ' >/dev/null 2>&1 || true';
+          cmd = '/bin/bash -lc ' + _shq(inner);
         }
         
         try {

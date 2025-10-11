@@ -63,6 +63,7 @@
             // Store the server port globally for other parts of the app
             if (healthy && serverPort) {
               window.__syncServerPort = serverPort;
+              try { window.dispatchEvent(new CustomEvent('sync-backend-ready', { detail: { port: serverPort, source: 'bootstrap' } })); } catch(_){ }
             }
           } catch(e){ }
         }
