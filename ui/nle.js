@@ -307,29 +307,10 @@
                     var expressPath = nodeModulesPath + (isWindows ? '\\express' : '/express');
                     
                     if (!fs.existsSync(nodeModulesPath) || !fs.existsSync(expressPath)) {
-                      updateDebugStatus('Dependencies missing, attempting to install...');
-                      try {
-                        var execSync = require('child_process').execSync;
-                        var installCmd;
-                        if (isWindows) {
-                          // Windows: use proper path separators and npm instead of node
-                          var serverDir = extPath.replace(/\//g, '\\') + '\\server';
-                          installCmd = 'cd /d "' + serverDir + '" && npm install --omit=dev';
-                        } else {
-                          installCmd = 'cd "' + extPath + '/server" && npm install --omit=dev';
-                        }
-                        updateDebugStatus('Running: ' + installCmd);
-                        execSync(installCmd, { encoding: 'utf8', timeout: 30000 });
-                        updateDebugStatus('Dependencies installed successfully');
-                      } catch(installError) {
-                        updateDebugStatus('Failed to install dependencies: ' + installError.message);
-                        if (isWindows) {
-                          updateDebugStatus('Manual fix: cd /d "' + extPath.replace(/\//g, '\\') + '\\server" && npm install');
-                        } else {
-                          updateDebugStatus('Manual fix: cd "' + extPath + '/server" && npm install');
-                        }
-                        return;
-                      }
+                      updateDebugStatus('Dependencies missing - this should not happen');
+                      updateDebugStatus('The extension package should include pre-installed node_modules');
+                      updateDebugStatus('Please reinstall the extension or contact support');
+                      return;
                     }
                     
                     updateDebugStatus('Spawning: ' + nodePath + ' ' + serverPath);
