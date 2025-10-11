@@ -57,6 +57,8 @@ jobs:
             Copy-Item "bin" "$dest/bin" -Recurse
             Copy-Item "index.html" "$dest/"
             Copy-Item "host" "$dest/host" -Recurse
+            # Copy main UI files to the existing ui directory (merge, don't replace)
+            Copy-Item "ui/*" "$dest/ui/" -Recurse -Force
           }
           
           # Build Windows variants (strip darwin bins)
@@ -169,25 +171,60 @@ jobs:
             echo "Created mimetype file: $mimetypePath"
           }
           
-          # Note: ZXPSignCmd may not preserve file order, but mimetype file is created
-          # The ZXP installer should still work even if mimetype isn't first
-          echo "Mimetype files created in all ZXP directories"
-          
-          # Set execute permissions on Node.js binaries using a different approach
-          foreach ($zxpDir in @("build\zxp-ae-mac", "build\zxp-ppro-mac")) {
-            $nodeBinaries = Get-ChildItem -Path $zxpDir -Recurse -Name "node" -File
-            foreach ($nodeBin in $nodeBinaries) {
-              $fullPath = Join-Path $zxpDir $nodeBin
-              echo "Setting execute permissions on: $fullPath"
-              
-              # Use attrib command to set archive bit (Windows equivalent of execute permission)
-              attrib +A "$fullPath"
-              
-              # Also try setting via PowerShell file attributes
-              $fileInfo = Get-Item $fullPath
-              $fileInfo.Attributes = $fileInfo.Attributes -bor [System.IO.FileAttributes]::Archive
+          # Ensure mimetype is the first file by creating a properly ordered ZIP
+          foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
+            $tempZip = "$zxpDir-temp.zip"
+            $mimetypePath = Join-Path $zxpDir "mimetype"
+            
+            # Create ZIP with mimetype first
+            Compress-Archive -Path $mimetypePath -DestinationPath $tempZip -Force
+            $allFiles = Get-ChildItem -Path $zxpDir -Recurse -File | Where-Object { $_.FullName -ne $mimetypePath }
+            foreach ($file in $allFiles) {
+              $relativePath = $file.FullName.Substring($zxpDir.Length + 1)
+              Compress-Archive -Path $file.FullName -DestinationPath $tempZip -Update
             }
-            echo "Processed Node.js binaries in: $zxpDir"
+            
+            # Replace directory with ZIP contents
+            Remove-Item $zxpDir -Recurse -Force
+            Expand-Archive -Path $tempZip -DestinationPath $zxpDir -Force
+            Remove-Item $tempZip -Force
+            
+            echo "Reordered files in: $zxpDir (mimetype first)"
+          }
+          
+          # Validate required files and set permissions
+          foreach ($zxpDir in @("build\zxp-ae-win", "build\zxp-ppro-win", "build\zxp-ae-mac", "build\zxp-ppro-mac")) {
+            echo "Validating $zxpDir..."
+            
+            # Check required files exist
+            $requiredFiles = @("mimetype", "index.html", "CSXS/manifest.xml")
+            foreach ($file in $requiredFiles) {
+              $filePath = Join-Path $zxpDir $file
+              if (-not (Test-Path $filePath)) { 
+                throw "Required file missing: $filePath" 
+              }
+            }
+            
+            # Check Node.js binaries exist and set permissions (macOS only)
+            if ($zxpDir -like "*mac*") {
+              $nodeBinaries = Get-ChildItem -Path $zxpDir -Recurse -Name "node" -File
+              if ($nodeBinaries.Count -eq 0) {
+                throw "No Node.js binaries found in macOS package: $zxpDir"
+              }
+              foreach ($nodeBin in $nodeBinaries) {
+                $fullPath = Join-Path $zxpDir $nodeBin
+                echo "Setting execute permissions on: $fullPath"
+                
+                # Use attrib command to set archive bit (Windows equivalent of execute permission)
+                attrib +A "$fullPath"
+                
+                # Also try setting via PowerShell file attributes
+                $fileInfo = Get-Item $fullPath
+                $fileInfo.Attributes = $fileInfo.Attributes -bor [System.IO.FileAttributes]::Archive
+              }
+            }
+            
+            echo "Validation completed for: $zxpDir"
           }
           
           # Define all packages to sign
