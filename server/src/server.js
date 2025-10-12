@@ -130,6 +130,9 @@ function tlog(){
   try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(_){ }
 }
 
+// Detect if we're being spawned by UI auto-start (stdout/stderr captured)
+const isSpawnedByUI = process.stdout.isTTY === false && process.stderr.isTTY === false;
+
 function ghHeaders(extra){
   const h = Object.assign({ 'Accept': 'application/vnd.github+json', 'User-Agent': GH_UA }, extra||{});
   if (GH_TOKEN) h['Authorization'] = `Bearer ${GH_TOKEN}`;
@@ -488,8 +491,10 @@ app.post('/update/apply', async (req,res)=>{
     }
     
     // Log update start for debugging
-    console.log(`Starting update process: ${current} -> ${latestVersion}`);
-    console.log(`Platform: ${process.platform}, Architecture: ${process.arch}`);
+    if (!isSpawnedByUI) {
+      console.log(`Starting update process: ${current} -> ${latestVersion}`);
+      console.log(`Platform: ${process.platform}, Architecture: ${process.arch}`);
+    }
     try { tlog('update:start', `${current} -> ${latestVersion}`, 'platform=', process.platform, 'arch=', process.arch); } catch(_){ }
     
     // Download and extract update
@@ -500,9 +505,9 @@ app.post('/update/apply', async (req,res)=>{
     const zipResp = await fetch(latest.zip_url);
     if (!zipResp.ok) throw new Error('Failed to download update');
     
-    const zipBuffer = await zipResp.buffer();
-    fs.writeFileSync(zipPath, zipBuffer);
-    try { tlog('update:downloaded', zipPath, 'bytes=', String(zipBuffer && zipBuffer.length || 0)); } catch(_){ }
+    const zipBuffer = await zipResp.arrayBuffer();
+    fs.writeFileSync(zipPath, Buffer.from(zipBuffer));
+    try { tlog('update:downloaded', zipPath, 'bytes=', String(zipBuffer && zipBuffer.byteLength || 0)); } catch(_){ }
     
     // Extract zip/zxp (ZXP is just a ZIP with extension folders)
     const isWindows = process.platform === 'win32';
@@ -512,36 +517,41 @@ app.post('/update/apply', async (req,res)=>{
       // Windows: Use PowerShell to extract zip/zxp
       const extractCmd = `Expand-Archive -Path "${zipPath}" -DestinationPath "${tempDir}" -Force`;
       try { tlog('update:extract:win', extractCmd); } catch(_){ }
-      console.log('Windows extract command:', extractCmd);
+      if (!isSpawnedByUI) console.log('Windows extract command:', extractCmd);
       try {
         await execPowerShell(extractCmd);
         try { tlog('update:extract:win:ok'); } catch(_){ }
-        console.log('PowerShell extraction completed');
+        if (!isSpawnedByUI) console.log('PowerShell extraction completed');
       } catch(e) {
         try { tlog('update:extract:win:fail', e.message); } catch(_){ }
-        console.log('PowerShell extraction failed:', e.message);
+        if (!isSpawnedByUI) console.log('PowerShell extraction failed:', e.message);
         throw new Error('Failed to extract zip/zxp with PowerShell: ' + e.message);
       }
     } else {
       // macOS/Linux: Use unzip
       const extractCmd = `cd "${tempDir}" && unzip -q "${zipPath}"`;
       try { tlog('update:extract:unix', extractCmd); } catch(_){ }
-      console.log('Unix extract command:', extractCmd);
+      if (!isSpawnedByUI) console.log('Unix extract command:', extractCmd);
       try {
         await exec(extractCmd);
         try { tlog('update:extract:unix:ok'); } catch(_){ }
-        console.log('Unix extraction completed');
+        if (!isSpawnedByUI) console.log('Unix extraction completed');
       } catch(e) {
         try { tlog('update:extract:unix:fail', e.message); } catch(_){ }
-        console.log('Unix extraction failed:', e.message);
+        if (!isSpawnedByUI) console.log('Unix extraction failed:', e.message);
         throw new Error('Failed to extract zip/zxp with unzip: ' + e.message);
       }
     }
     
     // Find the extracted directory (ZXP: extension folders, ZIP: sync-extensions/, zipball: repo-name-tag/)
-    const allItems = fs.readdirSync(tempDir);
+    let allItems;
+    try {
+      allItems = fs.readdirSync(tempDir);
+    } catch(e) {
+      throw new Error('Failed to read extracted directory: ' + e.message);
+    }
     try { tlog('update:extracted:items', JSON.stringify(allItems||[])); } catch(_){ }
-    console.log('Extracted items:', allItems);
+    if (!isSpawnedByUI) console.log('Extracted items:', allItems);
     
     const extractedDirs = allItems.filter(name => {
       const fullPath = path.join(tempDir, name);
@@ -555,7 +565,7 @@ app.post('/update/apply', async (req,res)=>{
     });
     
     try { tlog('update:extracted:dirs', JSON.stringify(extractedDirs||[])); } catch(_){ }
-    console.log('Extracted directories:', extractedDirs);
+    if (!isSpawnedByUI) console.log('Extracted directories:', extractedDirs);
     
     let extractedDir;
     
@@ -563,17 +573,17 @@ app.post('/update/apply', async (req,res)=>{
       // ZXP format: extension folders are directly in tempDir
       extractedDir = tempDir;
       try { tlog('update:format:zxp'); } catch(_){ }
-      console.log('Using ZXP format - extension folders directly in temp dir');
+      if (!isSpawnedByUI) console.log('Using ZXP format - extension folders directly in temp dir');
     } else if (extractedDirs.includes('sync-extensions')) {
       // ZIP format: sync-extensions directory
       extractedDir = path.join(tempDir, 'sync-extensions');
       try { tlog('update:format:zip:sync-extensions'); } catch(_){ }
-      console.log('Using sync-extensions directory from ZIP release asset');
+      if (!isSpawnedByUI) console.log('Using sync-extensions directory from ZIP release asset');
     } else if (extractedDirs.length > 0) {
       // Fallback to GitHub zipball format (repo-name-tag/)
       extractedDir = path.join(tempDir, extractedDirs[0]);
       try { tlog('update:format:zipball', extractedDirs[0]); } catch(_){ }
-      console.log('Using GitHub zipball directory:', extractedDirs[0]);
+      if (!isSpawnedByUI) console.log('Using GitHub zipball directory:', extractedDirs[0]);
     } else {
       // Try to find any directory that might contain the source code
       const possibleDirs = allItems.filter(name => {
@@ -591,7 +601,7 @@ app.post('/update/apply', async (req,res)=>{
       });
       
       try { tlog('update:format:guess:dirs', JSON.stringify(possibleDirs||[])); } catch(_){ }
-      console.log('Possible source directories:', possibleDirs);
+      if (!isSpawnedByUI) console.log('Possible source directories:', possibleDirs);
       
       if (possibleDirs.length === 0) {
         throw new Error('No extracted directory found in zipball. Contents: ' + allItems.join(', '));
@@ -599,10 +609,10 @@ app.post('/update/apply', async (req,res)=>{
       
       extractedDir = path.join(tempDir, possibleDirs[0]);
       try { tlog('update:format:guess:chosen', possibleDirs[0]); } catch(_){ }
-      console.log('Using fallback directory:', possibleDirs[0]);
+      if (!isSpawnedByUI) console.log('Using fallback directory:', possibleDirs[0]);
     }
     try { tlog('update:extracted:dir', extractedDir); } catch(_){ }
-    console.log('Using extracted directory:', extractedDir);
+    if (!isSpawnedByUI) console.log('Using extracted directory:', extractedDir);
     
     // Look for install script in the extracted directory (disabled; always use manual copy)
     const updateScript = path.join(extractedDir, 'scripts', isWindows ? 'install.ps1' : 'install.sh');
@@ -655,7 +665,12 @@ app.post('/update/apply', async (req,res)=>{
         const destRoot = targetApp === 'ae' ? aeDestDir : pproDestDir;
         try { tlog('update:copy:zxp:target', targetApp, 'dest=', destRoot); } catch(_){ }
         try { if (!fs.existsSync(destRoot)) fs.mkdirSync(destRoot, { recursive: true }); } catch(_){ }
-        const items = fs.readdirSync(extractedDir).filter(name => name !== 'META-INF' && name !== 'update.zip');
+        let items;
+        try {
+          items = fs.readdirSync(extractedDir).filter(name => name !== 'META-INF' && name !== 'update.zip');
+        } catch(e) {
+          throw new Error('Failed to read ZXP extracted directory: ' + e.message);
+        }
         for (const name of items){
           const srcPath = path.join(extractedDir, name);
           if (isWindows) {
@@ -719,15 +734,17 @@ app.post('/update/apply', async (req,res)=>{
     // Cleanup
     try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch(_){}
     
-    console.log(`Update completed successfully: ${current} -> ${latestVersion}`);
+    if (!isSpawnedByUI) console.log(`Update completed successfully: ${current} -> ${latestVersion}`);
     res.json({ ok:true, updated:true, message:'Update applied successfully', current, latest: latestVersion });
     // After confirming response was sent, exit the server so a fresh instance loads the new code on next panel start
     try {
-      setTimeout(()=>{ try { tlog('update:post:exit'); } catch(_){ } console.log('Exiting server after successful update'); process.exit(0); }, 800);
+      setTimeout(()=>{ try { tlog('update:post:exit'); } catch(_){ } if (!isSpawnedByUI) console.log('Exiting server after successful update'); process.exit(0); }, 800);
     } catch(_){ }
   }catch(e){ 
-    console.error('Update failed:', e.message);
-    console.error('Update error stack:', e.stack);
+    if (!isSpawnedByUI) {
+      console.error('Update failed:', e.message);
+      console.error('Update error stack:', e.stack);
+    }
     res.status(500).json({ error:String(e?.message||e) }); 
   }
 });

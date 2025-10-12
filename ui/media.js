@@ -56,16 +56,6 @@
             }
           });
         }
-
-        // Click on video toggles play/pause
-        video.addEventListener('click', () => {
-          if (video.paused) { video.play(); }
-          else { video.pause(); }
-          if (playBtn) {
-            if (video.paused) playBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
-            else playBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
-          }
-        });
         
         if (seekBar) {
           seekBar.addEventListener('input', () => {
@@ -410,6 +400,10 @@
 
       async function selectVideoInOut(){
         try{
+          console.log('selectVideoInOut called, busy:', window.__videoInOutBusy);
+          if (window.__videoInOutBusy) { return; }
+          window.__videoInOutBusy = true;
+          console.log('selectVideoInOut starting render');
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering video in/out…';
           // Only set loading state on the video in/out button
@@ -423,22 +417,44 @@
           try {
             // Always try AE route first (preload ae.jsx), then fall back
             let triedAE = false;
+            let hostIsAE = false;
             try {
               if (!cs) cs = new CSInterface();
-              const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
-              const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
-              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
-              const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-              const exportFunc = isAE ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
-              res = await new Promise(resolve => { cs.evalScript(`${exportFunc}(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
+               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+               const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+               hostIsAE = !!isAE;
+               console.log('Video: hostIsAE =', hostIsAE);
+               const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
+               await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
+               const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+               const exportFunc = isAE ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
+               console.log('Video: calling', exportFunc);
+              res = await new Promise(resolve => {
+                cs.evalScript(`${exportFunc}(\"${arg}\")`, r => {
+                  try {
+                    let out = null;
+                    if (typeof r === 'string') {
+                      try { out = JSON.parse(r||'{}'); }
+                      catch(parseErr) {
+                        if (r === '[object Object]' || (r && r.indexOf('ok') !== -1)) out = { ok:true };
+                        else out = { ok:false, error:String(r||'') };
+                      }
+                    } else if (r && typeof r === 'object') { out = r; }
+                    else { out = { ok:false, error:String(r) }; }
+                    resolve(out);
+                  } catch(e){ resolve({ ok:false, error:String(e) }); }
+                });
+              });
               triedAE = true;
             } catch(_){ }
             if (!res || !res.ok) {
-              if (window.nle && typeof window.nle.exportInOutVideo === 'function') {
-                res = await window.nle.exportInOutVideo({ codec });
-              } else {
-                res = await evalExtendScript('PPRO_exportInOutVideo', { codec });
+              // Only attempt fallback when the host is NOT AE; avoid a second AE invoke
+              if (!hostIsAE) {
+                if (window.nle && typeof window.nle.exportInOutVideo === 'function') {
+                  res = await window.nle.exportInOutVideo({ codec });
+                } else {
+                  res = await evalExtendScript('PPRO_exportInOutVideo', { codec });
+                }
               }
             }
           } catch(e){ res = { ok:false, error: String(e) }; }
@@ -475,10 +491,18 @@
             try { if (__videoInOutBtn) __videoInOutBtn.textContent = __videoInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
+        finally { try { window.__videoInOutBusy = false; } catch(_){ } }
       }
 
       async function selectAudioInOut(){
         try{
+          console.log('selectAudioInOut called, busy:', window.__audioInOutBusy);
+          if (window.__audioInOutBusy) { 
+            console.log('selectAudioInOut blocked by busy guard');
+            return; 
+          }
+          window.__audioInOutBusy = true;
+          console.log('selectAudioInOut starting render');
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering audio in/out…';
           // Only set loading state on the audio in/out button
@@ -490,24 +514,44 @@
           const format = document.getElementById('renderAudio').value || 'wav';
           let res = null;
           try {
-            // Always try AE route first (preload ae.jsx), then fall back
+            // Always try AE route first (preload ae.jsx), then (only if not AE) fall back
             let triedAE = false;
+            let hostIsAE = false;
             try {
               if (!cs) cs = new CSInterface();
               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
               const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+              hostIsAE = !!isAE;
               const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
               await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
               const arg = JSON.stringify({ format }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
               const audioExportFunc = isAE ? 'AEFT_exportInOutAudio' : 'PPRO_exportInOutAudio';
-              res = await new Promise(resolve => { cs.evalScript(`${audioExportFunc}(\"${arg}\")`, r => { try { resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:false, error:String(r||'') }); } }); });
+              res = await new Promise(resolve => {
+                cs.evalScript(`${audioExportFunc}(\"${arg}\")`, r => {
+                  try {
+                    let out = null;
+                    if (typeof r === 'string') {
+                      try { out = JSON.parse(r||'{}'); }
+                      catch(parseErr) {
+                        if (r === '[object Object]' || (r && r.indexOf('ok') !== -1)) out = { ok:true };
+                        else out = { ok:false, error:String(r||'') };
+                      }
+                    } else if (r && typeof r === 'object') { out = r; }
+                    else { out = { ok:false, error:String(r) }; }
+                    resolve(out);
+                  } catch(e){ resolve({ ok:false, error:String(e) }); }
+                });
+              });
               triedAE = true;
             } catch(_){ }
             if (!res || !res.ok) {
-              if (window.nle && typeof window.nle.exportInOutAudio === 'function') {
-                res = await window.nle.exportInOutAudio({ format });
-              } else {
-                res = await evalExtendScript('PPRO_exportInOutAudio', { format });
+              // Only attempt fallback when the host is NOT AE; avoid a second AE invoke
+              if (!hostIsAE) {
+                if (window.nle && typeof window.nle.exportInOutAudio === 'function') {
+                  res = await window.nle.exportInOutAudio({ format });
+                } else {
+                  res = await evalExtendScript('PPRO_exportInOutAudio', { format });
+                }
               }
             }
           } catch(e){ res = { ok:false, error: String(e) }; }
@@ -539,6 +583,7 @@
             try { if (__audioInOutBtn) __audioInOutBtn.textContent = __audioInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
+        finally { try { window.__audioInOutBusy = false; } catch(_){ } }
       }
 
       function updateInputStatus() {
@@ -654,8 +699,7 @@
         // Only center play button
         if (centerPlayBtn) centerPlayBtn.addEventListener('click', togglePlay);
         video.addEventListener('click', togglePlay);
-        // Click anywhere on video toggles play/pause
-        video.addEventListener('click', togglePlay);
+        // Click anywhere on video toggles play/pause - REMOVED DUPLICATE
 
         // Volume control
         if (volumeSlider) {
@@ -1069,7 +1113,7 @@
           }
         };
 
-        if (centerPlayBtn) centerPlayBtn.addEventListener('click', togglePlay);
+        // REMOVED DUPLICATE: if (centerPlayBtn) centerPlayBtn.addEventListener('click', togglePlay);
 
         // Volume control
         if (volumeSlider) {
