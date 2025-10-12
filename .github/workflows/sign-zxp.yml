@@ -66,7 +66,7 @@ jobs:
             cp -a bin "$dest/bin"
             cp -a index.html "$dest/"
             cp -a host "$dest/host"
-            cp -a .env "$dest/.env"
+            cp -a .env "$dest/.env" || echo "Warning: .env file not found or copy failed"
             mkdir -p "$dest/ui"
             # Copy shared UI but do NOT overwrite per-extension host-detection.js
             if command -v rsync >/dev/null 2>&1; then
@@ -155,7 +155,7 @@ jobs:
             Copy-Item "bin" "$dest/bin" -Recurse
             Copy-Item "index.html" "$dest/"
             Copy-Item "host" "$dest/host" -Recurse
-            Copy-Item ".env" "$dest/.env"
+            Copy-Item ".env" "$dest/.env" -ErrorAction SilentlyContinue; if (-not (Test-Path "$dest/.env")) { Write-Warning ".env file not found or copy failed" }
             # Copy main UI files to the existing ui directory (merge, don't replace)
             Copy-Item "ui/*" "$dest/ui/" -Recurse -Force
             # Restore per-extension host-detection.js after shared UI copy
