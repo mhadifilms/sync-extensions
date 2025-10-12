@@ -141,11 +141,11 @@
           try { statusEl.textContent = 'uploading video…'; } catch(_){ }
           try{
             const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
-            const body = { path: selectedVideo, apiKey: settings.apiKey||'', supabaseUrl: (settings.supabaseUrl||''), supabaseKey: (settings.supabaseKey||''), supabaseBucket: (settings.supabaseBucket||'') };
+            const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
             await ensureAuthToken();
             const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
             const j = await r.json().catch(()=>null);
-            if (r.ok && j && j.ok && j.url){ uploadedVideoUrl = j.url; }
+            if (r.ok && j && j.ok && j.url){ uploadedVideoUrl = j.url; window.uploadedVideoUrl = j.url; }
           }catch(_){ }
           try { statusEl.textContent = ''; } catch(_){ }
           try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
@@ -170,11 +170,11 @@
           try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
           try{
             const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
-            const body = { path: selectedAudio, apiKey: settings.apiKey||'', supabaseUrl: (settings.supabaseUrl||''), supabaseKey: (settings.supabaseKey||''), supabaseBucket: (settings.supabaseBucket||'') };
+            const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
             await ensureAuthToken();
             const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
             const j = await r.json().catch(()=>null);
-            if (r.ok && j && j.ok && j.url){ uploadedAudioUrl = j.url; }
+            if (r.ok && j && j.ok && j.url){ uploadedAudioUrl = j.url; window.uploadedAudioUrl = j.url; }
           }catch(_){ }
           try { updateInputStatus(); } catch(_){ }
           try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }

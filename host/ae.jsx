@@ -1,3 +1,57 @@
+// Minimal JSON polyfill for ExtendScript environments lacking JSON
+try {
+  if (typeof JSON === 'undefined') { JSON = {}; }
+  if (typeof JSON.stringify !== 'function') {
+    JSON.stringify = function(value){
+      function escStr(s){ return String(s).replace(/[\\"\n\r\t\b\f]/g, function(ch){
+        if (ch === '"') return '\\"';
+        if (ch === '\\') return '\\\\';
+        if (ch === '\n') return '\\n';
+        if (ch === '\r') return '\\r';
+        if (ch === '\t') return '\\t';
+        if (ch === '\b') return '\\b';
+        if (ch === '\f') return '\\f';
+        return ch;
+      }); }
+      function ser(v){
+        if (v === null) return 'null';
+        var t = typeof v;
+        if (t === 'string') return '"' + escStr(v) + '"';
+        if (t === 'number' || t === 'boolean') return String(v);
+        if (t === 'undefined') return 'null';
+        if (v instanceof Array) {
+          var arr = [];
+          for (var i=0;i<v.length;i++){ arr.push(ser(v[i])); }
+          return '[' + arr.join(',') + ']';
+        }
+        var props = [];
+        for (var k in v) {
+          if (!v.hasOwnProperty) continue;
+          props.push('"' + escStr(k) + '":' + ser(v[k]));
+        }
+        return '{' + props.join(',') + '}';
+      }
+      return ser(value);
+    };
+  }
+  if (typeof JSON.parse !== 'function') {
+    JSON.parse = function(text){
+      // Constrained eval for trusted UI payloads - add length check for safety
+      var s = String(text || '');
+      if (s.length > 1048576) { // 1MB limit
+        try { var log = _syncDebugLogFile(); log.open('a'); log.writeln('[JSON.parse] rejected oversized input: ' + s.length + ' bytes'); log.close(); } catch(_){}
+        throw new Error('JSON input too large');
+      }
+      try {
+        return eval('(' + s + ')');
+      } catch(e) {
+        try { var log = _syncDebugLogFile(); log.open('a'); log.writeln('[JSON.parse] parse error: ' + String(e)); log.close(); } catch(_){}
+        throw e;
+      }
+    };
+  }
+} catch(e) { /* ignore */ }
+
 function _respond(data) {
   try { return JSON.stringify(data); } catch (e) { return String(data); }
 }
@@ -35,6 +89,9 @@ function _shq(s) {
 }
 
 // Central app-data directory resolver for ExtendScript
+// NOTE: This function is duplicated in host/ppro.jsx and server/src/audio.cjs
+// ExtendScript does not support imports, so duplication is necessary
+// Future: Consider extracting to shared .jsxinc file that both hosts can $.evalFile()
 function SYNC_getBaseDirs(){
   try{
     var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
@@ -51,15 +108,15 @@ function SYNC_getBaseDirs(){
       logs: ensure('logs'),
       cache: ensure('cache'),
       state: ensure('state'),
-      outputs: ensure('outputs'),
+      uploads: ensure('uploads'),
       updates: ensure('updates')
     };
   }catch(e){
-    try { return { base: Folder.userData.fsName, logs: Folder.userData.fsName, cache: Folder.userData.fsName, state: Folder.userData.fsName, outputs: Folder.userData.fsName, updates: Folder.userData.fsName }; } catch(_){ return { base:'', logs:'', cache:'', state:'', outputs:'', updates:'' }; }
+    try { return { base: Folder.userData.fsName, logs: Folder.userData.fsName, cache: Folder.userData.fsName, state: Folder.userData.fsName, uploads: Folder.userData.fsName, updates: Folder.userData.fsName }; } catch(_){ return { base:'', logs:'', cache:'', state:'', uploads:'', updates:'' }; }
   }
 }
 function SYNC_getLogDir(){ try{ return SYNC_getBaseDirs().logs; }catch(_){ return ''; } }
-function SYNC_getOutputsDir(){ try{ return SYNC_getBaseDirs().outputs; }catch(_){ return ''; } }
+function SYNC_getUploadsDir(){ try{ return SYNC_getBaseDirs().uploads; }catch(_){ return ''; } }
 function _syncDebugLogPath(){
   try{
     var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
@@ -125,7 +182,7 @@ function _waitForFileReady(file, timeoutMs){
 function _safeOutDir(){
   try {
     var d = SYNC_getBaseDirs();
-    if (d && d.outputs) return d.outputs;
+    if (d && d.uploads) return d.uploads;
   } catch(_){ }
   try {
     var ext = _extensionRoot();
@@ -165,6 +222,18 @@ function AEFT_diagInOut() {
     var info = { ok: true, host: 'AEFT' };
     try { info.projectOpen = !!(app && app.project); } catch (e) { info.projectOpen = false; info.error = String(e); }
     try { info.ffmpeg = false; } catch(_){ info.ffmpeg = false; } // ffmpeg no longer required
+    
+    // Debug logging
+    try {
+      var logFile = _syncDebugLogFile();
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_diagInOut called");
+      logFile.writeln("[" + new Date().toString() + "] projectOpen: " + String(info.projectOpen));
+      logFile.writeln("[" + new Date().toString() + "] app exists: " + String(!!app));
+      logFile.writeln("[" + new Date().toString() + "] app.project exists: " + String(!!(app && app.project)));
+      logFile.close();
+    } catch(e) {}
+    
     return _respond(info);
   } catch (e) {
     return _respond({ ok: false, error: String(e) });
@@ -175,6 +244,17 @@ function AEFT_showFileDialog(payloadJson) {
   try {
     var p = {}; try { p = JSON.parse(payloadJson || '{}'); } catch (e) {}
     var kind = String(p.kind || 'video');
+    
+    // Debug logging
+    try {
+      var logFile = _syncDebugLogFile();
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_showFileDialog called");
+      logFile.writeln("[" + new Date().toString() + "] kind: " + String(kind));
+      logFile.writeln("[" + new Date().toString() + "] payload: " + String(payloadJson));
+      logFile.close();
+    } catch(e) {}
+    
     var allow = (kind === 'audio')
       ? { wav:1, mp3:1, aac:1, aif:1, aiff:1, m4a:1 }
       : { mov:1, mp4:1, mxf:1, mkv:1, avi:1, m4v:1, mpg:1, mpeg:1 };
@@ -189,10 +269,60 @@ function AEFT_showFileDialog(payloadJson) {
         var fn = function(f){ try { if (f instanceof Folder) return true; var n = (f && f.name) ? String(f.name).toLowerCase() : ''; var i = n.lastIndexOf('.'); if (i < 0) return false; var ext = n.substring(i+1); return allow[ext] === 1; } catch (e) { return true; } };
         file = File.openDialog('Select ' + kind + ' file', fn);
       }
+    } catch(e){ 
+      try {
+        var logFile = _syncDebugLogFile();
+        logFile.open("a");
+        logFile.writeln("[" + new Date().toString() + "] File.openDialog error: " + String(e));
+        logFile.close();
+      } catch(_){ }
+    }
+    
+    if (file && file.exists) { 
+      try {
+        var logFile = _syncDebugLogFile();
+        logFile.open("a");
+        logFile.writeln("[" + new Date().toString() + "] File selected: " + String(file.fsName));
+        logFile.close();
+      } catch(_){ }
+      
+      try {
+        var response = _respond({ ok:true, path: file.fsName });
+        try {
+          var logFile2 = _syncDebugLogFile();
+          logFile2.open("a");
+          logFile2.writeln("[" + new Date().toString() + "] Returning response: " + String(response));
+          logFile2.close();
+        } catch(_){ }
+        return response;
+      } catch(e) {
+        try {
+          var logFile3 = _syncDebugLogFile();
+          logFile3.open("a");
+          logFile3.writeln("[" + new Date().toString() + "] _respond error: " + String(e));
+          logFile3.close();
+        } catch(_){ }
+        return String({ ok:true, path: file.fsName });
+      }
+    }
+    
+    try {
+      var logFile = _syncDebugLogFile();
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] No file selected or file doesn't exist");
+      logFile.close();
     } catch(_){ }
-    if (file && file.exists) { return _respond({ ok:true, path: file.fsName }); }
+    
     return _respond({ ok:false, error:'No file selected' });
-  } catch (e) { return _respond({ ok:false, error:String(e) }); }
+  } catch (e) { 
+    try {
+      var logFile = _syncDebugLogFile();
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_showFileDialog error: " + String(e));
+      logFile.close();
+    } catch(_){ }
+    return _respond({ ok:false, error:String(e) }); 
+  }
 }
 
 function AEFT_exportInOutVideo(payloadJson) {
@@ -206,10 +336,16 @@ function AEFT_exportInOutVideo(payloadJson) {
       logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutVideo called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _syncDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     var comp = (app && app.project) ? app.project.activeItem : null;
     if (!comp || !(comp instanceof CompItem)) {
+      try {
+        var logFile = _syncDebugLogFile();
+        logFile.open("a");
+        logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutVideo: No active composition");
+        logFile.close();
+      } catch(_){ }
       return _respond({ ok: false, error: 'No active composition' });
     }
 
@@ -234,7 +370,7 @@ function AEFT_exportInOutVideo(payloadJson) {
       var applied = '';
       for (var i=0;i<h264T.length;i++){ try { om.applyTemplate(h264T[i]); applied = h264T[i]; break; } catch(_){ } }
       if (!applied) { try { om.applyTemplate('Lossless'); } catch(_){ } }
-      var mp4 = new File(SYNC_getOutputsDir() + '/sync_inout_' + (new Date().getTime()) + '.mp4');
+      var mp4 = new File(SYNC_getUploadsDir() + '/sync_inout_' + (new Date().getTime()) + '.mp4');
       try { om.file = mp4; } catch(_){ }
       try { rq.render(); } catch (eRender) { return _respond({ ok:false, error:'Render failed: '+String(eRender) }); }
       var waited=0; while(waited<180000){ try{ if(mp4 && mp4.exists) break; }catch(_){ } $.sleep(200); waited+=200; }
@@ -246,7 +382,7 @@ function AEFT_exportInOutVideo(payloadJson) {
     var appliedHQ = '';
     try { om.applyTemplate('High Quality with Alpha'); appliedHQ = 'High Quality with Alpha'; } catch(_){ }
     if (!appliedHQ) { try { om.applyTemplate('Lossless'); appliedHQ = 'Lossless'; } catch(_){ } }
-    var srcMov = new File(SYNC_getOutputsDir() + '/sync_inout_' + (new Date().getTime()) + '.mov');
+    var srcMov = new File(SYNC_getUploadsDir() + '/sync_inout_' + (new Date().getTime()) + '.mov');
     try { om.file = srcMov; } catch(_){ }
     try { rq.render(); } catch (eRender2) { return _respond({ ok:false, error:'Render failed: '+String(eRender2) }); }
     var waited2=0; while(waited2<180000){ try{ if(srcMov && srcMov.exists) break; }catch(_){ } $.sleep(200); waited2+=200; }
@@ -254,6 +390,12 @@ function AEFT_exportInOutVideo(payloadJson) {
 
     return _respond({ ok:true, path: srcMov.fsName, note:'prores render completed' });
   } catch (e) {
+    try {
+      var logFile = _syncDebugLogFile();
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutVideo error: " + String(e));
+      logFile.close();
+    } catch(_){ }
     return _respond({ ok: false, error: String(e) });
   }
 }
@@ -269,10 +411,16 @@ function AEFT_exportInOutAudio(payloadJson) {
       logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutAudio called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _syncDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     var comp = (app && app.project) ? app.project.activeItem : null;
     if (!comp || !(comp instanceof CompItem)) {
+      try {
+        var logFile = _syncDebugLogFile();
+        logFile.open("a");
+        logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutAudio: No active composition");
+        logFile.close();
+      } catch(_){ }
       return _respond({ ok: false, error: 'No active composition' });
     }
 
@@ -374,16 +522,9 @@ function AEFT_exportInOutAudio(payloadJson) {
             if (f && f.exists) { nodePath = f.fsName; }
           }
         } catch(_){ }
-        // Fallbacks
+        // No fallbacks - require bundled Node.js
         if (!nodePath) {
-          if (isWindows) {
-            nodePath = 'node.exe';
-            try { if (new File('C:\\Program Files\\nodejs\\node.exe').exists) nodePath = 'C:\\Program Files\\nodejs\\node.exe'; } catch(_){ }
-          } else {
-            nodePath = '/usr/bin/node';
-            try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
-            try { if (!new File(nodePath).exists) nodePath = 'node'; } catch(_){ }
-          }
+          return _respond({ ok:false, error:'Bundled Node.js not found - extension requires bundled Node.js' });
         }
         
         // Use server-side MP3 conversion via HTTP request
@@ -509,26 +650,21 @@ function AEFT_exportInOutAudio(payloadJson) {
       try {
         var outputFile = new File(outDir + '/sync_inout_audio_' + (new Date().getTime()) + '.wav');
         var extPath = _extensionRoot();
-        var nodePath = '';
         var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
         
-        // Find Node.js executable
-        if (isWindows) {
-          nodePath = 'node.exe';
-          try { if (new File('C:\\Program Files\\nodejs\\node.exe').exists) nodePath = 'C:\\Program Files\\nodejs\\node.exe'; } catch(_){ }
-        } else {
-          // Prefer bundled node when available on macOS
-          try {
-            var extRoot2 = _extensionRoot();
-            var cand2 = extRoot2 ? (extRoot2 + '/bin/darwin-arm64/node') : '';
-            var fn2 = cand2 ? new File(cand2) : null;
+        // Find bundled Node.js executable
+        var nodePath = null;
+        try {
+          var extRoot2 = _extensionRoot();
+          if (extRoot2) {
+            var cand2 = isWindows ? (extRoot2 + '\\bin\\win32-x64\\node.exe') : (extRoot2 + '/bin/darwin-arm64/node');
+            var fn2 = new File(cand2);
             if (fn2 && fn2.exists) { nodePath = fn2.fsName; }
-          } catch(_){ }
-          if (!nodePath) {
-            nodePath = '/usr/bin/node';
-            try { if (!new File(nodePath).exists) nodePath = '/usr/local/bin/node'; } catch(_){ }
-            try { if (!new File(nodePath).exists) nodePath = 'node'; } catch(_){ }
           }
+        } catch(_){ }
+        
+        if (!nodePath) {
+          return _respond({ ok:false, error:'Bundled Node.js not found - extension requires bundled Node.js' });
         }
         
         // Create a simple inline Node.js script for WAV conversion
@@ -749,6 +885,118 @@ function AEFT_exportInOutAudio(payloadJson) {
     }
     
     // Fallback: return AIFF directly
+    // Convert AIFF to MP3 using server endpoint
+    var want = String(p.format||'mp3').toLowerCase();
+    
+    if (want === 'mp3' && aif && aif.exists && aif.length > 0) {
+      try {
+        var outputFile = new File(outDir + '/sync_inout_audio_' + (new Date().getTime()) + '.mp3');
+        
+        // Use server-side MP3 conversion via HTTP request
+        var url = 'http://127.0.0.1:3000/audio/convert?format=mp3&srcPath=' + encodeURIComponent(aif.fsName);
+        
+        try {
+          var dbg3 = _syncDebugLogFile();
+          dbg3.open('a');
+          dbg3.writeln('[' + new Date().toString() + '] calling server for mp3: ' + String(url));
+          dbg3.close();
+        } catch(_){ }
+        
+        // Use curl to call the server and get JSON response
+        var cmd = '';
+        var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
+        if (isWindows) {
+          cmd = 'powershell -Command "Invoke-WebRequest -Uri \'' + url + '\' | Select-Object -ExpandProperty Content"';
+        } else {
+          cmd = 'curl -s "' + url + '"';
+        }
+        
+        try {
+          var dbg4 = _syncDebugLogFile();
+          dbg4.open('a');
+          dbg4.writeln('[' + new Date().toString() + '] curl mp3 cmd: ' + String(cmd));
+          dbg4.close();
+        } catch(_){ }
+        
+        var result = system.callSystem(cmd);
+        
+        try {
+          var dbg5 = _syncDebugLogFile();
+          dbg5.open('a');
+          dbg5.writeln('[' + new Date().toString() + '] curl mp3 result: ' + String(result));
+          dbg5.close();
+        } catch(_){ }
+        
+        // Parse JSON response to get the MP3 file path
+        var mp3Path = '';
+        try {
+          var jsonResponse = JSON.parse(result);
+          if (jsonResponse && jsonResponse.ok && jsonResponse.path) {
+            mp3Path = jsonResponse.path;
+          }
+        } catch(e) {
+          try {
+            var dbg6 = _syncDebugLogFile();
+            dbg6.open('a');
+            dbg6.writeln('[' + new Date().toString() + '] JSON parse error: ' + String(e));
+            dbg6.close();
+          } catch(_){ }
+        }
+        
+        // Copy the MP3 file from server path to our output path
+        if (mp3Path && mp3Path.length > 0) {
+          try {
+            var serverMp3File = new File(mp3Path);
+            if (serverMp3File && serverMp3File.exists) {
+              serverMp3File.copy(outputFile);
+              try {
+                var dbg7 = _syncDebugLogFile();
+                dbg7.open('a');
+                dbg7.writeln('[' + new Date().toString() + '] copied mp3 from server: ' + String(mp3Path) + ' to: ' + String(outputFile.fsName));
+                dbg7.close();
+              } catch(_){ }
+            }
+          } catch(e) {
+            try {
+              var dbg8 = _syncDebugLogFile();
+              dbg8.open('a');
+              dbg8.writeln('[' + new Date().toString() + '] copy mp3 error: ' + String(e));
+              dbg8.close();
+            } catch(_){ }
+          }
+        }
+        
+        // Wait for file to be created
+        var waited = 0;
+        while (waited < 10000) {
+          try { if (outputFile && outputFile.exists && outputFile.length > 0) break; } catch(_){ }
+          $.sleep(200);
+          waited += 200;
+        }
+        
+        // Check if MP3 file was successfully copied
+        try {
+          var dbg9 = _syncDebugLogFile();
+          dbg9.open('a');
+          dbg9.writeln('[' + new Date().toString() + '] mp3 output exists: ' + String(outputFile&&outputFile.exists) + ' len: ' + String(outputFile&&outputFile.length));
+          dbg9.close();
+        } catch(_){ }
+        
+        if (outputFile && outputFile.exists && outputFile.length > 0) { 
+          try { aif.remove(); } catch(_){ } 
+          return _respond({ ok:true, path: outputFile.fsName, note:'server convert mp3' }); 
+        }
+      } catch(e){ 
+        try {
+          var dbg6 = _syncDebugLogFile();
+          dbg6.open('a');
+          dbg6.writeln('[' + new Date().toString() + '] node mp3 convert error: ' + String(e));
+          dbg6.close();
+        } catch(_){ }
+      }
+    }
+    
+    // Fallback to AIFF if MP3 conversion failed
     try {
       var debugLogPath = _syncDebugLogPath();
       var dbg6 = new File(debugLogPath);
@@ -758,6 +1006,12 @@ function AEFT_exportInOutAudio(payloadJson) {
     } catch(_){ }
     return _respond({ ok:true, path: aif.fsName, note:'aiff direct' });
   } catch (e) {
+    try {
+      var logFile = _syncDebugLogFile();
+      logFile.open("a");
+      logFile.writeln("[" + new Date().toString() + "] AEFT_exportInOutAudio error: " + String(e));
+      logFile.close();
+    } catch(_){ }
     return _respond({ ok: false, error: String(e) });
   }
 }
@@ -765,7 +1019,7 @@ function AEFT_exportInOutAudio(payloadJson) {
 function AEFT_insertAtPlayhead(jobId) {
   try {
     var extPath = _extensionRoot();
-    var outputPath = extPath + "/outputs/" + jobId + "_output.mp4";
+    var outputPath = SYNC_getUploadsDir() + "/" + jobId + "_output.mp4";
     var outputFile = new File(outputPath);
     
     // Log to temp file for debugging

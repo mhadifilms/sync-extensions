@@ -13,6 +13,8 @@ function _callSystem(cmd) {
   return '';
 }
 // Central app-data directory resolver for ExtendScript (Premiere)
+// NOTE: This function is duplicated in host/ae.jsx and server/src/audio.cjs
+// ExtendScript does not support imports, so duplication is necessary
 function SYNC_getBaseDirs(){
   try{
     var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
@@ -20,10 +22,11 @@ function SYNC_getBaseDirs(){
     var base = new Folder(root + (isWindows ? "\\sync. extensions" : "/sync. extensions"));
     if (!base.exists) { try{ base.create(); }catch(_){ } }
     function ensure(name){ var f = new Folder(base.fsName + (isWindows ? ('\\' + name) : ('/' + name))); if(!f.exists){ try{ f.create(); }catch(_){ } } return f.fsName; }
-    return { base: base.fsName, logs: ensure('logs'), cache: ensure('cache'), state: ensure('state'), outputs: ensure('outputs'), updates: ensure('updates') };
-  }catch(e){ try{ return { base: Folder.userData.fsName, logs: Folder.userData.fsName, cache: Folder.userData.fsName, state: Folder.userData.fsName, outputs: Folder.userData.fsName, updates: Folder.userData.fsName }; }catch(_){ return { base:'', logs:'', cache:'', state:'', outputs:'', updates:'' }; } }
+    return { base: base.fsName, logs: ensure('logs'), cache: ensure('cache'), state: ensure('state'), uploads: ensure('uploads'), updates: ensure('updates') };
+  }catch(e){ try{ return { base: Folder.userData.fsName, logs: Folder.userData.fsName, cache: Folder.userData.fsName, state: Folder.userData.fsName, uploads: Folder.userData.fsName, updates: Folder.userData.fsName }; }catch(_){ return { base:'', logs:'', cache:'', state:'', uploads:'', updates:'' }; } }
 }
 function SYNC_getLogDir(){ try{ return SYNC_getBaseDirs().logs; }catch(_){ return ''; } }
+function SYNC_getUploadsDir(){ try{ return SYNC_getBaseDirs().uploads; }catch(_){ return ''; } }
 function _pproDebugLogPath(){
   try{
     var isWindows=false; try{ isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); }catch(_){ isWindows=false; }
@@ -82,8 +85,18 @@ try {
   }
   if (typeof JSON.parse !== 'function') {
     JSON.parse = function(text){
-      // Unsafe but acceptable for trusted payload from our own UI
-      return eval('(' + String(text) + ')');
+      // Constrained eval for trusted UI payloads - add length check for safety
+      var s = String(text || '');
+      if (s.length > 1048576) { // 1MB limit
+        try { var log = _pproDebugLogFile(); log.open('a'); log.writeln('[JSON.parse] rejected oversized input: ' + s.length + ' bytes'); log.close(); } catch(_){}
+        throw new Error('JSON input too large');
+      }
+      try {
+        return eval('(' + s + ')');
+      } catch(e) {
+        try { var log = _pproDebugLogFile(); log.open('a'); log.writeln('[JSON.parse] parse error: ' + String(e)); log.close(); } catch(_){}
+        throw e;
+      }
     };
   }
 } catch(e) { /* ignore */ }
@@ -144,26 +157,26 @@ function PPRO_showFileDialog(payloadJson) {
 }
 
 function _hostLog(msg){
+  // File-based logging only (per debug.md)
   try{
     var s = String(msg||'');
-    // Use curl to send JSON to local server; ignore output
-    var payload = '{"msg": ' + JSON.stringify(s) + '}';
-    var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
-    if (isWindows) {
-      var url = "http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/\"/g,'\\"');
-      var wcmd = 'cmd.exe /c curl -s -m 1 ' + '"' + url.replace(/"/g,'\\"') + '"' + ' >NUL 2>&1';
-      System.callSystem(wcmd);
-    } else {
-      var cmd = "/bin/bash -lc " + _shq("(curl -s -m 1 -X POST -H 'Content-Type: application/json' --data " + _shq(payload) + " http://127.0.0.1:3000/hostlog || curl -s -m 1 \"http://127.0.0.1:3000/hostlog?msg=" + encodeURIComponent(s).replace(/"/g,'\\"') + "\") >/dev/null 2>&1");
-      System.callSystem(cmd);
-    }
-  }catch(e){ /* ignore */ }
+    var timestamp = new Date().toISOString();
+    var logLine = '[' + timestamp + '] ' + s + '\n';
+    
+    // Write to debug log
+    try {
+      var logFile = _pproDebugLogFile();
+      logFile.open('a');
+      logFile.write(logLine);
+      logFile.close();
+    } catch(_){ }
+  }catch(e){ }
 }
 
 function PPRO_insertAtPlayhead(jobId) {
   try {
     var extPath = _extensionRoot();
-    var outputPath = extPath + "/outputs/" + jobId + "_output.mp4";
+    var outputPath = SYNC_getUploadsDir() + "/" + jobId + "_output.mp4";
     var outputFile = new File(outputPath);
     
     // Log to temp file for debugging
@@ -174,7 +187,7 @@ function PPRO_insertAtPlayhead(jobId) {
       logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
       logFile.writeln("[" + new Date().toString() + "] File exists: " + outputFile.exists);
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     if (outputFile.exists) {
       var project = app.project;
@@ -199,7 +212,7 @@ function PPRO_insertAtPlayhead(jobId) {
 
 function PPRO_insertFileAtPlayhead(payloadJson) {
   try {
-    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
+    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     var fsPath = String((p && (p.path||p)) || '');
     var file = new File(fsPath);
     
@@ -212,7 +225,7 @@ function PPRO_insertFileAtPlayhead(payloadJson) {
       logFile.writeln("[" + new Date().toString() + "] Parsed path: " + fsPath);
       logFile.writeln("[" + new Date().toString() + "] File exists: " + file.exists);
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     if (!file.exists) return _respond({ ok:false, error:'File not found' });
 
@@ -298,7 +311,7 @@ function PPRO_insertFileAtPlayhead(payloadJson) {
 function PPRO_importIntoBin(jobId) {
   try {
     var extPath = _extensionRoot();
-    var outputPath = extPath + "/outputs/" + jobId + "_output.mp4";
+    var outputPath = SYNC_getUploadsDir() + "/" + jobId + "_output.mp4";
     var outputFile = new File(outputPath);
     
     // Log to temp file for debugging
@@ -309,7 +322,7 @@ function PPRO_importIntoBin(jobId) {
       logFile.writeln("[" + new Date().toString() + "] Output path: " + outputPath);
       logFile.writeln("[" + new Date().toString() + "] File exists: " + outputFile.exists);
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     if (outputFile.exists) {
       var project = app.project;
@@ -350,7 +363,7 @@ function PPRO_getProjectDir() {
 
 function PPRO_importFileToBin(payloadJson) {
   try {
-    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){}
+    var p = {}; try { p = JSON.parse(payloadJson||'{}'); } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     var fsPath = String(p.path||'');
     var binName = String(p.binName||'');
     
@@ -363,7 +376,7 @@ function PPRO_importFileToBin(payloadJson) {
       logFile.writeln("[" + new Date().toString() + "] Parsed path: " + fsPath);
       logFile.writeln("[" + new Date().toString() + "] Bin name: " + binName);
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     var project = app.project;
     if (!project) return _respond({ ok:false, error:'No project' });
@@ -668,7 +681,7 @@ function _pickAudioPresetPath(format){
 
 function PPRO_exportInOutVideo(payloadJson){
   try{
-    var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){}
+    var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     // Log to temp file for debugging
     try {
@@ -677,14 +690,14 @@ function PPRO_exportInOutVideo(payloadJson){
       logFile.writeln("[" + new Date().toString() + "] PPRO_exportInOutVideo called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     var seq=app.project.activeSequence; if(!seq) return _respond({ ok:false, error:'No active sequence' });
     var codec=String(p.codec||'h264');
     var presetPath = _pickVideoPresetPath(codec);
     if(!presetPath) return _respond({ ok:false, error:'Preset not found in /epr for '+codec, eprRoot:_eprRoot() });
     try { var pf = new File(presetPath); if (!pf || !pf.exists) { return _respond({ ok:false, error:'Preset path missing', preset:presetPath }); } } catch(e) { return _respond({ ok:false, error:'Preset path invalid: '+String(e), preset:presetPath }); }
-    var ext=''; try{ ext = String(seq.getExportFileExtension(presetPath)||''); }catch(e){}
+    var ext=''; try{ ext = String(seq.getExportFileExtension(presetPath)||''); }catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     if(!ext) ext = (codec==='h264')?'.mp4':'.mov';
     var out = _chooseOutPath(ext.replace(/^\./,'')); if(!out) return _respond({ ok:false, error:'Temp path failed' });
     if (String(out).toLowerCase().indexOf(ext.toLowerCase()) === -1) { out = out.replace(/\.[^\.]+$/, '') + ext; }
@@ -699,7 +712,7 @@ function PPRO_exportInOutVideo(payloadJson){
 
 function PPRO_exportInOutAudio(payloadJson){
   try{
-    var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){}
+    var p={}; try{ p=JSON.parse(payloadJson||'{}'); }catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     // Log to temp file for debugging
     try {
@@ -708,14 +721,14 @@ function PPRO_exportInOutAudio(payloadJson){
       logFile.writeln("[" + new Date().toString() + "] PPRO_exportInOutAudio called");
       logFile.writeln("[" + new Date().toString() + "] Payload: " + String(payloadJson));
       logFile.close();
-    } catch(e) {}
+    } catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     
     var seq=app.project.activeSequence; if(!seq) return _respond({ ok:false, error:'No active sequence' });
     var format=String(p.format||'wav');
     var presetPath = _pickAudioPresetPath(format);
     if(!presetPath) return _respond({ ok:false, error:'Preset not found in /epr for '+format, eprRoot:_eprRoot() });
     try { var pf = new File(presetPath); if (!pf || !pf.exists) { return _respond({ ok:false, error:'Preset path missing', preset:presetPath }); } } catch(e) { return _respond({ ok:false, error:'Preset path invalid: '+String(e), preset:presetPath }); }
-    var ext=''; try{ ext = String(seq.getExportFileExtension(presetPath)||''); }catch(e){}
+    var ext=''; try{ ext = String(seq.getExportFileExtension(presetPath)||''); }catch(e){ try { var log = _pproDebugLogFile(); log.open("a"); log.writeln("[" + new Date().toString() + "] catch: " + String(e)); log.close(); } catch(_){} }
     if(!ext) ext = (format==='mp3')?'.mp3':'.wav';
     var out = _chooseOutPath(ext.replace(/^\./,'')); if(!out) return _respond({ ok:false, error:'Temp path failed' });
     if (String(out).toLowerCase().indexOf(ext.toLowerCase()) === -1) { out = out.replace(/\.[^\.]+$/, '') + ext; }

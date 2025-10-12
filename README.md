@@ -12,13 +12,6 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 - **Batch job history**: Save and insert previous jobs from the built-in history tab directly into your project.
 - **Automatic backend management**: Local Node.js server auto-starts and handles all file operations, transcoding, and API communication.
  - **Automatic backend management (bundled Node)**: A private Node.js runtime is bundled per-OS and started by the panel. No system Node or npm install required.
- - **Pure Node.js audio conversion**: Handles AIFF to WAV/MP3 conversion without external tools.
-
-## Limitations
-- Uses Supabase for file storage on files above 20MB, and for files up to 1GB. Files above 1GB are rejected.
-- Local server runs on fixed port 3000. If an instance is already healthy on 3000, the panel reuses it.
-- ProRes videos appear black in the preview due to a Chromium limitation, but export is unaffected.
-- No in‑app audio generation yet.
 
 ## System Requirements
 

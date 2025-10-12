@@ -1,6 +1,5 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -15,7 +14,11 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { convertAudio } = require('./audio.cjs');
 
-dotenv.config();
+// R2 client
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+
+// Load .env from project root (one level up from server directory)
+dotenv.config({ path: path.join(process.cwd(), '..', '.env') });
 
 const app = express();
 app.disable('x-powered-by');
@@ -79,14 +82,14 @@ function execPowerShell(command, options = {}) {
 // Windows-only helper to run robocopy with correct success codes (<8)
 async function runRobocopy(src, dest, filePattern){
   if (process.platform !== 'win32') { throw new Error('runRobocopy is Windows-only'); }
-  try { if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true }); } catch(_){ }
+  try { if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
   const args = [`"${src}"`, `"${dest}"`];
   if (filePattern) args.push(`"${filePattern}"`);
   const baseCmd = `robocopy ${args.join(' ')} /E /NFL /NDL /NJH /NJS`;
   const psCmd = `$ErrorActionPreference='Stop'; ${baseCmd}; if ($LASTEXITCODE -lt 8) { exit 0 } else { exit $LASTEXITCODE }`;
-  try { tlog('robocopy start', baseCmd); } catch(_){ }
+  try { tlog('robocopy start', baseCmd); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
   await execPowerShell(psCmd);
-  try { tlog('robocopy ok', baseCmd); } catch(_){ }
+  try { tlog('robocopy ok', baseCmd); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
 }
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -111,14 +114,14 @@ const DIRS = {
   logs: path.join(BASE_DIR, 'logs'),
   cache: path.join(BASE_DIR, 'cache'),
   state: path.join(BASE_DIR, 'state'),
-  outputs: path.join(BASE_DIR, 'outputs'),
+  uploads: path.join(BASE_DIR, 'uploads'),
   updates: path.join(BASE_DIR, 'updates')
 };
-try { fs.mkdirSync(DIRS.logs, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.logs, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
 try { fs.mkdirSync(DIRS.cache, { recursive: true }); } catch(_){ }
-try { fs.mkdirSync(DIRS.state, { recursive: true }); } catch(_){ }
-try { fs.mkdirSync(DIRS.outputs, { recursive: true }); } catch(_){ }
-try { fs.mkdirSync(DIRS.updates, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.state, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+try { fs.mkdirSync(DIRS.uploads, { recursive: true }); } catch(_){ }
+try { fs.mkdirSync(DIRS.updates, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
 
 // Debug flag and log helper to logs directory (flag file only)
 const DEBUG_FLAG_FILE = path.join(DIRS.logs, 'debug.enabled');
@@ -127,11 +130,62 @@ try { DEBUG = fs.existsSync(DEBUG_FLAG_FILE); } catch(_){ DEBUG = false; }
 const DEBUG_LOG = path.join(DIRS.logs, (APP_ID === 'premiere') ? 'sync_ppro_debug.log' : (APP_ID === 'ae') ? 'sync_ae_debug.log' : 'sync_server_debug.log');
 function tlog(){
   if (!DEBUG) return;
-  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(_){ }
+  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
 }
 
 // Detect if we're being spawned by UI auto-start (stdout/stderr captured)
 const isSpawnedByUI = process.stdout.isTTY === false && process.stderr.isTTY === false;
+
+// Cleanup functions for directory management
+function cleanupOldFiles(dirPath, maxAgeMs = 24 * 60 * 60 * 1000) {
+  try {
+    if (!fs.existsSync(dirPath)) return;
+    const files = fs.readdirSync(dirPath);
+    const now = Date.now();
+    let cleanedCount = 0;
+    
+    for (const file of files) {
+      const filePath = path.join(dirPath, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (stats.isFile() && (now - stats.mtime.getTime()) > maxAgeMs) {
+          fs.unlinkSync(filePath);
+          cleanedCount++;
+          try { tlog('cleanup:removed', filePath, 'age=', Math.round((now - stats.mtime.getTime()) / 1000 / 60), 'min'); } catch(_){}
+        }
+      } catch(e) {
+        try { tlog('cleanup:error', filePath, e && e.message ? e.message : String(e)); } catch(_){}
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      try { tlog('cleanup:completed', dirPath, 'removed=', cleanedCount, 'files'); } catch(_){}
+    }
+  } catch(e) {
+    try { tlog('cleanup:failed', dirPath, e && e.message ? e.message : String(e)); } catch(_){}
+  }
+}
+
+// Schedule cleanup tasks
+function scheduleCleanup() {
+  // Cleanup uploads directory every 24 hours (remove files older than 24 hours)
+  setInterval(() => {
+    cleanupOldFiles(DIRS.uploads, 24 * 60 * 60 * 1000); // 24 hours
+  }, 24 * 60 * 60 * 1000); // Run every 24 hours
+  
+  // Cleanup cache directory every 6 hours (remove files older than 6 hours)
+  setInterval(() => {
+    cleanupOldFiles(DIRS.cache, 6 * 60 * 60 * 1000); // 6 hours
+  }, 6 * 60 * 60 * 1000); // Run every 6 hours
+  
+  // Run initial cleanup after 1 minute
+  setTimeout(() => {
+    cleanupOldFiles(DIRS.uploads, 24 * 60 * 60 * 1000);
+    cleanupOldFiles(DIRS.cache, 6 * 60 * 60 * 1000);
+  }, 60 * 1000);
+  
+  try { tlog('cleanup:scheduled', 'uploads=24h', 'cache=6h'); } catch(_){}
+}
 
 function ghHeaders(extra){
   const h = Object.assign({ 'Accept': 'application/vnd.github+json', 'User-Agent': GH_UA }, extra||{});
@@ -255,9 +309,14 @@ app.use(express.json({ limit: '50mb' }));
 // Restrict CORS to local panel (file:// → Origin null) and localhost
 // Relaxed CORS: allow any origin on localhost-only service
 app.use(cors({
-  origin: function(_origin, cb){ cb(null, true); },
+  origin: function(origin, cb){
+    // CEP panels load from file:// (origin=null) - always allow
+    if (!origin) return cb(null, true);
+    // For non-null origins, CORS is allowed but requireCEPHeader middleware enforces header
+    cb(null, true);
+  },
   methods: ['GET','POST','OPTIONS'],
-  allowedHeaders: ['Content-Type','x-api-key','Authorization'],
+  allowedHeaders: ['Content-Type','x-api-key','Authorization','X-CEP-Panel'],
   maxAge: 86400
 }));
 
@@ -297,25 +356,58 @@ function toReadableLocalPath(p){
   try{
     if (!p || typeof p !== 'string') return '';
     const abs = path.resolve(p);
-    if (abs.indexOf('/TemporaryItems/') === -1) return abs;
-    try { if (!fs.existsSync(COPY_DIR)) fs.mkdirSync(COPY_DIR, { recursive: true }); } catch(_){ }
+    if (abs.indexOf('/TemporaryItems/') === -1) return path.normalize(abs);
+    try { if (!fs.existsSync(COPY_DIR)) fs.mkdirSync(COPY_DIR, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     const dest = path.join(COPY_DIR, path.basename(abs));
     try { fs.copyFileSync(abs, dest); return dest; } catch(_){ return abs; }
   }catch(_){ return String(p||''); }
+}
+
+// Rate limiting for /auth/token (1 req/sec per IP)
+const tokenRateLimit = new Map();
+function checkTokenRateLimit(ip){
+  const now = Date.now();
+  const last = tokenRateLimit.get(ip) || 0;
+  if (now - last < 1000) return false;
+  tokenRateLimit.set(ip, now);
+  // Cleanup old entries every 100 requests
+  if (tokenRateLimit.size > 100){
+    for (const [k, v] of tokenRateLimit.entries()){
+      if (now - v > 60000) tokenRateLimit.delete(k);
+    }
+  }
+  return true;
+}
+
+// Middleware to require X-CEP-Panel header for non-null origins
+function requireCEPHeader(req, res, next){
+  const origin = req.headers.origin || req.headers.referer || null;
+  // CEP panels have no origin (null) or file:// origin - always allow
+  if (!origin || origin === 'file://') return next();
+  // Non-CEP requests must include custom header
+  const cepHeader = req.headers['x-cep-panel'];
+  if (cepHeader === 'sync') return next();
+  try { tlog('requireCEPHeader: rejected request from', origin, 'missing X-CEP-Panel header'); } catch(_){}
+  return res.status(403).json({ error: 'forbidden' });
 }
 
 // Public endpoints (no auth): health and token fetch
 app.get('/health', (req,res)=> res.json({ status:'ok', ts: Date.now() }));
 // Friendly root
 app.get('/', (_req,res)=> res.json({ ok:true, service:'sync-extension-server' }));
-app.get('/auth/token', (req,res)=>{
-  // Only serve to localhost clients
+app.get('/auth/token', requireCEPHeader, (req,res)=>{
+  // Only serve to localhost clients with rate limiting
   try{
     const ip = (req.socket && req.socket.remoteAddress) || '';
     if (!(ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1')){
+      tlog('/auth/token: rejected non-localhost IP', ip);
       return res.status(403).json({ error:'forbidden' });
     }
-  }catch(_){ }
+    if (!checkTokenRateLimit(ip)){
+      tlog('/auth/token: rate limit exceeded for', ip);
+      return res.status(429).json({ error:'rate limit exceeded' });
+    }
+  }catch(e){ tlog('/auth/token: error', e.message); }
   res.json({ token: AUTH_TOKEN });
 });
 
@@ -347,7 +439,7 @@ app.post('/audio/convert', async (req, res) => {
       try {
         const out = await convertAudio(srcPath, fmt);
         if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
-        try { const sz = fs.statSync(out).size; tlog('convert mp3 ok', 'out=', out, 'bytes=', sz); } catch(_){ }
+        try { const sz = fs.statSync(out).size; tlog('convert mp3 ok', 'out=', out, 'bytes=', sz); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         res.json({ ok:true, path: out });
         return;
       } catch(e) {
@@ -357,7 +449,7 @@ app.post('/audio/convert', async (req, res) => {
     }
     const out = await convertAudio(srcPath, fmt);
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
-    try { const sz = fs.statSync(out).size; tlog('convert ok', 'out=', out, 'bytes=', sz); } catch(_){ }
+    try { const sz = fs.statSync(out).size; tlog('convert ok', 'out=', out, 'bytes=', sz); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     res.json({ ok:true, path: out });
   }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
@@ -379,7 +471,7 @@ app.get('/audio/convert', async (req, res) => {
       try {
         const out = await convertAudio(srcPath, fmt);
         if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
-        try { const sz = fs.statSync(out).size; tlog('convert mp3 ok', 'out=', out, 'bytes=', sz); } catch(_){ }
+        try { const sz = fs.statSync(out).size; tlog('convert mp3 ok', 'out=', out, 'bytes=', sz); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         res.json({ ok:true, path: out });
         return;
       } catch(e) {
@@ -389,7 +481,7 @@ app.get('/audio/convert', async (req, res) => {
     }
     const out = await convertAudio(srcPath, fmt);
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
-    try { const sz = fs.statSync(out).size; tlog('convert ok (GET)', 'out=', out, 'bytes=', sz); } catch(_){ }
+    try { const sz = fs.statSync(out).size; tlog('convert ok (GET)', 'out=', out, 'bytes=', sz); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     res.json({ ok:true, path: out });
   }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
@@ -413,7 +505,7 @@ app.get('/waveform/file', async (req, res) => {
       try {
         // If we created a copy under COPY_DIR for TemporaryItems, delete it after serving
         if (wasTemp && real.indexOf(COPY_DIR) === 0) { fs.unlink(real, ()=>{}); }
-      } catch(_){ }
+      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     });
   }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
 });
@@ -448,25 +540,96 @@ function requireAuth(req, res, next){
   }catch(_){ return res.status(401).json({ error:'unauthorized' }); }
 }
 
-// Apply auth to all routes below this line, but keep /logs public
+// Debug endpoint (PUBLIC - for UI debugging)
+app.post('/debug', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const timestamp = new Date().toISOString();
+    
+    // Determine which log file to write to based on the debug message type
+    let logFile = DEBUG_LOG; // Default to server log
+    
+    // If this is UI debug from AE, write to AE log
+    if (body.hostConfig && body.hostConfig.isAE) {
+      logFile = path.join(DIRS.logs, 'sync_ae_debug.log');
+    }
+    // If this is UI debug from Premiere, write to Premiere log  
+    else if (body.hostConfig && body.hostConfig.hostId === 'PPRO') {
+      logFile = path.join(DIRS.logs, 'sync_ppro_debug.log');
+    }
+    
+    const logMessage = `[${timestamp}] [debug] ${JSON.stringify(body)}`;
+    
+    // Write to appropriate log file (don't log to console to avoid duplication in server log)
+    try { fs.appendFileSync(logFile, logMessage + "\n"); } catch(_){ }
+    
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// Upload endpoint (PUBLIC - needed for file picker)
+app.post('/upload', async (req, res) => {
+  try {
+    const { path: filePath, apiKey } = req.body || {};
+    
+    if (!filePath) {
+      return res.status(400).json({ error: 'File path required' });
+    }
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Upload to R2 and return the cloud URL
+    const fileUrl = await r2Upload(filePath);
+    
+    res.json({ ok: true, url: fileUrl });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+// Apply auth to all routes below this line
+// Public routes: /logs, /health, /auth/token, /update/check, /update/version, /upload
 app.use((req,res,next)=>{
-  // Keep logs, health/token, and any /update/* endpoints public for bootstrap/UI
-  if (
-    req.path === '/logs' ||
-    req.path === '/health' ||
-    req.path === '/auth/token' ||
-    (typeof req.path === 'string' && req.path.indexOf('/update/') === 0)
-  ) {
+  const publicPaths = [
+    '/logs',
+    '/health',
+    '/auth/token',
+    '/update/check',
+    '/update/version',
+    '/upload',
+    '/debug'
+  ];
+  if (publicPaths.includes(req.path)) {
     return next();
   }
+  // All other routes require authentication
   return requireAuth(req,res,next);
 });
-const SUPA_URL = process.env.SUPABASE_URL || '';
-const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '';
-const SUPA_BUCKET = process.env.SUPABASE_BUCKET || '';
-const SUPA_PREFIX = 'sync. extension/';
+// ---------- R2 (S3 compatible) config ----------
+const R2_ENDPOINT_URL = process.env.R2_ENDPOINT_URL || 'https://a0282f2dad0cdecf5de20e2219e77809.r2.cloudflarestorage.com';
+const R2_ACCESS_KEY  = process.env.R2_ACCESS_KEY || '';
+const R2_SECRET_KEY  = process.env.R2_SECRET_KEY || '';
+const R2_BUCKET      = process.env.R2_BUCKET || 'service-based-business';
+const R2_PREFIX      = process.env.R2_PREFIX || 'sync-extension/';
+
+// Validate R2 credentials
+if (!R2_ACCESS_KEY || !R2_SECRET_KEY) {
+  console.error('R2 credentials not configured. R2 uploads will be disabled.');
+  console.error('Set R2_ACCESS_KEY and R2_SECRET_KEY environment variables.');
+}
+
+const r2Client = (R2_ACCESS_KEY && R2_SECRET_KEY) ? new S3Client({
+  region: 'auto',
+  endpoint: R2_ENDPOINT_URL,
+  credentials: { accessKeyId: R2_ACCESS_KEY, secretAccessKey: R2_SECRET_KEY },
+  forcePathStyle: true
+}) : null;
 const DOCS_DEFAULT_DIR = path.join(os.homedir(), 'Documents', 'sync. outputs');
-const TEMP_DEFAULT_DIR = DIRS.outputs;
+const TEMP_DEFAULT_DIR = DIRS.uploads;
 
 // Simple settings persistence for the panel (to help AE retain keys between reloads)
 let PANEL_SETTINGS = null;
@@ -495,7 +658,7 @@ app.post('/update/apply', async (req,res)=>{
       console.log(`Starting update process: ${current} -> ${latestVersion}`);
       console.log(`Platform: ${process.platform}, Architecture: ${process.arch}`);
     }
-    try { tlog('update:start', `${current} -> ${latestVersion}`, 'platform=', process.platform, 'arch=', process.arch); } catch(_){ }
+    try { tlog('update:start', `${current} -> ${latestVersion}`, 'platform=', process.platform, 'arch=', process.arch); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     
     // Download and extract update
     const tempDir = path.join(DIRS.updates, 'sync_extension_update_' + Date.now());
@@ -507,7 +670,7 @@ app.post('/update/apply', async (req,res)=>{
     
     const zipBuffer = await zipResp.arrayBuffer();
     fs.writeFileSync(zipPath, Buffer.from(zipBuffer));
-    try { tlog('update:downloaded', zipPath, 'bytes=', String(zipBuffer && zipBuffer.byteLength || 0)); } catch(_){ }
+    try { tlog('update:downloaded', zipPath, 'bytes=', String(zipBuffer && zipBuffer.byteLength || 0)); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     
     // Extract zip/zxp (ZXP is just a ZIP with extension folders)
     const isWindows = process.platform === 'win32';
@@ -516,28 +679,28 @@ app.post('/update/apply', async (req,res)=>{
     if (isWindows) {
       // Windows: Use PowerShell to extract zip/zxp
       const extractCmd = `Expand-Archive -Path "${zipPath}" -DestinationPath "${tempDir}" -Force`;
-      try { tlog('update:extract:win', extractCmd); } catch(_){ }
+      try { tlog('update:extract:win', extractCmd); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       if (!isSpawnedByUI) console.log('Windows extract command:', extractCmd);
       try {
         await execPowerShell(extractCmd);
-        try { tlog('update:extract:win:ok'); } catch(_){ }
+        try { tlog('update:extract:win:ok'); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         if (!isSpawnedByUI) console.log('PowerShell extraction completed');
       } catch(e) {
-        try { tlog('update:extract:win:fail', e.message); } catch(_){ }
+        try { tlog('update:extract:win:fail', e.message); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         if (!isSpawnedByUI) console.log('PowerShell extraction failed:', e.message);
         throw new Error('Failed to extract zip/zxp with PowerShell: ' + e.message);
       }
     } else {
       // macOS/Linux: Use unzip
       const extractCmd = `cd "${tempDir}" && unzip -q "${zipPath}"`;
-      try { tlog('update:extract:unix', extractCmd); } catch(_){ }
+      try { tlog('update:extract:unix', extractCmd); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       if (!isSpawnedByUI) console.log('Unix extract command:', extractCmd);
       try {
         await exec(extractCmd);
-        try { tlog('update:extract:unix:ok'); } catch(_){ }
+        try { tlog('update:extract:unix:ok'); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         if (!isSpawnedByUI) console.log('Unix extraction completed');
       } catch(e) {
-        try { tlog('update:extract:unix:fail', e.message); } catch(_){ }
+        try { tlog('update:extract:unix:fail', e.message); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         if (!isSpawnedByUI) console.log('Unix extraction failed:', e.message);
         throw new Error('Failed to extract zip/zxp with unzip: ' + e.message);
       }
@@ -550,7 +713,7 @@ app.post('/update/apply', async (req,res)=>{
     } catch(e) {
       throw new Error('Failed to read extracted directory: ' + e.message);
     }
-    try { tlog('update:extracted:items', JSON.stringify(allItems||[])); } catch(_){ }
+    try { tlog('update:extracted:items', JSON.stringify(allItems||[])); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     if (!isSpawnedByUI) console.log('Extracted items:', allItems);
     
     const extractedDirs = allItems.filter(name => {
@@ -558,13 +721,13 @@ app.post('/update/apply', async (req,res)=>{
       try {
         return fs.statSync(fullPath).isDirectory();
       } catch(e) {
-        try { tlog('update:extracted:check:error', name, e.message); } catch(_){ }
+        try { tlog('update:extracted:check:error', name, e.message); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         console.log('Error checking item:', name, e.message);
         return false;
       }
     });
     
-    try { tlog('update:extracted:dirs', JSON.stringify(extractedDirs||[])); } catch(_){ }
+    try { tlog('update:extracted:dirs', JSON.stringify(extractedDirs||[])); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     if (!isSpawnedByUI) console.log('Extracted directories:', extractedDirs);
     
     let extractedDir;
@@ -572,17 +735,17 @@ app.post('/update/apply', async (req,res)=>{
     if (isZxp) {
       // ZXP format: extension folders are directly in tempDir
       extractedDir = tempDir;
-      try { tlog('update:format:zxp'); } catch(_){ }
+      try { tlog('update:format:zxp'); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       if (!isSpawnedByUI) console.log('Using ZXP format - extension folders directly in temp dir');
     } else if (extractedDirs.includes('sync-extensions')) {
       // ZIP format: sync-extensions directory
       extractedDir = path.join(tempDir, 'sync-extensions');
-      try { tlog('update:format:zip:sync-extensions'); } catch(_){ }
+      try { tlog('update:format:zip:sync-extensions'); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       if (!isSpawnedByUI) console.log('Using sync-extensions directory from ZIP release asset');
     } else if (extractedDirs.length > 0) {
       // Fallback to GitHub zipball format (repo-name-tag/)
       extractedDir = path.join(tempDir, extractedDirs[0]);
-      try { tlog('update:format:zipball', extractedDirs[0]); } catch(_){ }
+      try { tlog('update:format:zipball', extractedDirs[0]); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       if (!isSpawnedByUI) console.log('Using GitHub zipball directory:', extractedDirs[0]);
     } else {
       // Try to find any directory that might contain the source code
@@ -608,10 +771,10 @@ app.post('/update/apply', async (req,res)=>{
       }
       
       extractedDir = path.join(tempDir, possibleDirs[0]);
-      try { tlog('update:format:guess:chosen', possibleDirs[0]); } catch(_){ }
+      try { tlog('update:format:guess:chosen', possibleDirs[0]); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       if (!isSpawnedByUI) console.log('Using fallback directory:', possibleDirs[0]);
     }
-    try { tlog('update:extracted:dir', extractedDir); } catch(_){ }
+    try { tlog('update:extracted:dir', extractedDir); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     if (!isSpawnedByUI) console.log('Using extracted directory:', extractedDir);
     
     // Look for install script in the extracted directory (disabled; always use manual copy)
@@ -644,26 +807,26 @@ app.post('/update/apply', async (req,res)=>{
             if (wrongHas){
               if (process.platform === 'win32') { await runRobocopy(wrong, correct); }
               else { await exec(`mkdir -p "${correct}" && cp -R "${wrong}/." "${correct}/"`); }
-              try { fs.rmSync(wrong, { recursive: true, force: true }); } catch(_){ }
+              try { fs.rmSync(wrong, { recursive: true, force: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
               try { tlog('update:migrate:copy', wrong, '->', correct); } catch(_){ }
             }
-          }catch(e){ try { tlog('update:migrate:error', wrong, '->', correct, e && e.message ? e.message : String(e)); } catch(_){ } }
+          }catch(e){ try { tlog('update:migrate:error', wrong, '->', correct, e && e.message ? e.message : String(e)); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} } }
         }
         await migrateIfMisnamed(aeWrong, aeDestDir);
         await migrateIfMisnamed(pproWrong, pproDestDir);
-      } catch(_){ }
+      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       
       // Do not remove existing extensions; copy over into destination to avoid locking issues
-      try { tlog('update:dest', 'ae=', aeDestDir, 'ppro=', pproDestDir); } catch(_){ }
+      try { tlog('update:dest', 'ae=', aeDestDir, 'ppro=', pproDestDir); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       try { fs.mkdirSync(aeDestDir, { recursive: true }); } catch(_){ }
-      try { fs.mkdirSync(pproDestDir, { recursive: true }); } catch(_){ }
+      try { fs.mkdirSync(pproDestDir, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       
       // Copy extensions (handle both ZXP and ZIP formats)
       if (isZxp) {
         // ZXP format: extracted root contains extension content (CSXS, ui, server, etc.)
         const targetApp = (APP_ID === 'ae' || APP_ID === 'premiere') ? APP_ID : 'premiere';
         const destRoot = targetApp === 'ae' ? aeDestDir : pproDestDir;
-        try { tlog('update:copy:zxp:target', targetApp, 'dest=', destRoot); } catch(_){ }
+        try { tlog('update:copy:zxp:target', targetApp, 'dest=', destRoot); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
         try { if (!fs.existsSync(destRoot)) fs.mkdirSync(destRoot, { recursive: true }); } catch(_){ }
         let items;
         try {
@@ -679,7 +842,7 @@ app.post('/update/apply', async (req,res)=>{
             await exec(`cp -R "${srcPath}" "${destRoot}/"`);
           }
         }
-        try { tlog('update:copy:zxp:ok', 'items=', String(items.length)); } catch(_){ }
+        try { tlog('update:copy:zxp:ok', 'items=', String(items.length)); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       } else {
         // ZIP format: extensions are in extensions/ subdirectory
         const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
@@ -738,7 +901,7 @@ app.post('/update/apply', async (req,res)=>{
     res.json({ ok:true, updated:true, message:'Update applied successfully', current, latest: latestVersion });
     // After confirming response was sent, exit the server so a fresh instance loads the new code on next panel start
     try {
-      setTimeout(()=>{ try { tlog('update:post:exit'); } catch(_){ } if (!isSpawnedByUI) console.log('Exiting server after successful update'); process.exit(0); }, 800);
+      setTimeout(()=>{ try { tlog('update:post:exit'); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} } if (!isSpawnedByUI) console.log('Exiting server after successful update'); process.exit(0); }, 800);
     } catch(_){ }
   }catch(e){ 
     if (!isSpawnedByUI) {
@@ -776,33 +939,24 @@ async function convertIfAiff(p){
   }catch(e){ tlog('convertIfAiff error', e && e.message ? e.message : String(e)); return p; }
 }
 
-async function supabaseUpload(localPath, job){
-  const U = getSupabaseUrl(job);
-  const K = getSupabaseKey(job);
-  const B = getSupabaseBucket(job);
-  if (!U || !K || !B) throw new Error('Supabase not configured');
-  const base = path.basename(localPath);
-  const dest = `${SUPA_PREFIX}uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}`;
-  const url = `${U}/storage/v1/object/${encodeURIComponent(B)}/${dest}`;
-  const stream = fs.createReadStream(localPath);
-  slog('[upload] start', localPath, '→', dest);
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${K}`,
-      'Content-Type': guessMime(localPath),
-      'x-upsert': 'true'
-    },
-    body: stream
-  });
-  if (!resp.ok){
-    let t = ''; try { t = await resp.text(); } catch(_){ }
-    throw new Error(`supabase upload failed ${resp.status} ${t}`);
+async function r2Upload(localPath){
+  if (!r2Client) {
+    throw new Error('R2 client not configured. Missing R2_ACCESS_KEY or R2_SECRET_KEY environment variables.');
   }
-  const publicUrl = `${U}/storage/v1/object/public/${B}/${dest}`;
-  // Allow brief propagation time
-  await new Promise(r=>setTimeout(r, 300));
-  slog('[upload] ok', publicUrl);
+  if (!fs.existsSync(localPath)) throw new Error('file not found: ' + localPath);
+  const base = path.basename(localPath);
+  const key  = `${R2_PREFIX}uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}`;
+  slog('[r2] put start', localPath, '→', `${R2_BUCKET}/${key}`);
+  const body = fs.createReadStream(localPath);
+  const contentType = guessMime(localPath);
+  await r2Client.send(new PutObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    Body: body,
+    ContentType: contentType
+  }));
+  const publicUrl = `${R2_ENDPOINT_URL}/${R2_BUCKET}/${key}`;
+  slog('[r2] put ok', publicUrl);
   return publicUrl;
 }
 
@@ -852,19 +1006,19 @@ function normalizeOutputDir(p){
   try{
     if (!p || typeof p !== 'string') return '';
     const abs = path.resolve(p);
-    return abs;
+    return path.normalize(abs);
   }catch(_){ return ''; }
 }
 
 app.post('/jobs', async (req, res) => {
   try{
-    let { videoPath, audioPath, videoUrl, audioUrl, isTempVideo, isTempAudio, model, temperature, activeSpeakerOnly, detectObstructions, options = {}, apiKey, outputDir, supabaseUrl, supabaseKey, supabaseBucket } = req.body || {};
+    let { videoPath, audioPath, videoUrl, audioUrl, isTempVideo, isTempAudio, model, temperature, activeSpeakerOnly, detectObstructions, options = {}, apiKey, outputDir } = req.body || {};
     ({ videoPath, audioPath } = normalizePaths({ videoPath, audioPath }));
     // Auto-convert AIFF from AE to WAV so the rest of the pipeline can read it
     try { if (audioPath) { audioPath = await convertIfAiff(audioPath); } } catch(_){}
     const vStat = safeStat(videoPath); const aStat = safeStat(audioPath);
     const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
-    slog('[jobs:create]', 'model=', model||'lipsync-2-pro', 'overLimit=', overLimit, 'v=', vStat&&vStat.size, 'a=', aStat&&aStat.size, 'supaUrl=', Boolean(supabaseUrl||SUPA_URL), 'bucket=', (supabaseBucket||SUPA_BUCKET));
+    slog('[jobs:create]', 'model=', model||'lipsync-2-pro', 'overLimit=', overLimit, 'v=', vStat&&vStat.size, 'a=', aStat&&aStat.size, 'r2=', true, 'bucket=', R2_BUCKET);
     
     if (!apiKey) {
       return res.status(400).json({ error: 'API key required' });
@@ -872,9 +1026,6 @@ app.post('/jobs', async (req, res) => {
     if (!videoUrl || !audioUrl){
       if (!videoPath || !audioPath) return res.status(400).json({ error: 'Video and audio required' });
       if (!fs.existsSync(videoPath) || !fs.existsSync(audioPath)) return res.status(400).json({ error: 'Video or audio file not found' });
-    }
-    if (overLimit && (!((supabaseUrl||SUPA_URL) && (supabaseKey||SUPA_KEY) && (supabaseBucket||SUPA_BUCKET)))){
-      return res.status(400).json({ error: 'Large file upload requires Supabase url/key/bucket in settings' });
     }
 
     const limit1GB = 1024*1024*1024;
@@ -901,9 +1052,6 @@ app.post('/jobs', async (req, res) => {
       outputPath: null,
       outputDir: normalizeOutputDir(outputDir || '') || null,
       apiKey,
-      supabaseUrl: supabaseUrl || '',
-      supabaseKey: supabaseKey || '',
-      supabaseBucket: supabaseBucket || ''
     };
     jobs.push(job);
     if (jobs.length > 500) { jobs = jobs.slice(-500); }
@@ -914,10 +1062,10 @@ app.post('/jobs', async (req, res) => {
       // Cleanup temp inputs if present and uploaded
       try {
         if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; }
-      } catch(_){ }
+      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       try {
         if (job.isTempAudio && job.audioPath && fs.existsSync(job.audioPath)) { fs.unlinkSync(job.audioPath); job.audioPath = ''; }
-      } catch(_){ }
+      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       saveJobs();
       res.json(job);
       pollSyncJob(job);
@@ -968,7 +1116,7 @@ app.post('/jobs/:id/save', async (req,res)=>{
     if (job.outputPath && fs.existsSync(job.outputPath)){
       const newPath = path.join(outDir, `${job.id}_output.mp4`);
       try { fs.copyFileSync(job.outputPath, newPath); } catch(_){ }
-      try { if (path.dirname(job.outputPath) !== outDir) fs.unlinkSync(job.outputPath); } catch(_){ }
+      try { if (path.dirname(job.outputPath) !== outDir) fs.unlinkSync(job.outputPath); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       job.outputPath = newPath;
       saveJobs();
       return res.json({ ok:true, outputPath: job.outputPath });
@@ -998,18 +1146,17 @@ app.get('/costs', (_req, res)=>{
 app.post('/costs', async (req, res) => {
   try{
     slog('[costs] received POST');
-    let { videoPath, audioPath, videoUrl, audioUrl, model = 'lipsync-2-pro', apiKey, supabaseUrl, supabaseKey, supabaseBucket, options = {} } = req.body || {};
+    let { videoPath, audioPath, videoUrl, audioUrl, model = 'lipsync-2-pro', apiKey, options = {} } = req.body || {};
     ({ videoPath, audioPath } = normalizePaths({ videoPath, audioPath }));
     if (!apiKey) return res.status(400).json({ error: 'API key required' });
+    // If URLs aren't provided, use local paths and upload to R2
     if (!videoUrl || !audioUrl){
       if (!videoPath || !audioPath) return res.status(400).json({ error: 'Video and audio required' });
       if (!fs.existsSync(videoPath) || !fs.existsSync(audioPath)) return res.status(400).json({ error: 'Video or audio file not found' });
-      const U = supabaseUrl || SUPA_URL; const K = supabaseKey || SUPA_KEY; const B = supabaseBucket || SUPA_BUCKET;
-      if (!U || !K || !B) return res.status(400).json({ error: 'Supabase url/key/bucket required to estimate cost' });
 
-      slog('[costs] uploading sources for cost estimate');
-      videoUrl = await supabaseUpload(resolveSafeLocalPath(videoPath), { supabaseUrl: U, supabaseKey: K, supabaseBucket: B });
-      audioUrl = await supabaseUpload(resolveSafeLocalPath(audioPath), { supabaseUrl: U, supabaseKey: K, supabaseBucket: B });
+      slog('[costs] uploading sources to R2 for cost estimate');
+      videoUrl = await r2Upload(resolveSafeLocalPath(videoPath));
+      audioUrl = await r2Upload(resolveSafeLocalPath(audioPath));
     }
 
     const opts = (options && typeof options === 'object') ? options : {};
@@ -1067,12 +1214,12 @@ async function createGeneration(job){
       job.syncJobId = data.id;
       return;
     }
-    if (overLimit && (getSupabaseUrl(job) && getSupabaseKey(job) && getSupabaseBucket(job))) {
-      slog('[upload] using supabase url mode');
-      const videoUrl = await supabaseUpload(resolveSafeLocalPath(job.videoPath), job);
-      const audioUrl = await supabaseUpload(resolveSafeLocalPath(job.audioPath), job);
+    if (overLimit) {
+      slog('[upload] using r2 url mode');
+      const videoUrl = await r2Upload(resolveSafeLocalPath(job.videoPath));
+      const audioUrl = await r2Upload(resolveSafeLocalPath(job.audioPath));
       // Cleanup temp sources if flagged
-      try { if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; } } catch(_){ }
+      try { if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; } } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       try { if (job.isTempAudio && job.audioPath && fs.existsSync(job.audioPath)) { fs.unlinkSync(job.audioPath); job.audioPath = ''; } } catch(_){ }
       const body = {
         model: job.model,
@@ -1090,21 +1237,26 @@ async function createGeneration(job){
       job.syncJobId = data.id;
       return;
     }
-  }catch(e){ console.error('URL mode failed, falling back:', e); }
-  // fallback file mode below...
-
-  // Fallback to file upload mode
-  const form = new FormData();
-  form.append('video', fs.createReadStream(resolveSafeLocalPath(job.videoPath)));
-  form.append('audio', fs.createReadStream(resolveSafeLocalPath(job.audioPath)));
-  form.append('model', job.model);
-  try { if (job.options && typeof job.options === 'object') form.append('options', JSON.stringify(job.options)); } catch(_){ }
+  }catch(e){ console.error('URL mode failed:', e); }
+  
+  // Always use R2 - no direct file uploads
+  slog('[upload] using r2 url mode (forced)');
+  const videoUrl = await r2Upload(resolveSafeLocalPath(job.videoPath));
+  const audioUrl = await r2Upload(resolveSafeLocalPath(job.audioPath));
+  // Cleanup temp sources if flagged
+  try { if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; } } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+  try { if (job.isTempAudio && job.audioPath && fs.existsSync(job.audioPath)) { fs.unlinkSync(job.audioPath); job.audioPath = ''; } } catch(_){ }
+  const body = {
+    model: job.model,
+    input: [ { type:'video', url: videoUrl }, { type:'audio', url: audioUrl } ],
+    options: (job.options && typeof job.options === 'object') ? job.options : {}
+  };
   const resp = await fetch(`${SYNC_API_BASE}/generate`, {
-    method:'POST',
-    headers: { 'x-api-key': job.apiKey, 'accept':'application/json', ...form.getHeaders() },
-    body: form
+    method: 'POST',
+    headers: { 'x-api-key': job.apiKey, 'accept':'application/json', 'content-type':'application/json' },
+    body: JSON.stringify(body)
   });
-  if (!resp.ok){ const t = await safeText(resp); slog('[create:file] error', resp.status, t); throw new Error(`create(file) failed ${resp.status} ${t}`); }
+  if (!resp.ok){ const t = await safeText(resp); slog('[create:url] error', resp.status, t); throw new Error(`create(url) failed ${resp.status} ${t}`); }
   const data = await resp.json();
   job.syncJobId = data.id;
 }
@@ -1211,6 +1363,8 @@ async function startServer() {
     console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
     console.log(`Jobs file: ${jobsFile}`);
     try { tlog('server started on', `${HOST}:${PORT}`); } catch(_){ }
+    // Start cleanup scheduling
+    scheduleCleanup();
   });
   srv.on('error', async (err) => {
     if (err && err.code === 'EADDRINUSE') {
@@ -1235,25 +1389,38 @@ async function startServer() {
 
 startServer();
 
-// override helpers
-function getSupabaseUrl(job){ return (job && job.supabaseUrl) || SUPA_URL; }
-function getSupabaseKey(job){ return (job && job.supabaseKey) || SUPA_KEY; }
-function getSupabaseBucket(job){ return (job && job.supabaseBucket) || SUPA_BUCKET; }
 
 function resolveSafeLocalPath(p){
   try{
-    if (!p || typeof p !== 'string') return p;
-    // Ensure absolute path to prevent traversal from relative inputs
-    if (!path.isAbsolute(p)) return p;
+    if (!p || typeof p !== 'string') {
+      tlog('resolveSafeLocalPath: invalid input', typeof p);
+      return p;
+    }
+    // SECURITY: Reject non-absolute paths to prevent traversal attacks
+    if (!path.isAbsolute(p)) {
+      tlog('resolveSafeLocalPath: rejected non-absolute path', p);
+      throw new Error('Only absolute paths allowed');
+    }
     const isTempItems = p.indexOf('/TemporaryItems/') !== -1;
     if (!isTempItems) return p;
+    // macOS workaround: copy from TemporaryItems to readable location
     const docs = path.join(os.homedir(), 'Documents', 'sync_extension_temp');
     if (!fs.existsSync(docs)) fs.mkdirSync(docs, { recursive: true });
     const target = path.join(docs, path.basename(p));
-    try { fs.copyFileSync(p, target); return target; } catch(_){ return p; }
-  }catch(_){ return p; }
+    try { 
+      fs.copyFileSync(p, target); 
+      tlog('resolveSafeLocalPath: copied from TemporaryItems', p, '→', target);
+      return target; 
+    } catch(e){ 
+      tlog('resolveSafeLocalPath: copy failed', e.message);
+      return p; 
+    }
+  }catch(e){ 
+    tlog('resolveSafeLocalPath: exception', e.message);
+    throw e;
+  }
 }
 
 // Crash safety
-process.on('uncaughtException', (err)=>{ try { console.error('uncaughtException', err && err.stack || err); } catch(_) {} });
-process.on('unhandledRejection', (reason)=>{ try { console.error('unhandledRejection', reason); } catch(_) {} });
+process.on('uncaughtException', (err)=>{ try { console.error('uncaughtException', err && err.stack || err); tlog('uncaughtException', err && err.stack || err); } catch(_) {} });
+process.on('unhandledRejection', (reason)=>{ try { console.error('unhandledRejection', reason); tlog('unhandledRejection', String(reason)); } catch(_) {} });

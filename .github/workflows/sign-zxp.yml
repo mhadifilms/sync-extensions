@@ -33,6 +33,7 @@ jobs:
         working-directory: server
         run: npm ci --omit=dev
 
+
       - name: Build CEP folders for macOS
         shell: bash
         run: |
@@ -54,6 +55,7 @@ jobs:
             cp -a bin "$dest/bin"
             cp -a index.html "$dest/"
             cp -a host "$dest/host"
+            cp -a .env "$dest/.env"
             mkdir -p "$dest/ui"
             # Copy shared UI but do NOT overwrite per-extension host-detection.js
             if command -v rsync >/dev/null 2>&1; then
@@ -101,6 +103,7 @@ jobs:
         working-directory: server
         run: npm ci --omit=dev
 
+
       - name: Build CEP folders for Windows
         shell: pwsh
         run: |
@@ -130,6 +133,7 @@ jobs:
             Copy-Item "bin" "$dest/bin" -Recurse
             Copy-Item "index.html" "$dest/"
             Copy-Item "host" "$dest/host" -Recurse
+            Copy-Item ".env" "$dest/.env"
             # Copy main UI files to the existing ui directory (merge, don't replace)
             Copy-Item "ui/*" "$dest/ui/" -Recurse -Force
             # Restore per-extension host-detection.js after shared UI copy

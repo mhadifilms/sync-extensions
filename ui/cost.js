@@ -1,52 +1,166 @@
       function scheduleEstimate(){
         try{ if (estimateTimer) clearTimeout(estimateTimer); }catch(_){ }
+        // Debug logging
+        try {
+          fetch('http://127.0.0.1:3000/debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'scheduleEstimate_called',
+              selectedVideo: selectedVideo || '',
+              selectedAudio: selectedAudio || '',
+              uploadedVideoUrl: window.uploadedVideoUrl || '',
+              uploadedAudioUrl: window.uploadedAudioUrl || '',
+              hostConfig: window.HOST_CONFIG
+            })
+          }).catch(() => {});
+        } catch(_){ }
         estimateTimer = setTimeout(()=>estimateCost(true), 800);
       }
 
       async function estimateCost(auto, retry){
         const statusEl = document.getElementById('statusMessage');
-        const badge = document.getElementById('costIndicator');
         const display = document.getElementById('costDisplay');
+        
+        // Debug logging for DOM elements
+        try {
+          fetch('http://127.0.0.1:3000/debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'cost_estimation_dom_elements',
+              statusEl: !!statusEl,
+              display: !!display,
+              hostConfig: window.HOST_CONFIG
+            })
+          }).catch(() => {});
+        } catch(_){ }
         const myToken = ++costToken;
+        
+        // Debug logging
+        try {
+          fetch('http://127.0.0.1:3000/debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'estimateCost_called',
+              auto: auto,
+              retry: retry,
+              selectedVideo: selectedVideo || '',
+              selectedAudio: selectedAudio || '',
+              uploadedVideoUrl: window.uploadedVideoUrl || '',
+              uploadedAudioUrl: window.uploadedAudioUrl || '',
+              hostConfig: window.HOST_CONFIG
+            })
+          }).catch(() => {});
+        } catch(_){ }
+        
         try{
           // Before selection: show $0.00
           if (!selectedVideo || !selectedAudio) {
+            // Debug logging
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'cost_estimation_no_files',
+                  selectedVideo: selectedVideo || '',
+                  selectedAudio: selectedAudio || '',
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
+            
             if (!auto && statusEl) statusEl.textContent = 'select both video and audio first';
             const txt = 'cost: $0.00';
-            if (badge){ badge.style.display='block'; badge.textContent=txt; }
             if (display){ display.textContent = txt; }
             try{ const below=document.getElementById('costBelow'); if (below) below.textContent=txt; }catch(_){ }
             return;
           }
           const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
           const apiKey = settings.apiKey||'';
-          const hasSupabase = !!(settings.supabaseUrl && settings.supabaseKey && settings.supabaseBucket);
-          const hasUrls = !!(uploadedVideoUrl && uploadedAudioUrl);
-          // If lacking API key or required Supabase when no URLs, show $--
-          if (!apiKey || (!hasSupabase && !hasUrls)) {
+          const hasUrls = !!(window.uploadedVideoUrl && window.uploadedAudioUrl);
+          
+          // Debug logging for URL state
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'cost_estimation_url_check',
+                uploadedVideoUrl: window.uploadedVideoUrl || '',
+                uploadedAudioUrl: window.uploadedAudioUrl || '',
+                hasUrls: hasUrls,
+                videoUrlLength: (window.uploadedVideoUrl || '').length,
+                audioUrlLength: (window.uploadedAudioUrl || '').length,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_){ }
+          
+          // If lacking API key, show $--
+          if (!apiKey) {
             const txt = 'cost: $--';
-            if (badge){ badge.style.display='block'; badge.textContent=txt; }
             if (display){ display.textContent = txt; }
-            if (!auto && statusEl) statusEl.textContent = !apiKey ? 'add API key in settings' : 'set supabase in settings or upload to URLs';
+            if (!auto && statusEl) statusEl.textContent = 'add API key in settings';
             try{ const below=document.getElementById('costBelow'); if (below) below.textContent=txt; }catch(_){ }
+            // Debug logging for missing API key
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'cost_estimation_no_api_key',
+                  apiKey: apiKey || '',
+                  apiKeyLength: (apiKey || '').length,
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
             return;
           }
-          if (badge){ badge.style.display='block'; badge.textContent='cost: estimating…'; }
+          
+          // If URLs not ready, show estimating and wait
+          if (!hasUrls) {
+            if (display){ display.textContent='cost: estimating…'; }
+            if (!auto && statusEl) statusEl.textContent = 'uploading files...';
+            try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: estimating…'; }catch(_){ }
+            
+            // Debug logging
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'cost_estimation_waiting',
+                  uploadedVideoUrl: window.uploadedVideoUrl || '',
+                  uploadedAudioUrl: window.uploadedAudioUrl || '',
+                  hasUrls: hasUrls,
+                  retry: retry,
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
+            
+            // Retry after a delay if URLs still not ready
+            if (retry !== false) {
+              setTimeout(() => estimateCost(auto, false), 1000);
+            }
+            return;
+          }
           if (display){ display.textContent='cost: estimating…'; }
           try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: estimating…'; }catch(_){ }
           const body = {
             videoPath: selectedVideo,
             audioPath: selectedAudio,
-            videoUrl: uploadedVideoUrl || '',
-            audioUrl: uploadedAudioUrl || '',
+            videoUrl: window.uploadedVideoUrl || '',
+            audioUrl: window.uploadedAudioUrl || '',
             model: (document.querySelector('input[name="model"]:checked')||{}).value || 'lipsync-2-pro',
             temperature: parseFloat(document.getElementById('temperature').value),
             activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
             detectObstructions: document.getElementById('detectObstructions').checked,
             apiKey,
-            supabaseUrl: (settings.supabaseUrl||''),
-            supabaseKey: (settings.supabaseKey||''),
-            supabaseBucket: (settings.supabaseBucket||''),
             options: {
               sync_mode: (document.getElementById('syncMode')||{}).value || 'loop',
               temperature: parseFloat(document.getElementById('temperature').value),
@@ -57,8 +171,34 @@
           let resp, data;
           try {
             await ensureAuthToken();
+            // Debug logging for cost API request
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'cost_api_request_start',
+                  body: body,
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
             resp = await fetch('http://127.0.0.1:3000/costs', { method: 'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
             data = await resp.json().catch(()=>null);
+            // Debug logging for cost API response
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'cost_api_response',
+                  status: resp.status,
+                  ok: resp.ok,
+                  data: data,
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
           } catch (netErr) {
             // Start backend and retry once (host-aware)
             if (!hasStartedBackendForCost) {
@@ -86,6 +226,20 @@
               else if (data.estimate && typeof data.estimate === 'object') est = [data.estimate];
             } catch(_){ }
             const val = (est.length && est[0] && typeof est[0].estimatedGenerationCost !== 'undefined') ? Number(est[0].estimatedGenerationCost) : NaN;
+            // Debug logging for cost calculation
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'cost_calculation',
+                  est: est,
+                  val: val,
+                  isFinite: isFinite(val),
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
             if (isFinite(val)) {
               const txt = `cost: $${val.toFixed(2)}`;
               if (badge){ badge.style.display='block'; badge.textContent = txt; }

@@ -10,6 +10,15 @@
 
       async function startLipsync() {
         if (!selectedVideo || !selectedAudio) return;
+        
+        // Check for API key before proceeding
+        const apiKey = document.getElementById('apiKey').value;
+        if (!apiKey || apiKey.trim() === '') {
+          const statusEl = document.getElementById('statusMessage');
+          if (statusEl) statusEl.textContent = 'API key required - add it in settings';
+          return;
+        }
+        
         const myToken = ++runToken;
         
         const btn = document.getElementById('lipsyncBtn');
@@ -64,6 +73,8 @@
           const jobData = {
             videoPath: selectedVideo,
             audioPath: selectedAudio,
+            videoUrl: window.uploadedVideoUrl,
+            audioUrl: window.uploadedAudioUrl,
             isTempVideo: !!selectedVideoIsTemp,
             isTempAudio: !!selectedAudioIsTemp,
             model: document.querySelector('input[name="model"]:checked').value,
@@ -71,9 +82,6 @@
             activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
             detectObstructions: document.getElementById('detectObstructions').checked,
             apiKey: document.getElementById('apiKey').value,
-            supabaseUrl: (document.getElementById('supabaseUrl').value||'').trim(),
-            supabaseKey: (document.getElementById('supabaseKey').value||'').trim(),
-            supabaseBucket: (document.getElementById('supabaseBucket').value||'').trim(),
             outputDir: outputDir,
             options: {
               sync_mode: (document.getElementById('syncMode')||{}).value || 'loop',
@@ -91,10 +99,41 @@
           try {
             try { if (currentFetchController) currentFetchController.abort(); } catch(_){ }
             currentFetchController = new AbortController();
+            
+            // Debug logging
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  type: 'job_submission_start', 
+                  jobData: jobData,
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
+            
             const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(jobData), signal: currentFetchController.signal });
             const text = await resp.text();
             let data = {};
             try { data = JSON.parse(text || '{}'); } catch(_) { data = { error: text }; }
+            
+            // Debug logging
+            try {
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  type: 'job_submission_response', 
+                  respOk: resp.ok,
+                  respStatus: resp.status,
+                  text: text,
+                  data: data,
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            } catch(_){ }
+            
             if (!resp.ok) { throw new Error(data && data.error ? data.error : (text || 'job creation failed')); }
             if (myToken !== runToken) return;
             statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. rendering/transcoding…';

@@ -268,9 +268,25 @@
         if (selectedAudio) {
           audioDropzone.style.display = 'none';
           audioPreview.style.display = 'block';
+          const audioSrc = "file://" + selectedAudio.replace(/ /g, '%20');
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'audio_src_set', 
+                selectedAudio: selectedAudio,
+                audioSrc: audioSrc,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_){ }
+          
           audioPreview.innerHTML = `
             <div class="custom-audio-player">
-              <audio id="audioPlayer" src="file://${selectedAudio.replace(/ /g, '%20')}" preload="auto"></audio>
+              <audio id="audioPlayer" src="${audioSrc}" preload="auto"></audio>
               <div class="audio-waveform-container">
                 <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
                 <div class="audio-controls-bottom">
@@ -289,6 +305,7 @@
                 </div>
               </div>
             </div>`;
+          
           initCustomAudioPlayer();
         } else {
           audioDropzone.style.display = 'flex';
@@ -301,10 +318,38 @@
 
       async function selectVideo() {
         try {
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'selectVideo_called', 
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_) {}
+          
           if (typeof __pickerBusy !== 'undefined' && __pickerBusy) { return; }
           var statusEl = document.getElementById('statusMessage');
           try { statusEl.textContent = 'opening video picker…'; } catch(_){ }
           const raw = await openFileDialog('video');
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'selectVideo_result', 
+                raw: String(raw),
+                rawType: typeof raw,
+                hasSlash: raw && raw.indexOf('/') !== -1,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_) {}
+          
           if (raw && raw.indexOf('/') !== -1) {
             selectedVideoIsTemp = false;
             const ext = raw.split('.').pop().toLowerCase();
@@ -333,7 +378,7 @@
             try { statusEl.textContent = 'uploading video…'; } catch(_){ }
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
-              const body = { path: selectedVideo, apiKey: settings.apiKey||'', supabaseUrl: (settings.supabaseUrl||''), supabaseKey: (settings.supabaseKey||''), supabaseBucket: (settings.supabaseBucket||'') };
+              const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
               await ensureAuthToken();
               const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
               const j = await r.json().catch(()=>null);
@@ -354,6 +399,22 @@
           var statusEl = document.getElementById('statusMessage');
           try { statusEl.textContent = 'opening audio picker…'; } catch(_){ }
           const raw = await openFileDialog('audio');
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'selectAudio_result', 
+                raw: String(raw),
+                rawType: typeof raw,
+                hasSlash: raw && raw.indexOf('/') !== -1,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_) {}
+          
           if (raw && raw.indexOf('/') !== -1) {
             selectedAudioIsTemp = false;
             const ext = raw.split('.').pop().toLowerCase();
@@ -383,7 +444,7 @@
             try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
-              const body = { path: selectedAudio, apiKey: settings.apiKey||'', supabaseUrl: (settings.supabaseUrl||''), supabaseKey: (settings.supabaseKey||''), supabaseBucket: (settings.supabaseBucket||'') };
+              const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
               await ensureAuthToken();
               const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
               const j = await r.json().catch(()=>null);
@@ -444,12 +505,85 @@
               }
             }
           } catch(e){ res = { ok:false, error: String(e) }; }
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'selectVideoInOut_result', 
+                res: res,
+                resOk: res && res.ok,
+                resPath: res && res.path,
+                resError: res && res.error,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_) {}
+          
           if (res && res.ok && res.path){
             selectedVideo = res.path; selectedVideoIsTemp = true;
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
             updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
-            scheduleEstimate();
+            
+            // Upload for cost estimation
+            try { statusEl.textContent = 'uploading video…'; } catch(_){ }
+            try{
+              const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
+              const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
+              await ensureAuthToken();
+              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+              const j = await r.json().catch(()=>null);
+              if (r.ok && j && j.ok && j.url){ 
+                uploadedVideoUrl = j.url;
+                window.uploadedVideoUrl = j.url;
+                // Debug logging
+                try {
+                  fetch('http://127.0.0.1:3000/debug', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      type: 'upload_complete',
+                      fileType: 'video',
+                      url: j.url,
+                      uploadedVideoUrl: uploadedVideoUrl,
+                      hostConfig: window.HOST_CONFIG
+                    })
+                  }).catch(() => {});
+                } catch(_){ }
+              }
+            }catch(_){ }
+            try { statusEl.textContent = ''; } catch(_){ }
+            
+            // Schedule cost estimation after upload completes
+            try {
+              if (typeof scheduleEstimate === 'function') {
+                scheduleEstimate();
+              } else {
+                // Debug logging
+                fetch('http://127.0.0.1:3000/debug', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    type: 'scheduleEstimate_not_found',
+                    hostConfig: window.HOST_CONFIG
+                  })
+                }).catch(() => {});
+              }
+            } catch(e) {
+              // Debug logging
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'scheduleEstimate_error',
+                  error: String(e),
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            }
             try { if (__videoInOutBtn) __videoInOutBtn.textContent = __videoInOutBtnOrig || 'in/out points'; } catch(_){ }
           } else {
             let diag = null;
@@ -465,15 +599,32 @@
             } catch(_){ }
             let extra = '';
             if (diag && typeof diag === 'object') {
-              extra = ' [diag: ' +
-                (typeof diag.hasActiveSequence !== 'undefined' ? ('active=' + String(diag.hasActiveSequence) + ', direct=' + String(diag.hasExportAsMediaDirect)) : ('projectOpen=' + String(diag.projectOpen))) +
-                (diag.inTicks!=null?(', in='+diag.inTicks):'') +
+              extra = ' [diag: ';
+              if (typeof diag.hasActiveSequence !== 'undefined') {
+                extra += 'active=' + String(diag.hasActiveSequence) + ', direct=' + String(diag.hasExportAsMediaDirect);
+              } else if (typeof diag.projectOpen !== 'undefined') {
+                extra += 'projectOpen=' + String(diag.projectOpen);
+              } else {
+                extra += 'unknown';
+              }
+              extra += (diag.inTicks!=null?(', in='+diag.inTicks):'') +
                 (diag.outTicks!=null?(', out='+diag.outTicks):'') +
                 (diag.eprRoot?(', eprRoot='+diag.eprRoot):'') +
                 (diag.eprCount!=null?(', eprs='+diag.eprCount):'') +
               ']';
             }
-            if (statusEl) statusEl.textContent = 'video in/out export failed: ' + (res && res.error ? res.error : 'EvalScript error') + (res && res.eprRoot ? (' root=' + res.eprRoot) : '') + (res && res.preset ? (' preset=' + res.preset) : '') + extra;
+            if (statusEl) {
+              var errorMsg = 'video in/out export failed: ';
+              if (res && res.error) {
+                errorMsg += String(res.error);
+              } else {
+                errorMsg += 'EvalScript error';
+              }
+              if (res && res.eprRoot) errorMsg += ' root=' + res.eprRoot;
+              if (res && res.preset) errorMsg += ' preset=' + res.preset;
+              errorMsg += extra;
+              statusEl.textContent = errorMsg;
+            }
             try { if (__videoInOutBtn) __videoInOutBtn.textContent = __videoInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
@@ -526,31 +677,124 @@
               }
             }
           } catch(e){ res = { ok:false, error: String(e) }; }
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'selectAudioInOut_result', 
+                res: res,
+                resOk: res && res.ok,
+                resPath: res && res.path,
+                resError: res && res.error,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_) {}
+          
           if (res && res.ok && res.path){
             selectedAudio = res.path; selectedAudioIsTemp = true;
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
             updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
-            scheduleEstimate();
+            
+            // Upload for cost estimation
+            try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
+            try{
+              const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
+              const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
+              await ensureAuthToken();
+              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+              const j = await r.json().catch(()=>null);
+              if (r.ok && j && j.ok && j.url){ 
+                uploadedAudioUrl = j.url;
+                window.uploadedAudioUrl = j.url;
+                // Debug logging
+                try {
+                  fetch('http://127.0.0.1:3000/debug', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      type: 'upload_complete',
+                      fileType: 'audio',
+                      url: j.url,
+                      uploadedAudioUrl: uploadedAudioUrl,
+                      hostConfig: window.HOST_CONFIG
+                    })
+                  }).catch(() => {});
+                } catch(_){ }
+              }
+            }catch(_){ }
+            try { statusEl.textContent = ''; } catch(_){ }
+            
+            // Schedule cost estimation after upload completes
+            try {
+              if (typeof scheduleEstimate === 'function') {
+                scheduleEstimate();
+              } else {
+                // Debug logging
+                fetch('http://127.0.0.1:3000/debug', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    type: 'scheduleEstimate_not_found',
+                    hostConfig: window.HOST_CONFIG
+                  })
+                }).catch(() => {});
+              }
+            } catch(e) {
+              // Debug logging
+              fetch('http://127.0.0.1:3000/debug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  type: 'scheduleEstimate_error',
+                  error: String(e),
+                  hostConfig: window.HOST_CONFIG
+                })
+              }).catch(() => {});
+            }
             try { if (__audioInOutBtn) __audioInOutBtn.textContent = __audioInOutBtnOrig || 'in/out points'; } catch(_){ }
           } else {
             let diag = null;
             try {
-              if (window.nle && typeof window.nle.diagInOut === 'function') diag = await window.nle.diagInOut();
+              const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.HOST_CONFIG && window.HOST_CONFIG.isAE);
+              if (isAE) {
+                if (!cs) cs = new CSInterface();
+                try { const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const hostFile = window.HOST_CONFIG && window.HOST_CONFIG.isAE ? 'ae.jsx' : 'ppro.jsx'; await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve())); } catch(_){ }
+                const diagFunc = window.HOST_CONFIG && window.HOST_CONFIG.isAE ? 'AEFT_diagInOut' : 'PPRO_diagInOut';
+                diag = await new Promise(resolve=>{ cs.evalScript(`${diagFunc}()`, r=>{ try{ resolve(JSON.parse(r||'{}')); } catch(_){ resolve({ ok:true, host:window.nle && window.nle.getHostId && window.nle.getHostId() || 'PPRO' }); } }); });
+              } else if (window.nle && typeof window.nle.diagInOut === 'function') diag = await window.nle.diagInOut();
               else diag = await evalExtendScript('PPRO_diagInOut', {});
             } catch(_){ }
             let extra = '';
             if (diag && typeof diag === 'object') {
-              extra = ' [diag: ' +
-                'active=' + String(diag.hasActiveSequence) +
-                ', direct=' + String(diag.hasExportAsMediaDirect) +
-                (diag.inTicks!=null?(', in='+diag.inTicks):'') +
+              extra = ' [diag: ';
+              if (typeof diag.hasActiveSequence !== 'undefined') {
+                extra += 'active=' + String(diag.hasActiveSequence) + ', direct=' + String(diag.hasExportAsMediaDirect);
+              } else if (typeof diag.projectOpen !== 'undefined') {
+                extra += 'projectOpen=' + String(diag.projectOpen);
+              } else {
+                extra += 'unknown';
+              }
+              extra += (diag.inTicks!=null?(', in='+diag.inTicks):'') +
                 (diag.outTicks!=null?(', out='+diag.outTicks):'') +
                 (diag.eprRoot?(', eprRoot='+diag.eprRoot):'') +
                 (diag.eprCount!=null?(', eprs='+diag.eprCount):'') +
               ']';
             }
-            if (statusEl) statusEl.textContent = 'audio in/out export failed: ' + (res && res.error ? res.error : 'EvalScript error') + extra;
+            if (statusEl) {
+              var errorMsg = 'audio in/out export failed: ';
+              if (res && res.error) {
+                errorMsg += String(res.error);
+              } else {
+                errorMsg += 'EvalScript error';
+              }
+              errorMsg += extra;
+              statusEl.textContent = errorMsg;
+            }
             try { if (__audioInOutBtn) __audioInOutBtn.textContent = __audioInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
         }catch(e){ try{ updateInputStatus(); }catch(_){} }
@@ -598,7 +842,8 @@
       }
 
       function initCustomVideoPlayer() {
-        // Prevent duplicate initialization
+        // Reset initialization flag to allow re-initialization for new files
+        window.__videoPlayerInitialized = false;
         if (window.__videoPlayerInitialized) return;
         window.__videoPlayerInitialized = true;
         
@@ -624,6 +869,39 @@
             const totalFrames = Math.floor(video.duration * 30);
             frameInfo.textContent = `0 / ${totalFrames}`;
           }
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'video_loadedmetadata', 
+                duration: video.duration,
+                src: video.src,
+                readyState: video.readyState,
+                selectedVideo: selectedVideo,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_){ }
+        });
+        
+        // Debug video loading errors
+        video.addEventListener('error', (e) => {
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'video_error', 
+                error: String(e),
+                src: video.src,
+                readyState: video.readyState,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_){ }
         });
 
         // Update time and progress during playback
@@ -682,7 +960,8 @@
       }
 
       function initCustomAudioPlayer() {
-        // Prevent duplicate initialization
+        // Reset initialization flag to allow re-initialization for new files
+        window.__audioPlayerInitialized = false;
         if (window.__audioPlayerInitialized) return;
         window.__audioPlayerInitialized = true;
         
@@ -736,7 +1015,7 @@
             if (!localPath) { renderWaveform(canvas, [], 0, displayWidth, displayHeight); return; }
             // This endpoint is now public to avoid blank waveform when token fails
             await ensureAuthToken();
-            const resp = await fetch('http://127.0.0.1:3000/waveform/file?'+new URLSearchParams({ path: localPath }), { cache:'no-store' }).catch((e)=>{ try{ uiLog('waveform fetch exception '+String(e)); }catch(_){} return null; });
+            const resp = await fetch('http://127.0.0.1:3000/waveform/file?'+new URLSearchParams({ path: localPath }), { headers: authHeaders(), cache:'no-store' }).catch((e)=>{ try{ uiLog('waveform fetch exception '+String(e)); }catch(_){} return null; });
             if (!resp || !resp.ok) {
               // Fallback: draw placeholder waveform so UI isn't blank
               try { uiLog('waveform fetch failed'); } catch(_){ }
@@ -777,6 +1056,39 @@
         audio.addEventListener('loadedmetadata', () => {
           const duration = formatTime(audio.duration || 0);
           if (timeDisplay) timeDisplay.textContent = `00:00 / ${duration}`;
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'audio_loadedmetadata', 
+                duration: audio.duration,
+                src: audio.src,
+                readyState: audio.readyState,
+                selectedAudio: selectedAudio,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_){ }
+        });
+        
+        // Debug audio loading errors
+        audio.addEventListener('error', (e) => {
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'audio_error', 
+                error: String(e),
+                src: audio.src,
+                readyState: audio.readyState,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_){ }
         });
 
         // Update time and progress highlight

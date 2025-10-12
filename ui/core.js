@@ -15,12 +15,18 @@
       let uploadedAudioUrl = '';
       let costToken = 0;
       
+      // Expose variables globally for cost estimation
+      window.uploadedVideoUrl = uploadedVideoUrl;
+      window.uploadedAudioUrl = uploadedAudioUrl;
+      
       // Per-install auth token for local server
       let __authToken = '';
       async function ensureAuthToken(){
         if (__authToken) return __authToken;
         try{
-          const r = await fetch('http://127.0.0.1:3000/auth/token');
+          const r = await fetch('http://127.0.0.1:3000/auth/token', {
+            headers: { 'X-CEP-Panel': 'sync' }
+          });
           const j = await r.json().catch(()=>null);
           if (r.ok && j && j.token){ __authToken = j.token; }
         }catch(_){ }
@@ -28,15 +34,16 @@
       }
       function authHeaders(extra){
         const h = Object.assign({}, extra||{});
+        h['X-CEP-Panel'] = 'sync'; // Required by server for CORS validation
         if (__authToken) h['Authorization'] = 'Bearer ' + __authToken;
         return h;
       }
       
-      // UI logger to local server
+      // UI logger (disabled - use debug.md file-based logging instead)
       const DEBUG_LOGS = false;
       function uiLog(msg){
-        if (!DEBUG_LOGS) return;
-        try { fetch('http://127.0.0.1:3000/hostlog', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({ msg: String(msg||'') }) }).catch(()=>{}); } catch(_) {}
+        // Dead code - logging moved to file-based system per debug.md
+        return;
       }
       
       // Helper to call JSX with JSON payload and parse JSON response (with auto-load + retry)
@@ -178,12 +185,70 @@
 
       // Host-backed file picker to avoid inline ExtendScript parser issues
       let __pickerBusy = false;
+      
+      try {
+        fetch('http://127.0.0.1:3000/debug', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            type: 'ui_loaded', 
+            hostConfig: window.HOST_CONFIG,
+            timestamp: Date.now()
+          })
+        }).then(r => {
+          // Debug: fetch response
+          fetch('http://127.0.0.1:3000/debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              type: 'ui_loaded_response', 
+              status: r.status,
+              ok: r.ok
+            })
+          }).catch(() => {});
+        }).catch(e => {
+          // Debug: fetch error
+          fetch('http://127.0.0.1:3000/debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              type: 'ui_loaded_error', 
+              error: String(e.message || e)
+            })
+          }).catch(() => {});
+        });
+      } catch(e) {
+        // Debug: try-catch error
+        try {
+          fetch('http://127.0.0.1:3000/debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              type: 'ui_loaded_try_catch_error', 
+              error: String(e.message || e)
+            })
+          }).catch(() => {});
+        } catch(_) {}
+      }
       async function openFileDialog(kind) {
         if (__pickerBusy) { return ''; }
         __pickerBusy = true;
         try {
           const k = (typeof kind === 'string' ? kind : 'video');
           if (!cs) cs = new CSInterface();
+          
+          // Debug logging
+          try {
+            fetch('http://127.0.0.1:3000/debug', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                type: 'file_picker_start', 
+                kind: k,
+                hostConfig: window.HOST_CONFIG
+              })
+            }).catch(() => {});
+          } catch(_) {}
           // Ensure only current host script is loaded before invoking
           try {
             const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
@@ -198,7 +263,56 @@
               const isAE = (window.HOST_CONFIG && window.HOST_CONFIG.isAE);
               const fn = isAE ? 'AEFT_showFileDialog' : 'PPRO_showFileDialog';
               cs.evalScript(`${fn}(\"${payload}\")`, function(r){
-                try { var j = JSON.parse(r||'{}'); if (j && j.ok && j.path) { resolve(j.path); return; } } catch(_){ }
+                // Debug logging
+                try {
+                    fetch('http://127.0.0.1:3000/debug', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        type: 'file_picker_response', 
+                        response: String(r),
+                        responseType: typeof r,
+                        function: fn,
+                        responseLength: String(r).length,
+                        responsePreview: String(r).substring(0, 200),
+                        hostConfig: window.HOST_CONFIG
+                      })
+                    }).catch(() => {});
+                } catch(_) {}
+                
+                try { 
+                  var j = JSON.parse(r||'{}'); 
+                  if (j && j.ok && j.path) { 
+                    resolve(j.path); 
+                    return; 
+                  } 
+                  // If JSON parsing failed but we got a string that looks like a path, use it
+                  if (typeof r === 'string' && r.indexOf('/') !== -1 && !r.startsWith('{')) {
+                    resolve(r);
+                    return;
+                  }
+                } catch(e){ 
+                  // Debug JSON parse error
+                  try {
+                    fetch('http://127.0.0.1:3000/debug', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        type: 'file_picker_json_parse_error',
+                        error: String(e),
+                        response: String(r),
+                        function: fn,
+                        hostConfig: window.HOST_CONFIG
+                      })
+                    }).catch(() => {});
+                  } catch(_){ }
+                  
+                  // If JSON parsing failed but we got a string that looks like a path, use it
+                  if (typeof r === 'string' && r.indexOf('/') !== -1 && !r.startsWith('{')) {
+                    resolve(r);
+                    return;
+                  }
+                }
                 resolve('');
               });
             });
@@ -247,7 +361,7 @@
       async function waitForHealth(maxAttempts = 20, delayMs = 250, expectedToken) {
         for (let i = 0; i < maxAttempts; i++) {
           try {
-            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/health`, { cache: 'no-store' });
+            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/health`, { headers: { 'X-CEP-Panel': 'sync' }, cache: 'no-store' });
             if (resp.ok) return true;
           } catch (e) {
             // ignore until attempts exhausted

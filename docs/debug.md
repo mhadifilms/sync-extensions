@@ -8,9 +8,9 @@ All runtime files (logs, state, cache, outputs, updates) are stored per‑user u
 
 Subfolders created on demand:
 - `logs/`
-- `cache/`
+- `cache/` (cleaned every 6 hours)
 - `state/`
-- `outputs/`
+- `uploads/` (cleaned every 24 hours)
 - `updates/`
 
 ### Enabling debug logs (simple flag file)
@@ -43,9 +43,9 @@ New-Item -ItemType File -Force "$env:APPDATA\sync. extensions\logs\debug.enabled
 - MacOS: `rm -f ~/Library/Application\ Support/sync.\ extensions/logs/debug.enabled`
 - Windows: `Remove-Item -Force "$env:APPDATA\sync. extensions\logs\debug.enabled"`
 
-### Outputs and temporary files
-- Transient render/transcode outputs are written under `outputs/`.
-- Temporary copies (e.g., of macOS `TemporaryItems`) are kept in `cache/`.
+### Uploads and temporary files
+- Transient render/transcode outputs are written under `uploads/` (automatically cleaned every 24 hours).
+- Temporary copies (e.g., of macOS `TemporaryItems`) are kept in `cache/` (automatically cleaned every 6 hours).
 
 ### Troubleshooting
 - If you don’t see logs, create `logs/debug.enabled` and retry.

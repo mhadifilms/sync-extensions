@@ -223,26 +223,9 @@
                       candidates = [bundledNodePath];
                       updateDebugStatus('Found bundled Node.js binary');
                     } else {
-                      // Fallback to system Node.js if bundled binary not found
-                      if (isWindows) {
-                        candidates = [
-                          'C:\\Program Files\\nodejs\\node.exe',
-                          'C:\\Program Files (x86)\\nodejs\\node.exe',
-                          'C:\\nodejs\\node.exe',
-                          'node.exe'  // Try PATH
-                        ];
-                        updateDebugStatus('Windows detected, trying system Node.js paths: ' + candidates.join(', '));
-                      } else {
-                        candidates = [
-                          '/opt/homebrew/bin/node',
-                          '/usr/local/bin/node',
-                          '/usr/bin/node',
-                          '/usr/local/opt/node/bin/node',
-                          '/Applications/Node.js.app/Contents/MacOS/node',
-                          'node'  // Try PATH
-                        ];
-                        updateDebugStatus('macOS detected, trying system Node.js paths: ' + candidates.join(', '));
-                      }
+                      updateDebugStatus('Bundled Node.js binary not found - extension requires bundled Node.js');
+                      updateDebugStatus('Please reinstall the extension or contact support');
+                      return;
                     }
                     
                     // Try each candidate synchronously
@@ -261,45 +244,17 @@
                         }
                         updateDebugStatus('Trying Node.js path: ' + candidate);
                         
-                        // For PATH-based candidates, try execSync
-                        if (candidate === 'node' || candidate === 'node.exe') {
+                        // For bundled Node.js, check if file exists and is executable
+                        if (fs.existsSync(candidate)) {
                           try {
-                            var execSync = require('child_process').execSync;
-                            if (isWindows) {
-                              // On Windows, try 'where node' first
-                              try {
-                                var whereResult = execSync('where node', { encoding: 'utf8', timeout: 2000 });
-                                var nodeExePath = whereResult.trim().split('\n')[0];
-                                if (nodeExePath && nodeExePath.length > 0) {
-                                  updateDebugStatus('Found Node.js via where: ' + nodeExePath);
-                                  nodePath = nodeExePath;
-                                  break;
-                                }
-                              } catch(whereError) {
-                                updateDebugStatus('where command failed: ' + whereError.message);
-                              }
+                            var stats = fs.statSync(candidate);
+                            if (stats.isFile()) {
+                              nodePath = candidate;
+                              updateDebugStatus('Found bundled Node.js at: ' + nodePath);
+                              break;
                             }
-                            // Fallback to direct version check
-                            execSync(candidate + ' --version', { encoding: 'utf8', timeout: 2000 });
-                            nodePath = candidate;
-                            updateDebugStatus('Found working Node.js via PATH: ' + candidate);
-                            break;
                           } catch(e) {
-                            updateDebugStatus('PATH test failed for ' + candidate + ': ' + e.message);
-                          }
-                        } else {
-                          // For absolute paths, check if file exists
-                          if (fs.existsSync(candidate)) {
-                            try {
-                              var stats = fs.statSync(candidate);
-                              if (stats.isFile()) {
-                                nodePath = candidate;
-                                updateDebugStatus('Found Node.js at: ' + nodePath);
-                                break;
-                              }
-                            } catch(e) {
-                              updateDebugStatus('Error checking ' + candidate + ': ' + e.message);
-                            }
+                            updateDebugStatus('Error checking bundled Node.js: ' + e.message);
                           }
                         }
                       } catch(e) {

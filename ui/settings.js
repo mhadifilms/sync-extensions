@@ -72,15 +72,6 @@
         if (settings.apiKey) {
           document.getElementById('apiKey').value = settings.apiKey;
         }
-        if (settings.supabaseUrl) {
-          document.getElementById('supabaseUrl').value = settings.supabaseUrl;
-        }
-        if (settings.supabaseKey) {
-          document.getElementById('supabaseKey').value = settings.supabaseKey;
-        }
-        if (settings.supabaseBucket) {
-          document.getElementById('supabaseBucket').value = settings.supabaseBucket;
-        }
         if (settings.saveLocation) {
           const opt = document.querySelector(`input[name="saveLocation"][value="${settings.saveLocation}"]`);
           if (opt) opt.checked = true;
@@ -95,9 +86,6 @@
         }
         // Initialize checkmark events for all input fields
         setupCheckmarkEvents('apiKey', 'apiKeyCheck');
-        setupCheckmarkEvents('supabaseUrl', 'supabaseUrlCheck');
-        setupCheckmarkEvents('supabaseKey', 'supabaseKeyCheck');
-        setupCheckmarkEvents('supabaseBucket', 'supabaseCredsCheck');
       }
 
       function saveSettings() {
@@ -108,9 +96,6 @@
           detectObstructions: document.getElementById('detectObstructions').checked,
           syncMode: (document.getElementById('syncMode')||{}).value || 'loop',
           apiKey: document.getElementById('apiKey').value,
-          supabaseUrl: (document.getElementById('supabaseUrl').value||'').trim(),
-          supabaseKey: (document.getElementById('supabaseKey').value||'').trim(),
-          supabaseBucket: (document.getElementById('supabaseBucket').value||'').trim(),
           saveLocation: (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project',
           renderVideo: document.getElementById('renderVideo').value || 'h264',
           renderAudio: document.getElementById('renderAudio').value || 'wav'
