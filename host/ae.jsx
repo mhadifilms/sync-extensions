@@ -151,9 +151,9 @@ function _extensionRoot() {
     
     var fallback;
     if (isWindows) {
-      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ae.panel";
+      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ae";
     } else {
-      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ae.panel";
+      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ae";
     }
     return fallback;
   } catch (e2) {}

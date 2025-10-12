@@ -55,7 +55,7 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 3. Restart Adobe app and open the panel from Window → Extensions.
 
 ### Developer install (unzipped folder)
-1. Extract the ZXP (it’s a ZIP) and copy `com.sync.extension.*.panel` to CEP extensions:
+1. Extract the ZXP (it's a ZIP) and copy `com.sync.extension.*` to CEP extensions:
    - macOS: `~/Library/Application Support/Adobe/CEP/extensions/`
    - Windows: `%APPDATA%\Adobe\CEP\extensions\`
 2. If needed for dev builds, enable PlayerDebugMode:

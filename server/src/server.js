@@ -15,7 +15,8 @@ const require = createRequire(import.meta.url);
 const { convertAudio } = require('./audio.cjs');
 
 // R2 client
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Load .env from project root (one level up from server directory)
 dotenv.config({ path: path.join(process.cwd(), '..', '.env') });
@@ -221,8 +222,28 @@ function compareSemver(a, b){
 
 async function getCurrentVersion(){
   try{
-    const xml = fs.readFileSync(MANIFEST_PATH, 'utf8');
-    return parseBundleVersion(xml) || '';
+    // Try the original path first (for installed extensions)
+    try {
+      const xml = fs.readFileSync(MANIFEST_PATH, 'utf8');
+      const version = parseBundleVersion(xml);
+      if (version) return version;
+    } catch(_) {}
+    
+    // Fallback: try to find manifest in extensions subdirectories (for local development)
+    const extensionsDir = path.join(EXT_ROOT, 'extensions');
+    if (fs.existsSync(extensionsDir)) {
+      const subdirs = fs.readdirSync(extensionsDir);
+      for (const subdir of subdirs) {
+        const manifestPath = path.join(extensionsDir, subdir, 'CSXS', 'manifest.xml');
+        try {
+          const xml = fs.readFileSync(manifestPath, 'utf8');
+          const version = parseBundleVersion(xml);
+          if (version) return version;
+        } catch(_) {}
+      }
+    }
+    
+    return '';
   }catch(_){ return ''; }
 }
 
@@ -601,7 +622,8 @@ app.use((req,res,next)=>{
     '/update/check',
     '/update/version',
     '/upload',
-    '/debug'
+    '/debug',
+    '/costs'
   ];
   if (publicPaths.includes(req.path)) {
     return next();
@@ -784,37 +806,13 @@ app.post('/update/apply', async (req,res)=>{
       let aeDestDir, pproDestDir;
       
       if (isWindows) {
-        aeDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
-        pproDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+        aeDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae');
+        pproDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro');
       } else {
-        aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae.panel');
-        pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro.panel');
+        aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae');
+        pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro');
       }
       
-      // If a previous installer created folders without the .panel suffix, migrate them to the correct names
-      try {
-        const aeWrong = path.join(path.dirname(aeDestDir), 'com.sync.extension.ae');
-        const pproWrong = path.join(path.dirname(pproDestDir), 'com.sync.extension.ppro');
-        async function migrateIfMisnamed(wrong, correct){
-          try{
-            if (!fs.existsSync(wrong)) return;
-            const wrongHas = (fs.readdirSync(wrong).filter(n=>n!=='.DS_Store').length > 0);
-            const correctExists = fs.existsSync(correct);
-            const correctHas = correctExists ? (fs.readdirSync(correct).filter(n=>n!=='.DS_Store').length > 0) : false;
-            if (!correctExists && wrongHas){
-              try { fs.renameSync(wrong, correct); try { tlog('update:migrate:rename', wrong, '->', correct); } catch(_){ } return; } catch(_){ }
-            }
-            if (wrongHas){
-              if (process.platform === 'win32') { await runRobocopy(wrong, correct); }
-              else { await exec(`mkdir -p "${correct}" && cp -R "${wrong}/." "${correct}/"`); }
-              try { fs.rmSync(wrong, { recursive: true, force: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-              try { tlog('update:migrate:copy', wrong, '->', correct); } catch(_){ }
-            }
-          }catch(e){ try { tlog('update:migrate:error', wrong, '->', correct, e && e.message ? e.message : String(e)); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} } }
-        }
-        await migrateIfMisnamed(aeWrong, aeDestDir);
-        await migrateIfMisnamed(pproWrong, pproDestDir);
-      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
       
       // Do not remove existing extensions; copy over into destination to avoid locking issues
       try { tlog('update:dest', 'ae=', aeDestDir, 'ppro=', pproDestDir); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
@@ -955,9 +953,15 @@ async function r2Upload(localPath){
     Body: body,
     ContentType: contentType
   }));
-  const publicUrl = `${R2_ENDPOINT_URL}/${R2_BUCKET}/${key}`;
-  slog('[r2] put ok', publicUrl);
-  return publicUrl;
+  
+  // Generate signed URL for external access
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key
+  });
+  const signedUrl = await getSignedUrl(r2Client, command, { expiresIn: 3600 }); // 1 hour expiry
+  slog('[r2] put ok', signedUrl);
+  return signedUrl;
 }
 
 const SYNC_API_BASE = 'https://api.sync.so/v2';
@@ -1157,6 +1161,8 @@ app.post('/costs', async (req, res) => {
       slog('[costs] uploading sources to R2 for cost estimate');
       videoUrl = await r2Upload(resolveSafeLocalPath(videoPath));
       audioUrl = await r2Upload(resolveSafeLocalPath(audioPath));
+    } else {
+      slog('[costs] using provided URLs', 'videoUrl=', videoUrl, 'audioUrl=', audioUrl);
     }
 
     const opts = (options && typeof options === 'object') ? options : {};
@@ -1170,7 +1176,7 @@ app.post('/costs', async (req, res) => {
     const resp = await fetch(`${SYNC_API_BASE}/analyze/cost`, { method:'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body) });
     const text = await safeText(resp);
     try { slog('[costs] response', resp.status, (text||'').slice(0,200)); } catch(_){ }
-    if (!resp.ok) { slog('[costs] error', resp.status, text); return res.status(resp.status).json({ error: text || 'cost failed' }); }
+    if (!resp.ok) { slog('[costs] sync api error', resp.status, text); return res.status(resp.status).json({ error: text || 'cost failed' }); }
     let raw = null; let estimate = [];
     try { raw = JSON.parse(text || '[]'); } catch(_) { raw = null; }
     if (Array.isArray(raw)) estimate = raw;

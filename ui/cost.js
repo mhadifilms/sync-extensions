@@ -21,6 +21,7 @@
       async function estimateCost(auto, retry){
         const statusEl = document.getElementById('statusMessage');
         const display = document.getElementById('costDisplay');
+        const badge = document.getElementById('costBadge');
         
         // Debug logging for DOM elements
         try {

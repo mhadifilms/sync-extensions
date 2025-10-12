@@ -468,9 +468,9 @@ function _extensionRoot() {
     
     var fallback;
     if (isWindows) {
-      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro.panel";
+      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
     } else {
-      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro.panel";
+      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
     }
     return fallback;
   } catch(e2) {}

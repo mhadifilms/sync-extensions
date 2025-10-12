@@ -397,8 +397,8 @@
             // Fallback: check extension path
             try {
               var extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION);
-              if (extPath && extPath.indexOf('ae.panel') !== -1) return 'AEFT';
-              if (extPath && extPath.indexOf('ppro.panel') !== -1) return 'PPRO';
+              if (extPath && extPath.indexOf('ae') !== -1) return 'AEFT';
+              if (extPath && extPath.indexOf('ppro') !== -1) return 'PPRO';
             } catch(_) {}
             
             return 'PPRO';

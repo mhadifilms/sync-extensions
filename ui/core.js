@@ -344,6 +344,10 @@
         if (tabName === 'history') {
           try { updateHistory(); } catch(_) {}
           try { loadJobsFromServer(); } catch(_) {}
+          // Start auto-refresh for history tab
+          try { 
+            if (typeof startHistoryAutoRefresh === 'function') startHistoryAutoRefresh(); 
+          } catch(_) {}
           // Reset scroll to top to avoid landing mid-list after job submit
           try {
             setTimeout(function(){
@@ -355,6 +359,11 @@
               try { window.scrollTo(0, 0); } catch(_) { }
             }, 0);
           } catch(_) { }
+        } else {
+          // Stop auto-refresh when switching away from history tab
+          try { 
+            if (typeof stopHistoryAutoRefresh === 'function') stopHistoryAutoRefresh(); 
+          } catch(_) {}
         }
       }
 

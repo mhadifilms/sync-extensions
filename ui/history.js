@@ -92,6 +92,38 @@
         });
       } catch(_){ }
       
+      // Auto-refresh history every 3 seconds to catch status changes
+      let historyRefreshInterval = null;
+      function startHistoryAutoRefresh() {
+        if (historyRefreshInterval) return; // Already running
+        historyRefreshInterval = setInterval(() => {
+          try { 
+            updateHistory(); 
+            // Also refresh from server periodically to catch any missed updates
+            if (typeof loadJobsFromServer === 'function') loadJobsFromServer(); 
+          } catch(_){ }
+        }, 3000); // 3 seconds - industry standard polling interval
+      }
+      
+      function stopHistoryAutoRefresh() {
+        if (historyRefreshInterval) {
+          clearInterval(historyRefreshInterval);
+          historyRefreshInterval = null;
+        }
+      }
+      
+      // Auto-refresh is now handled in core.js showTab function
+      
+      // Also start auto-refresh if history tab is already active on page load
+      try {
+        setTimeout(() => {
+          const historyTab = document.getElementById('history');
+          if (historyTab && historyTab.classList.contains('active')) {
+            startHistoryAutoRefresh();
+          }
+        }, 1000); // Wait 1 second after page load
+      } catch(_){ }
+      
       async function revealFile(jobId) {
         const job = jobs.find(j => String(j.id) === String(jobId));
         if (!job || !job.outputPath) return;
