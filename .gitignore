@@ -6,6 +6,7 @@ node_modules/
 .DS_Store
 dist/
 release.sh
+local-release.sh
 
 # CEP build artifacts (created by GitHub Actions)
 com.sync.extension.ae.panel/
