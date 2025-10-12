@@ -44,6 +44,10 @@ jobs:
           R2_BUCKET=${{ secrets.R2_BUCKET }}
           R2_PREFIX=${{ secrets.R2_PREFIX }}
           EOF
+          echo "Created .env file:"
+          ls -la .env
+          echo "Contents:"
+          cat .env
 
       - name: Build CEP folders for macOS
         shell: bash
@@ -125,6 +129,10 @@ jobs:
           R2_BUCKET=${{ secrets.R2_BUCKET }}
           R2_PREFIX=${{ secrets.R2_PREFIX }}
           EOF
+          echo "Created .env file:"
+          ls -la .env
+          echo "Contents:"
+          cat .env
 
       - name: Build CEP folders for Windows
         shell: pwsh
