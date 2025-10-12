@@ -24,9 +24,7 @@ Disable by removing `logs/debug.enabled`.
 When enabled, components write to the `logs/` directory:
 - After Effects host: `logs/sync_ae_debug.log`
 - Premiere host: `logs/sync_ppro_debug.log`
-- UI auto‑start: `logs/sync_nle_autostart.log`
-- UI actions: `logs/sync_save_debug.log`, `logs/sync_insert_debug.log`
-- Local server: `logs/sync_ae_debug.log` (server prefix)
+- Server auto-start and debug: `logs/sync_server_debug.log`
 
 Note: Without the flag file, UI and host log files are not written.
 

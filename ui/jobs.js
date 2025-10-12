@@ -38,7 +38,7 @@
           if (myToken !== runToken) return;
           statusEl.textContent = 'backend ready. creating job...';
           const mainBtn = document.getElementById('lipsyncBtn');
-          if (mainBtn) { mainBtn.textContent = 'rendering…'; mainBtn.disabled = true; }
+          if (mainBtn) { mainBtn.textContent = 'submitting…'; mainBtn.disabled = true; }
           
           // Resolve output directory from host project
           let outputDir = null;

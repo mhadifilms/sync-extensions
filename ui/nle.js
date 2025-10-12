@@ -16,12 +16,12 @@
               var base = (process.platform === 'win32') ? path.join(home, 'AppData', 'Roaming', 'sync. extensions') : (process.platform === 'darwin') ? path.join(home, 'Library', 'Application Support', 'sync. extensions') : path.join(home, '.config', 'sync. extensions');
               var logs = path.join(base, 'logs');
               try { fs.mkdirSync(logs, { recursive: true }); } catch(_){ }
-              return path.join(logs, 'sync_nle_autostart.log');
+              return path.join(logs, 'sync_server_debug.log');
             }
           }catch(_){ }
-          if (process && process.platform === 'win32') return (process.env.TEMP||'C:\\temp') + '\\sync_nle_autostart.log';
-          try{ if (typeof require !== 'undefined'){ var os2=require('os'); return os2.tmpdir()+ '/sync_nle_autostart.log'; } }catch(_){ }
-          return '/tmp/sync_nle_autostart.log';
+          if (process && process.platform === 'win32') return (process.env.TEMP||'C:\\temp') + '\\sync_server_debug.log';
+          try{ if (typeof require !== 'undefined'){ var os2=require('os'); return os2.tmpdir()+ '/sync_server_debug.log'; } }catch(_){ }
+          return '/tmp/sync_server_debug.log';
         })();
         
         // Debug: Log the actual log file path (only when SYNC_DEBUG enabled)

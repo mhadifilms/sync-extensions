@@ -400,10 +400,8 @@
 
       async function selectVideoInOut(){
         try{
-          console.log('selectVideoInOut called, busy:', window.__videoInOutBusy);
           if (window.__videoInOutBusy) { return; }
           window.__videoInOutBusy = true;
-          console.log('selectVideoInOut starting render');
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering video in/out…';
           // Only set loading state on the video in/out button
@@ -420,30 +418,18 @@
             let hostIsAE = false;
             try {
               if (!cs) cs = new CSInterface();
-               const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-               const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
-               hostIsAE = !!isAE;
-               console.log('Video: hostIsAE =', hostIsAE);
-               const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
-               await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
-               const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
-               const exportFunc = isAE ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
-               console.log('Video: calling', exportFunc);
-              res = await new Promise(resolve => {
-                cs.evalScript(`${exportFunc}(\"${arg}\")`, r => {
-                  try {
-                    let out = null;
-                    if (typeof r === 'string') {
-                      try { out = JSON.parse(r||'{}'); }
-                      catch(parseErr) {
-                        if (r === '[object Object]' || (r && r.indexOf('ok') !== -1)) out = { ok:true };
-                        else out = { ok:false, error:String(r||'') };
-                      }
-                    } else if (r && typeof r === 'object') { out = r; }
-                    else { out = { ok:false, error:String(r) }; }
-                    resolve(out);
-                  } catch(e){ resolve({ ok:false, error:String(e) }); }
-                });
+              const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+              hostIsAE = !!isAE;
+              const hostFile = isAE ? 'ae.jsx' : 'ppro.jsx';
+              await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
+              const arg = JSON.stringify({ codec }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
+              const exportFunc = isAE ? 'AEFT_exportInOutVideo' : 'PPRO_exportInOutVideo';
+              res = await new Promise(resolve => { 
+                cs.evalScript(`${exportFunc}(\"${arg}\")`, r => { 
+                  try { resolve(JSON.parse(r||'{}')); } 
+                  catch(_){ resolve({ ok:false, error:String(r||'') }); } 
+                }); 
               });
               triedAE = true;
             } catch(_){ }
@@ -496,13 +482,8 @@
 
       async function selectAudioInOut(){
         try{
-          console.log('selectAudioInOut called, busy:', window.__audioInOutBusy);
-          if (window.__audioInOutBusy) { 
-            console.log('selectAudioInOut blocked by busy guard');
-            return; 
-          }
+          if (window.__audioInOutBusy) { return; }
           window.__audioInOutBusy = true;
-          console.log('selectAudioInOut starting render');
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'rendering audio in/out…';
           // Only set loading state on the audio in/out button
@@ -526,21 +507,11 @@
               await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve()));
               const arg = JSON.stringify({ format }).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"');
               const audioExportFunc = isAE ? 'AEFT_exportInOutAudio' : 'PPRO_exportInOutAudio';
-              res = await new Promise(resolve => {
-                cs.evalScript(`${audioExportFunc}(\"${arg}\")`, r => {
-                  try {
-                    let out = null;
-                    if (typeof r === 'string') {
-                      try { out = JSON.parse(r||'{}'); }
-                      catch(parseErr) {
-                        if (r === '[object Object]' || (r && r.indexOf('ok') !== -1)) out = { ok:true };
-                        else out = { ok:false, error:String(r||'') };
-                      }
-                    } else if (r && typeof r === 'object') { out = r; }
-                    else { out = { ok:false, error:String(r) }; }
-                    resolve(out);
-                  } catch(e){ resolve({ ok:false, error:String(e) }); }
-                });
+              res = await new Promise(resolve => { 
+                cs.evalScript(`${audioExportFunc}(\"${arg}\")`, r => { 
+                  try { resolve(JSON.parse(r||'{}')); } 
+                  catch(_){ resolve({ ok:false, error:String(r||'') }); } 
+                }); 
               });
               triedAE = true;
             } catch(_){ }
@@ -627,6 +598,10 @@
       }
 
       function initCustomVideoPlayer() {
+        // Prevent duplicate initialization
+        if (window.__videoPlayerInitialized) return;
+        window.__videoPlayerInitialized = true;
+        
         const video = document.getElementById('mainVideo');
         const centerPlayBtn = document.getElementById('centerPlayBtn');
         const playOverlay = document.getElementById('videoPlayOverlay');
@@ -678,14 +653,7 @@
           if (playOverlay) playOverlay.classList.remove('hidden');
         });
 
-        // Progress bar scrubbing
-        if (progressBar) {
-          progressBar.addEventListener('click', (e) => {
-            const rect = progressBar.getBoundingClientRect();
-            const pos = (e.clientX - rect.left) / rect.width;
-            video.currentTime = pos * video.duration;
-          });
-        }
+        // REMOVED DUPLICATE: Progress bar scrubbing (handled later)
 
         // Play/pause functionality - only center button
         const togglePlay = () => {
@@ -708,30 +676,16 @@
           });
         }
 
-        if (volumeBtn) {
-          volumeBtn.addEventListener('click', () => {
-            video.muted = !video.muted;
-            if (video.muted) {
-              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
-            } else {
-              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
-            }
-          });
-        }
+        // REMOVED DUPLICATE: Volume button (handled later)
 
-        // Fullscreen
-        if (fullscreenBtn) {
-          fullscreenBtn.addEventListener('click', () => {
-            if (video.requestFullscreen) {
-              video.requestFullscreen();
-            } else if (video.webkitRequestFullscreen) {
-              video.webkitRequestFullscreen();
-            }
-          });
-        }
+        // REMOVED DUPLICATE: Fullscreen (handled later)
       }
 
       function initCustomAudioPlayer() {
+        // Prevent duplicate initialization
+        if (window.__audioPlayerInitialized) return;
+        window.__audioPlayerInitialized = true;
+        
         const audio = document.getElementById('audioPlayer');
         const playBtn = document.getElementById('audioPlayBtn');
         const timeDisplay = document.getElementById('audioTime');
