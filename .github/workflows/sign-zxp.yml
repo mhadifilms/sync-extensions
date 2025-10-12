@@ -33,6 +33,16 @@ jobs:
         working-directory: server
         run: npm ci --omit=dev
 
+      - name: Create .env file from secrets
+        run: |
+          cat > .env << EOF
+          # R2 Configuration
+          R2_ENDPOINT_URL=${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET=${{ secrets.R2_BUCKET }}
+          R2_PREFIX=${{ secrets.R2_PREFIX }}
+          EOF
 
       - name: Build CEP folders for macOS
         shell: bash
@@ -103,6 +113,16 @@ jobs:
         working-directory: server
         run: npm ci --omit=dev
 
+      - name: Create .env file from secrets
+        run: |
+          cat > .env << EOF
+          # R2 Configuration
+          R2_ENDPOINT_URL=${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET=${{ secrets.R2_BUCKET }}
+          R2_PREFIX=${{ secrets.R2_PREFIX }}
+          EOF
 
       - name: Build CEP folders for Windows
         shell: pwsh
