@@ -31,18 +31,6 @@ A Premiere Pro and After Effects panel for lipsyncing using the sync. API, with 
 - Local server runs on port 3000 (auto-starts with extension)
 - Internet connection required for sync API and updates
 
-### Repository layout
-- `CSXS/manifest.xml` — CEP manifest (ExtensionBundleId, hosts, icons)
-- `index.html` — panel entry
-- `ui/` — panel UI logic (spawns bundled Node)
-- `host/` — ExtendScript bridges for AE/PPro
-- `lib/CSInterface.js` — CEP host bridge
-- `server/` — local Node helper (jobs, costs, file operations)
-- `bin/` — bundled Node runtimes (`darwin-arm64`, `darwin-x64`, `win32-x64`)
-- `extensions/premiere-extension/epr/` — AME export presets (Premiere only)
-- `scripts/release.sh` — builds CEP folders for signing
-- `.github/workflows/sign-zxp.yml` — CI for signing ZXP packages
-
 ## Installation
 
 ### Recommended (signed ZXP)
