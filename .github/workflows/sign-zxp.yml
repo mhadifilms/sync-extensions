@@ -256,6 +256,51 @@ jobs:
         with:
           name: mac-build
           path: build/mac
+          
+      - name: Debug downloaded macOS directories
+        shell: powershell
+        run: |
+          echo "Checking downloaded macOS directories..."
+          echo "AE macOS directory exists: $(Test-Path "build\mac\com.sync.extension.ae.panel")"
+          echo "Premiere macOS directory exists: $(Test-Path "build\mac\com.sync.extension.ppro.panel")"
+          echo "AE macOS .env exists: $(Test-Path "build\mac\com.sync.extension.ae.panel\.env")"
+          echo "Premiere macOS .env exists: $(Test-Path "build\mac\com.sync.extension.ppro.panel\.env")"
+          
+          echo "Contents of AE macOS directory:"
+          Get-ChildItem "build\mac\com.sync.extension.ae.panel" | Select-Object Name, Length
+          echo "Contents of Premiere macOS directory:"
+          Get-ChildItem "build\mac\com.sync.extension.ppro.panel" | Select-Object Name, Length
+          
+          echo "Searching for .env files recursively in build\mac:"
+          Get-ChildItem "build\mac" -Recurse -Name "*.env" | ForEach-Object { echo "Found .env at: $_" }
+          
+          echo "Searching for any files starting with dot in build\mac:"
+          Get-ChildItem "build\mac" -Recurse -Force | Where-Object { $_.Name -like ".*" } | ForEach-Object { echo "Found hidden file: $($_.FullName)" }
+          
+          # Search for .env files recursively in the downloaded artifact
+          echo "Searching for .env files in downloaded artifact..."
+          Get-ChildItem "build\mac" -Recurse -Name ".env" -Force
+          
+          # If .env files are found elsewhere, copy them to the correct locations
+          $aeEnvPath = Get-ChildItem "build\mac" -Recurse -Name ".env" -Force | Where-Object { $_ -like "*ae*" } | Select-Object -First 1
+          $ppEnvPath = Get-ChildItem "build\mac" -Recurse -Name ".env" -Force | Where-Object { $_ -like "*ppro*" } | Select-Object -First 1
+          
+          if ($aeEnvPath) {
+            echo "Found AE .env at: $aeEnvPath"
+            Copy-Item "build\mac\$aeEnvPath" "build\mac\com.sync.extension.ae.panel\.env" -Force
+            echo "Copied .env to AE macOS directory"
+          }
+          
+          if ($ppEnvPath) {
+            echo "Found Premiere .env at: $ppEnvPath"
+            Copy-Item "build\mac\$ppEnvPath" "build\mac\com.sync.extension.ppro.panel\.env" -Force
+            echo "Copied .env to Premiere macOS directory"
+          }
+          
+          # Verify .env files are now present
+          echo "Final verification:"
+          echo "AE macOS .env exists: $(Test-Path "build\mac\com.sync.extension.ae.panel\.env")"
+          echo "Premiere macOS .env exists: $(Test-Path "build\mac\com.sync.extension.ppro.panel\.env")"
 
       - name: Fetch ZXPSignCmd
         shell: pwsh
