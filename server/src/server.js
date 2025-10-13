@@ -425,7 +425,7 @@ app.use((req, res, next) => {
       try { tlog('request:timeout', req.method, req.path); } catch(_){}
       res.status(408).json({ error: 'Request timeout' });
     }
-  }, 30000); // 30 second timeout
+  }, 180000); // 3 minute timeout (increased for Premiere Pro jobs)
   
   res.on('finish', () => clearTimeout(timeout));
   res.on('close', () => clearTimeout(timeout));
@@ -1351,7 +1351,8 @@ async function createGeneration(job){
   const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
   
   // Add timeout protection to prevent hanging
-  const timeoutMs = 60000; // 60 second timeout
+  // Premiere Pro jobs may take longer due to different export pipeline
+  const timeoutMs = 180000; // 3 minute timeout (increased from 60s)
   const timeoutPromise = new Promise((_, reject) => 
     setTimeout(() => reject(new Error('Generation timeout')), timeoutMs)
   );

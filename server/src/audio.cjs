@@ -227,33 +227,14 @@ async function convertAiffToMp3(srcPath, destPath){
   tlog('convertAiffToMp3 start', srcPath, '->', destPath||'(auto)');
   const finalPath = destPath || srcPath.replace(/\.[^.]+$/, '.mp3');
   
-  // Load lamejs for MP3 encoding
+  // Load lamejs for MP3 encoding (using fixed version with dynamic import)
   let lamejs;
   try {
-    // Load MPEGMode and make it global (required by Mp3Encoder)
-    const MPEGMode = require('lamejs/src/js/MPEGMode.js');
-    global.MPEGMode = MPEGMode;
-    tlog('MPEGMode loaded and made global');
-    
-    // Load other required dependencies
-    global.Lame = require('lamejs/src/js/Lame.js');
-    global.BitStream = require('lamejs/src/js/BitStream.js');
-    global.Presets = require('lamejs/src/js/Presets.js');
-    global.GainAnalysis = require('lamejs/src/js/GainAnalysis.js');
-    global.QuantizePVT = require('lamejs/src/js/QuantizePVT.js');
-    global.Quantize = require('lamejs/src/js/Quantize.js');
-    global.Takehiro = require('lamejs/src/js/Takehiro.js');
-    global.Reservoir = require('lamejs/src/js/Reservoir.js');
-    global.Version = require('lamejs/src/js/Version.js');
-    global.VBRTag = require('lamejs/src/js/VBRTag.js');
-    global.Encoder = require('lamejs/src/js/Encoder.js');
-    global.common = require('lamejs/src/js/common.js');
-    
-    lamejs = require('lamejs');
-    tlog('lamejs loaded successfully');
+    lamejs = await import('@breezystack/lamejs');
+    tlog('@breezystack/lamejs loaded successfully');
   } catch(e) {
-    tlog('Failed to load lamejs:', e.message);
-    throw new Error('MP3 encoding requires lamejs dependency: ' + e.message);
+    tlog('Failed to load @breezystack/lamejs:', e.message);
+    throw new Error('MP3 encoding requires @breezystack/lamejs dependency: ' + e.message);
   }
   
   // Parse AIFF header to get audio metadata
