@@ -283,42 +283,26 @@
                       return;
                     }
                     
-                    updateDebugStatus('Spawning: ' + nodePath + ' ' + serverPath);
-                    
-                    // Use exec with full command - Windows compatible
-                    var exec = require('child_process').exec;
-                    var cmd;
-                    if (isWindows) {
-                      // Fix Windows path separators and quoting
-                      var serverDir = extPath.replace(/\//g, '\\') + '\\server';
-                      cmd = 'cd /d "' + serverDir + '" && "' + nodePath + '" "' + serverPath + '"';
-                    } else {
-                      cmd = 'cd "' + extPath + '/server" && "' + nodePath + '" "' + serverPath + '"';
-                    }
-                    updateDebugStatus('Exec command: ' + cmd);
-                    
-                    var child = exec(cmd, {
+                    updateDebugStatus('Spawning (detached, stdio ignored): ' + nodePath + ' ' + serverPath);
+
+                    // Fully detached spawn with stdio ignored to avoid broken pipe (EPIPE) issues
+                    var spawn = require('child_process').spawn;
+                    var child = spawn(nodePath, [serverPath], {
+                      cwd: extPath + '/server',
                       detached: true,
-                      stdio: ['ignore', 'pipe', 'pipe']
+                      stdio: 'ignore'
                     });
-                    
-                    // Log any errors from the child process
-                    child.stderr.on('data', function(data) {
-                      updateDebugStatus('Server stderr: ' + data.toString());
-                    });
-                    
-                    child.stdout.on('data', function(data) {
-                      updateDebugStatus('Server stdout: ' + data.toString());
-                    });
-                    
+
+                    // Do not attach stdout/stderr listeners when stdio is ignored
                     child.on('error', function(err) {
                       updateDebugStatus('Server spawn error: ' + err.message);
                     });
-                    
+
+                    // We won't get exit events when fully detached on some platforms, but keep for completeness
                     child.on('exit', function(code, signal) {
                       updateDebugStatus('Server exited with code: ' + code + ', signal: ' + signal);
                     });
-                    
+
                     child.unref();
                     serverStarted = true;
                     updateDebugStatus('Server spawned successfully');

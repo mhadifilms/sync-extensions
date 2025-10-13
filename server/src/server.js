@@ -18,6 +18,19 @@ const { convertAudio } = require('./audio.cjs');
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+// ROOT CAUSE FIX: Don't write to stdout/stderr when spawned as detached process
+// The CEP panel spawns us with detached:true and pipes stdout/stderr, but stops reading them
+// This causes EPIPE errors when we try to console.log. Solution: disable console output entirely.
+const isSpawnedByCEP = process.stdout.isTTY === false && process.stderr.isTTY === false;
+
+if (isSpawnedByCEP) {
+  // Redirect all console output to null when spawned by CEP
+  console.log = () => {};
+  console.error = () => {};
+  console.warn = () => {};
+  console.info = () => {};
+}
+
 // Load .env from project root (one level up from server directory)
 const envPath = path.join(process.cwd(), '..', '.env');
 console.log('Looking for .env at:', envPath);
@@ -1583,11 +1596,21 @@ async function safeExists(p){
   }
 }
 
-function log(){ try{ console.log.apply(console, arguments);}catch(_){} }
+function log(){ 
+  // Console output disabled when spawned by CEP to prevent EPIPE crashes
+  // Logs are still available via /logs endpoint
+}
 
 // Simple in-memory log buffer for panel debugging
 const LOGS = [];
-function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); LOGS.push(new Date().toISOString()+" "+msg); if (LOGS.length>500) LOGS.shift(); try{ console.log.apply(console, arguments);}catch(e){ /* Ignore EPIPE and other console errors to prevent crashes */ } }
+function slog(){ 
+  const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); 
+  LOGS.push(new Date().toISOString()+" "+msg); 
+  if (LOGS.length>500) LOGS.shift(); 
+  
+  // Console output disabled when spawned by CEP to prevent EPIPE crashes
+  // Logs are still available via /logs endpoint
+}
 app.get('/logs', (_req,res)=>{ res.json({ ok:true, logs: LOGS.slice(-200) }); });
 // Keep only the slog + LOGS; public /logs is declared above
 
