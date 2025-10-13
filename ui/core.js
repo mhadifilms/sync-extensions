@@ -19,14 +19,35 @@
       window.uploadedVideoUrl = uploadedVideoUrl;
       window.uploadedAudioUrl = uploadedAudioUrl;
       
+      // Timeout wrapper for fetch requests to prevent hanging
+      async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          return response;
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+          }
+          throw error;
+        }
+      }
+      
       // Per-install auth token for local server
       let __authToken = '';
       async function ensureAuthToken(){
         if (__authToken) return __authToken;
         try{
-          const r = await fetch('http://127.0.0.1:3000/auth/token', {
+          const r = await fetchWithTimeout('http://127.0.0.1:3000/auth/token', {
             headers: { 'X-CEP-Panel': 'sync' }
-          });
+          }, 5000); // 5 second timeout
           const j = await r.json().catch(()=>null);
           if (r.ok && j && j.token){ __authToken = j.token; }
         }catch(_){ }
@@ -187,7 +208,7 @@
       let __pickerBusy = false;
       
       try {
-        fetch('http://127.0.0.1:3000/debug', {
+        fetchWithTimeout('http://127.0.0.1:3000/debug', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -195,9 +216,9 @@
             hostConfig: window.HOST_CONFIG,
             timestamp: Date.now()
           })
-        }).then(r => {
+        }, 3000).then(r => {
           // Debug: fetch response
-          fetch('http://127.0.0.1:3000/debug', {
+          fetchWithTimeout('http://127.0.0.1:3000/debug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -205,29 +226,29 @@
               status: r.status,
               ok: r.ok
             })
-          }).catch(() => {});
+          }, 3000).catch(() => {});
         }).catch(e => {
           // Debug: fetch error
-          fetch('http://127.0.0.1:3000/debug', {
+          fetchWithTimeout('http://127.0.0.1:3000/debug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               type: 'ui_loaded_error', 
               error: String(e.message || e)
             })
-          }).catch(() => {});
+          }, 3000).catch(() => {});
         });
       } catch(e) {
         // Debug: try-catch error
         try {
-          fetch('http://127.0.0.1:3000/debug', {
+          fetchWithTimeout('http://127.0.0.1:3000/debug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               type: 'ui_loaded_try_catch_error', 
               error: String(e.message || e)
             })
-          }).catch(() => {});
+          }, 3000).catch(() => {});
         } catch(_) {}
       }
       async function openFileDialog(kind) {
@@ -239,7 +260,7 @@
           
           // Debug logging
           try {
-            fetch('http://127.0.0.1:3000/debug', {
+            fetchWithTimeout('http://127.0.0.1:3000/debug', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
@@ -247,7 +268,7 @@
                 kind: k,
                 hostConfig: window.HOST_CONFIG
               })
-            }).catch(() => {});
+            }, 3000).catch(() => {});
           } catch(_) {}
           // Ensure only current host script is loaded before invoking
           try {
@@ -265,7 +286,7 @@
               cs.evalScript(`${fn}(\"${payload}\")`, function(r){
                 // Debug logging
                 try {
-                    fetch('http://127.0.0.1:3000/debug', {
+                    fetchWithTimeout('http://127.0.0.1:3000/debug', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ 
@@ -277,7 +298,7 @@
                         responsePreview: String(r).substring(0, 200),
                         hostConfig: window.HOST_CONFIG
                       })
-                    }).catch(() => {});
+                    }, 3000).catch(() => {});
                 } catch(_) {}
                 
                 try { 
@@ -294,7 +315,7 @@
                 } catch(e){ 
                   // Debug JSON parse error
                   try {
-                    fetch('http://127.0.0.1:3000/debug', {
+                    fetchWithTimeout('http://127.0.0.1:3000/debug', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -304,7 +325,7 @@
                         function: fn,
                         hostConfig: window.HOST_CONFIG
                       })
-                    }).catch(() => {});
+                    }, 3000).catch(() => {});
                   } catch(_){ }
                   
                   // If JSON parsing failed but we got a string that looks like a path, use it
@@ -370,7 +391,10 @@
       async function waitForHealth(maxAttempts = 20, delayMs = 250, expectedToken) {
         for (let i = 0; i < maxAttempts; i++) {
           try {
-            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/health`, { headers: { 'X-CEP-Panel': 'sync' }, cache: 'no-store' });
+            const resp = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/health`, { 
+              headers: { 'X-CEP-Panel': 'sync' }, 
+              cache: 'no-store' 
+            }, 5000); // 5 second timeout per attempt
             if (resp.ok) return true;
           } catch (e) {
             // ignore until attempts exhausted

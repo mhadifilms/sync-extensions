@@ -1,3 +1,24 @@
+      // Timeout wrapper for fetch requests to prevent hanging
+      async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          return response;
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+          }
+          throw error;
+        }
+      }
+
       async function updateHistory() {
         const historyList = document.getElementById('historyList');
         if (!historyList) return;
@@ -17,7 +38,7 @@
         try {
           let healthy = false;
           try { 
-            const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); 
+            const r = await fetchWithTimeout('http://127.0.0.1:3000/health', { cache:'no-store' }, 5000); 
             healthy = !!(r && r.ok); 
           } catch(_){ 
             healthy = false; 
@@ -94,8 +115,11 @@
       
       // Auto-refresh history every 3 seconds to catch status changes
       let historyRefreshInterval = null;
+      let historyRefreshTimeout = null;
+      
       function startHistoryAutoRefresh() {
         if (historyRefreshInterval) return; // Already running
+        
         historyRefreshInterval = setInterval(() => {
           try { 
             updateHistory(); 
@@ -103,12 +127,21 @@
             if (typeof loadJobsFromServer === 'function') loadJobsFromServer(); 
           } catch(_){ }
         }, 3000); // 3 seconds - industry standard polling interval
+        
+        // Auto-stop after 30 minutes to prevent memory leaks
+        historyRefreshTimeout = setTimeout(() => {
+          stopHistoryAutoRefresh();
+        }, 1800000); // 30 minutes
       }
       
       function stopHistoryAutoRefresh() {
         if (historyRefreshInterval) {
           clearInterval(historyRefreshInterval);
           historyRefreshInterval = null;
+        }
+        if (historyRefreshTimeout) {
+          clearTimeout(historyRefreshTimeout);
+          historyRefreshTimeout = null;
         }
       }
       

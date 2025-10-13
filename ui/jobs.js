@@ -102,7 +102,7 @@
             
             // Debug logging
             try {
-              fetch('http://127.0.0.1:3000/debug', {
+              fetchWithTimeout('http://127.0.0.1:3000/debug', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -110,7 +110,7 @@
                   jobData: jobData,
                   hostConfig: window.HOST_CONFIG
                 })
-              }).catch(() => {});
+              }, 3000).catch(() => {});
             } catch(_){ }
             
             const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(jobData), signal: currentFetchController.signal });
@@ -120,7 +120,7 @@
             
             // Debug logging
             try {
-              fetch('http://127.0.0.1:3000/debug', {
+              fetchWithTimeout('http://127.0.0.1:3000/debug', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -131,7 +131,7 @@
                   data: data,
                   hostConfig: window.HOST_CONFIG
                 })
-              }).catch(() => {});
+              }, 3000).catch(() => {});
             } catch(_){ }
             
             if (!resp.ok) { throw new Error(data && data.error ? data.error : (text || 'job creation failed')); }
@@ -157,13 +157,17 @@
         })();
       }
 
+      // Track active polling intervals for cleanup
+      const activePollingIntervals = new Set();
+      
       function pollJobStatus(jobId) {
         const interval = setInterval(() => {
-          fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() })
+          fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() }, 10000)
           .then(response => response.json())
           .then(data => {
             if (data.status === 'completed') {
               clearInterval(interval);
+              activePollingIntervals.delete(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
               saveJobsLocal();
               updateHistory();
@@ -178,6 +182,7 @@
               showPostLipsyncActions(data);
             } else if (data.status === 'failed') {
               clearInterval(interval);
+              activePollingIntervals.delete(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
               saveJobsLocal();
               updateHistory();
@@ -190,8 +195,19 @@
           .catch(error => {
             console.error('Error polling job:', error);
             clearInterval(interval);
+            activePollingIntervals.delete(interval);
           });
         }, 2000);
+        
+        activePollingIntervals.add(interval);
+        
+        // Auto-cleanup after 10 minutes to prevent memory leaks
+        setTimeout(() => {
+          if (activePollingIntervals.has(interval)) {
+            clearInterval(interval);
+            activePollingIntervals.delete(interval);
+          }
+        }, 600000); // 10 minutes
       }
 
       function clearSelection() {
@@ -552,6 +568,27 @@
         }
       }
 
+      // Timeout wrapper for fetch requests to prevent hanging
+      async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          return response;
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+          }
+          throw error;
+        }
+      }
+
       async function loadJobsFromServer() {
         const historyList = document.getElementById('historyList');
         if (!historyList) return;
@@ -570,7 +607,7 @@
           // Check server health first
           let healthy = false;
           try { 
-            const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); 
+            const r = await fetchWithTimeout('http://127.0.0.1:3000/health', { cache:'no-store' }, 5000); 
             healthy = !!(r && r.ok); 
           } catch(_){ 
             healthy = false; 
@@ -585,7 +622,7 @@
           if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
           
           await ensureAuthToken();
-          const gen = await fetch(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });
+          const gen = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }, 15000).then(function(r){ return r.json(); }).catch(function(){ return null; });
           
           if (Array.isArray(gen)) {
             jobs = gen.map(function(g){

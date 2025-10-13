@@ -339,8 +339,38 @@ jobs:
           # Move panel contents to ZXP root (not in subdirectory)
           Copy-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ae.panel\*" "build\zxp-ae-win\" -Recurse -Force
           Copy-Item "$env:GITHUB_WORKSPACE\build\win\com.sync.extension.ppro.panel\*" "build\zxp-ppro-win\" -Recurse -Force
+          
+          # Debug macOS source directories
+          echo "Checking macOS source directories..."
+          echo "AE macOS source exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel")"
+          echo "Premiere macOS source exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel")"
+          echo "AE macOS .env exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel\.env")"
+          echo "Premiere macOS .env exists: $(Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel\.env")"
+          
+          # List contents of macOS directories
+          echo "Contents of AE macOS directory:"
+          Get-ChildItem "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel" | Select-Object Name, Length
+          echo "Contents of Premiere macOS directory:"
+          Get-ChildItem "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel" | Select-Object Name, Length
+          
+          # Copy macOS packages with explicit .env handling
           Copy-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel\*" "build\zxp-ae-mac\" -Recurse -Force
           Copy-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel\*" "build\zxp-ppro-mac\" -Recurse -Force
+          
+          # Ensure .env files are copied (explicit copy as backup)
+          if (Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel\.env") {
+            Copy-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ae.panel\.env" "build\zxp-ae-mac\.env" -Force
+            echo "Explicitly copied .env to AE macOS ZXP"
+          } else {
+            echo "WARNING: .env not found in AE macOS source"
+          }
+          
+          if (Test-Path "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel\.env") {
+            Copy-Item "$env:GITHUB_WORKSPACE\build\mac\com.sync.extension.ppro.panel\.env" "build\zxp-ppro-mac\.env" -Force
+            echo "Explicitly copied .env to Premiere macOS ZXP"
+          } else {
+            echo "WARNING: .env not found in Premiere macOS source"
+          }
           
           # Create mimetype file (must be first file in ZXP)
           $mimetypeContent = "application/vnd.adobe.air-ucf-package+zip"
@@ -476,6 +506,22 @@ jobs:
             echo "$zxp verified successfully"
           }
           
+          # Generate checksums for trust verification
+          echo "Generating checksums for trust verification..."
+          $checksums = @()
+          foreach ($zxp in $zxps) {
+            $filePath = "$env:GITHUB_WORKSPACE\$zxp"
+            if (Test-Path $filePath) {
+              $hash = Get-FileHash $filePath -Algorithm SHA256
+              $checksum = "$($hash.Hash)  $zxp"
+              $checksums += $checksum
+              echo "SHA256: $checksum"
+            }
+          }
+          
+          # Write checksums to file
+          $checksums | Out-File -FilePath "$env:GITHUB_WORKSPACE\checksums.txt" -Encoding UTF8
+          echo "Checksums written to checksums.txt"
           
           # Note: Quarantine attributes are added by macOS when files are downloaded
           # Users need to remove them manually: xattr -d com.apple.provenance *.zxp
@@ -491,6 +537,7 @@ jobs:
             sync-extension-premiere-windows-signed.zxp
             sync-extension-ae-mac-signed.zxp
             sync-extension-premiere-mac-signed.zxp
+            checksums.txt
 
       - name: Get tag message
         if: startsWith(github.ref, 'refs/tags/')
@@ -519,11 +566,14 @@ jobs:
             
             **Security & Trust:**
             - All packages are digitally signed and verified
+            - SHA256 checksums are provided in `checksums.txt` for integrity verification
+            - Verify checksums: `sha256sum -c checksums.txt` (Linux/macOS) or `certutil -hashfile <file> SHA256` (Windows)
           files: |
             sync-extension-ae-windows-signed.zxp
             sync-extension-premiere-windows-signed.zxp
             sync-extension-ae-mac-signed.zxp
             sync-extension-premiere-mac-signed.zxp
+            checksums.txt
           draft: false
           prerelease: false
           generate_release_notes: true

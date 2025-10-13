@@ -19,7 +19,11 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Load .env from project root (one level up from server directory)
-dotenv.config({ path: path.join(process.cwd(), '..', '.env') });
+const envPath = path.join(process.cwd(), '..', '.env');
+console.log('Looking for .env at:', envPath);
+console.log('Current working directory:', process.cwd());
+console.log('.env file exists:', require('fs').existsSync(envPath));
+dotenv.config({ path: envPath });
 
 const app = express();
 app.disable('x-powered-by');
@@ -98,6 +102,63 @@ const EXT_ROOT = path.resolve(__dirname, '..', '..');
 const EXT_FOLDER = path.basename(EXT_ROOT);
 const APP_ID = EXT_FOLDER.indexOf('.ae.') !== -1 ? 'ae' : (EXT_FOLDER.indexOf('.ppro.') !== -1 ? 'premiere' : 'unknown');
 const MANIFEST_PATH = path.join(EXT_ROOT, 'CSXS', 'manifest.xml');
+
+// Detect extension installation location (user vs system-wide)
+function detectExtensionLocation() {
+  try {
+    // Method 1: Check if we're in a system-wide location
+    if (process.platform === 'darwin') {
+      if (EXT_ROOT.startsWith('/Library/Application Support/Adobe/CEP/extensions/')) {
+        return 'system';
+      }
+    } else if (process.platform === 'win32') {
+      if (EXT_ROOT.includes('Program Files') && EXT_ROOT.includes('Adobe\\CEP\\extensions')) {
+        return 'system';
+      }
+    }
+    
+    // Method 2: Check if we're in a user location
+    const home = os.homedir();
+    if (process.platform === 'darwin') {
+      if (EXT_ROOT.startsWith(path.join(home, 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions'))) {
+        return 'user';
+      }
+    } else if (process.platform === 'win32') {
+      if (EXT_ROOT.includes(path.join(home, 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions'))) {
+        return 'user';
+      }
+    }
+    
+    // Method 3: Check if extension exists in both locations to determine which one is active
+    let userPath, systemPath;
+    
+    if (process.platform === 'darwin') {
+      userPath = path.join(home, 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', EXT_FOLDER);
+      systemPath = path.join('/Library', 'Application Support', 'Adobe', 'CEP', 'extensions', EXT_FOLDER);
+    } else if (process.platform === 'win32') {
+      userPath = path.join(home, 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', EXT_FOLDER);
+      systemPath = path.join('C:', 'Program Files', 'Adobe', 'CEP', 'extensions', EXT_FOLDER);
+    }
+    
+    const userExists = fs.existsSync(userPath);
+    const systemExists = fs.existsSync(systemPath);
+    
+    if (userExists && !systemExists) return 'user';
+    if (systemExists && !userExists) return 'system';
+    if (userExists && systemExists) {
+      // Both exist, prefer user installation
+      return 'user';
+    }
+    
+    // Default to user location
+    return 'user';
+  } catch (e) {
+    // Default to user location on error
+    return 'user';
+  }
+}
+
+const EXTENSION_LOCATION = detectExtensionLocation();
 const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mhadifilms/sync-extensions';
 const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
 const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
@@ -129,63 +190,92 @@ const DEBUG_FLAG_FILE = path.join(DIRS.logs, 'debug.enabled');
 let DEBUG = false;
 try { DEBUG = fs.existsSync(DEBUG_FLAG_FILE); } catch(_){ DEBUG = false; }
 const DEBUG_LOG = path.join(DIRS.logs, (APP_ID === 'premiere') ? 'sync_ppro_debug.log' : (APP_ID === 'ae') ? 'sync_ae_debug.log' : 'sync_server_debug.log');
-function tlog(){
+// Async logging to prevent blocking the event loop
+async function tlog(){
   if (!DEBUG) return;
-  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+  try { 
+    const logLine = `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n";
+    await fs.promises.appendFile(DEBUG_LOG, logLine).catch(() => {}); // Silent fail to prevent recursion
+  } catch(e){ 
+    // Silent catch to prevent infinite recursion on logging errors
+  }
+}
+
+// Synchronous version for critical startup operations only
+function tlogSync(){
+  if (!DEBUG) return;
+  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] [server] ` + Array.from(arguments).map(a=>String(a)).join(' ') + "\n"); } catch(e){}
 }
 
 // Detect if we're being spawned by UI auto-start (stdout/stderr captured)
 const isSpawnedByUI = process.stdout.isTTY === false && process.stderr.isTTY === false;
 
-// Cleanup functions for directory management
-function cleanupOldFiles(dirPath, maxAgeMs = 24 * 60 * 60 * 1000) {
+// Async cleanup functions to prevent blocking the event loop
+async function cleanupOldFiles(dirPath, maxAgeMs = 24 * 60 * 60 * 1000) {
   try {
-    if (!fs.existsSync(dirPath)) return;
-    const files = fs.readdirSync(dirPath);
+    // Check if directory exists asynchronously
+    try {
+      await fs.promises.access(dirPath);
+    } catch {
+      return; // Directory doesn't exist
+    }
+    
+    const files = await fs.promises.readdir(dirPath);
     const now = Date.now();
     let cleanedCount = 0;
     
-    for (const file of files) {
-      const filePath = path.join(dirPath, file);
-      try {
-        const stats = fs.statSync(filePath);
-        if (stats.isFile() && (now - stats.mtime.getTime()) > maxAgeMs) {
-          fs.unlinkSync(filePath);
-          cleanedCount++;
-          try { tlog('cleanup:removed', filePath, 'age=', Math.round((now - stats.mtime.getTime()) / 1000 / 60), 'min'); } catch(_){}
+    // Process files in batches to avoid blocking
+    const batchSize = 10;
+    for (let i = 0; i < files.length; i += batchSize) {
+      const batch = files.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(async (file) => {
+        const filePath = path.join(dirPath, file);
+        try {
+          const stats = await fs.promises.stat(filePath);
+          if (stats.isFile() && (now - stats.mtime.getTime()) > maxAgeMs) {
+            await fs.promises.unlink(filePath);
+            cleanedCount++;
+            await tlog('cleanup:removed', filePath, 'age=', Math.round((now - stats.mtime.getTime()) / 1000 / 60), 'min');
+          }
+        } catch(e) {
+          await tlog('cleanup:error', filePath, e && e.message ? e.message : String(e));
         }
-      } catch(e) {
-        try { tlog('cleanup:error', filePath, e && e.message ? e.message : String(e)); } catch(_){}
+      }));
+      
+      // Yield control between batches
+      if (i + batchSize < files.length) {
+        await new Promise(resolve => setImmediate(resolve));
       }
     }
     
     if (cleanedCount > 0) {
-      try { tlog('cleanup:completed', dirPath, 'removed=', cleanedCount, 'files'); } catch(_){}
+      await tlog('cleanup:completed', dirPath, 'removed=', cleanedCount, 'files');
     }
   } catch(e) {
-    try { tlog('cleanup:failed', dirPath, e && e.message ? e.message : String(e)); } catch(_){}
+    await tlog('cleanup:failed', dirPath, e && e.message ? e.message : String(e));
   }
 }
 
 // Schedule cleanup tasks
 function scheduleCleanup() {
   // Cleanup uploads directory every 24 hours (remove files older than 24 hours)
-  setInterval(() => {
-    cleanupOldFiles(DIRS.uploads, 24 * 60 * 60 * 1000); // 24 hours
+  setInterval(async () => {
+    await cleanupOldFiles(DIRS.uploads, 24 * 60 * 60 * 1000); // 24 hours
   }, 24 * 60 * 60 * 1000); // Run every 24 hours
   
   // Cleanup cache directory every 6 hours (remove files older than 6 hours)
-  setInterval(() => {
-    cleanupOldFiles(DIRS.cache, 6 * 60 * 60 * 1000); // 6 hours
+  setInterval(async () => {
+    await cleanupOldFiles(DIRS.cache, 6 * 60 * 60 * 1000); // 6 hours
   }, 6 * 60 * 60 * 1000); // Run every 6 hours
   
   // Run initial cleanup after 1 minute
-  setTimeout(() => {
-    cleanupOldFiles(DIRS.uploads, 24 * 60 * 60 * 1000);
-    cleanupOldFiles(DIRS.cache, 6 * 60 * 60 * 1000);
+  setTimeout(async () => {
+    await cleanupOldFiles(DIRS.uploads, 24 * 60 * 60 * 1000);
+    await cleanupOldFiles(DIRS.cache, 6 * 60 * 60 * 1000);
   }, 60 * 1000);
   
-  try { tlog('cleanup:scheduled', 'uploads=24h', 'cache=6h'); } catch(_){}
+  tlogSync('cleanup:scheduled', 'uploads=24h', 'cache=6h');
 }
 
 function ghHeaders(extra){
@@ -327,6 +417,21 @@ async function getLatestReleaseInfo(){
 }
 
 app.use(express.json({ limit: '50mb' }));
+
+// Request timeout middleware to prevent hanging requests
+app.use((req, res, next) => {
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) {
+      try { tlog('request:timeout', req.method, req.path); } catch(_){}
+      res.status(408).json({ error: 'Request timeout' });
+    }
+  }, 30000); // 30 second timeout
+  
+  res.on('finish', () => clearTimeout(timeout));
+  res.on('close', () => clearTimeout(timeout));
+  next();
+});
+
 // Restrict CORS to local panel (file:// → Origin null) and localhost
 // Relaxed CORS: allow any origin on localhost-only service
 app.use(cors({
@@ -348,18 +453,29 @@ const STATE_DIR = DIRS.state;
 if (!fs.existsSync(STATE_DIR)) { try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch(_) {} }
 const jobsFile = path.join(STATE_DIR, 'jobs.json');
 const tokenFile = path.join(STATE_DIR, 'auth_token');
-function getOrCreateToken(){
+async function getOrCreateToken(){
   try{
-    if (fs.existsSync(tokenFile)){
-      const t = fs.readFileSync(tokenFile, 'utf8').trim();
-      if (t.length > 0) return t;
+    try {
+      const t = await fs.promises.readFile(tokenFile, 'utf8');
+      const trimmed = t.trim();
+      if (trimmed.length > 0) return trimmed;
+    } catch {
+      // File doesn't exist or can't be read
     }
   }catch(_){ }
   const token = crypto.randomBytes(24).toString('hex');
-  try { fs.writeFileSync(tokenFile, token, { mode: 0o600 }); } catch(_) {}
+  try { await fs.promises.writeFile(tokenFile, token, { mode: 0o600 }); } catch(_) {}
   return token;
 }
-const AUTH_TOKEN = getOrCreateToken();
+
+// Initialize token asynchronously
+let AUTH_TOKEN = '';
+getOrCreateToken().then(token => {
+  AUTH_TOKEN = token;
+}).catch(() => {
+  // Fallback to random token if file operations fail
+  AUTH_TOKEN = crypto.randomBytes(24).toString('hex');
+});
 
 function loadJobs(){
   // Cloud-first: do not load persisted jobs
@@ -639,6 +755,13 @@ const R2_BUCKET      = process.env.R2_BUCKET || 'service-based-business';
 const R2_PREFIX      = process.env.R2_PREFIX || 'sync-extension/';
 
 // Validate R2 credentials
+console.log('R2 configuration check:');
+console.log('R2_ENDPOINT_URL:', R2_ENDPOINT_URL ? 'SET' : 'NOT SET');
+console.log('R2_ACCESS_KEY:', R2_ACCESS_KEY ? 'SET' : 'NOT SET');
+console.log('R2_SECRET_KEY:', R2_SECRET_KEY ? 'SET' : 'NOT SET');
+console.log('R2_BUCKET:', R2_BUCKET);
+console.log('R2_PREFIX:', R2_PREFIX);
+
 if (!R2_ACCESS_KEY || !R2_SECRET_KEY) {
   console.error('R2 credentials not configured. R2 uploads will be disabled.');
   console.error('Set R2_ACCESS_KEY and R2_SECRET_KEY environment variables.');
@@ -799,98 +922,74 @@ app.post('/update/apply', async (req,res)=>{
     try { tlog('update:extracted:dir', extractedDir); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     if (!isSpawnedByUI) console.log('Using extracted directory:', extractedDir);
     
-    // Look for install script in the extracted directory (disabled; always use manual copy)
-    const updateScript = path.join(extractedDir, 'scripts', isWindows ? 'install.ps1' : 'install.sh');
-    if (false && fs.existsSync(updateScript)) {
-      // Detect which extensions are currently installed
-      let aeDestDir, pproDestDir;
-      
-      if (isWindows) {
-        aeDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae');
-        pproDestDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro');
-      } else {
-        aeDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ae');
-        pproDestDir = path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'com.sync.extension.ppro');
+    // Manual copy: copy extension files directly to current installation location
+    // This works for both user and system-wide installations by copying over the running extension
+    try { tlog('update:manual:copy:start', 'target=', EXT_ROOT); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+    
+    // Copy extensions (handle both ZXP and ZIP formats)
+    if (isZxp) {
+      // ZXP format: extracted root contains extension content (CSXS, ui, server, etc.)
+      try { tlog('update:copy:zxp:target', 'dest=', EXT_ROOT); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+      let items;
+      try {
+        items = fs.readdirSync(extractedDir).filter(name => name !== 'META-INF' && name !== 'update.zip');
+      } catch(e) {
+        throw new Error('Failed to read ZXP extracted directory: ' + e.message);
       }
-      
-      
-      // Do not remove existing extensions; copy over into destination to avoid locking issues
-      try { tlog('update:dest', 'ae=', aeDestDir, 'ppro=', pproDestDir); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-      try { fs.mkdirSync(aeDestDir, { recursive: true }); } catch(_){ }
-      try { fs.mkdirSync(pproDestDir, { recursive: true }); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-      
-      // Copy extensions (handle both ZXP and ZIP formats)
-      if (isZxp) {
-        // ZXP format: extracted root contains extension content (CSXS, ui, server, etc.)
-        const targetApp = (APP_ID === 'ae' || APP_ID === 'premiere') ? APP_ID : 'premiere';
-        const destRoot = targetApp === 'ae' ? aeDestDir : pproDestDir;
-        try { tlog('update:copy:zxp:target', targetApp, 'dest=', destRoot); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-        try { if (!fs.existsSync(destRoot)) fs.mkdirSync(destRoot, { recursive: true }); } catch(_){ }
-        let items;
-        try {
-          items = fs.readdirSync(extractedDir).filter(name => name !== 'META-INF' && name !== 'update.zip');
-        } catch(e) {
-          throw new Error('Failed to read ZXP extracted directory: ' + e.message);
-        }
-        for (const name of items){
-          const srcPath = path.join(extractedDir, name);
-          if (isWindows) {
-            await runRobocopy(extractedDir, destRoot, name);
-          } else {
-            await exec(`cp -R "${srcPath}" "${destRoot}/"`);
-          }
-        }
-        try { tlog('update:copy:zxp:ok', 'items=', String(items.length)); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-      } else {
-        // ZIP format: extensions are in extensions/ subdirectory
-        const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
-        if (fs.existsSync(aeSrcDir)) {
-          if (isWindows) {
-            // Windows: Use robust robocopy wrapper
-            await runRobocopy(aeSrcDir, aeDestDir);
-            await runRobocopy(path.join(extractedDir, 'ui'), path.join(aeDestDir, 'ui'));
-            await runRobocopy(path.join(extractedDir, 'server'), path.join(aeDestDir, 'server'));
-            await runRobocopy(path.join(extractedDir, 'icons'), path.join(aeDestDir, 'icons'));
-            await runRobocopy(extractedDir, aeDestDir, 'index.html');
-            await runRobocopy(path.join(extractedDir, 'lib'), path.join(aeDestDir, 'lib'));
-          } else {
-            // macOS/Linux: Use cp
-            await exec(`cp -R "${aeSrcDir}"/* "${aeDestDir}/"`);
-            await exec(`cp -R "${extractedDir}"/ui "${aeDestDir}/"`);
-            await exec(`cp -R "${extractedDir}"/server "${aeDestDir}/"`);
-            await exec(`cp -R "${extractedDir}"/icons "${aeDestDir}/"`);
-            await exec(`cp "${extractedDir}"/index.html "${aeDestDir}/"`);
-            await exec(`cp "${extractedDir}"/lib "${aeDestDir}/" -R`);
-          }
-          // EPR files are Premiere-only, skip for AE
-        }
-        
-        // Copy Premiere extension
-        const pproSrcDir = path.join(extractedDir, 'extensions', 'premiere-extension');
-        if (fs.existsSync(pproSrcDir)) {
-          if (isWindows) {
-            await runRobocopy(pproSrcDir, pproDestDir);
-            await runRobocopy(path.join(extractedDir, 'ui'), path.join(pproDestDir, 'ui'));
-            await runRobocopy(path.join(extractedDir, 'server'), path.join(pproDestDir, 'server'));
-            await runRobocopy(path.join(extractedDir, 'icons'), path.join(pproDestDir, 'icons'));
-            await runRobocopy(extractedDir, pproDestDir, 'index.html');
-            await runRobocopy(path.join(extractedDir, 'lib'), path.join(pproDestDir, 'lib'));
-            await runRobocopy(path.join(extractedDir, 'extensions', 'premiere-extension', 'epr'), path.join(pproDestDir, 'epr'));
-          } else {
-            // macOS/Linux: Use cp
-            await exec(`cp -R "${pproSrcDir}"/* "${pproDestDir}/"`);
-            await exec(`cp -R "${extractedDir}"/ui "${pproDestDir}/"`);
-            await exec(`cp -R "${extractedDir}"/server "${pproDestDir}/"`);
-            await exec(`cp -R "${extractedDir}"/icons "${pproDestDir}/"`);
-            await exec(`cp "${extractedDir}"/index.html "${pproDestDir}/"`);
-            await exec(`cp "${extractedDir}"/lib "${pproDestDir}/" -R`);
-            await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${pproDestDir}/" -R`);
-          }
+      for (const name of items){
+        const srcPath = path.join(extractedDir, name);
+        const destPath = path.join(EXT_ROOT, name);
+        if (isWindows) {
+          await runRobocopy(srcPath, destPath);
+        } else {
+          await exec(`cp -R "${srcPath}" "${destPath}"`);
         }
       }
+      try { tlog('update:copy:zxp:ok', 'items=', String(items.length)); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+    } else {
+      // ZIP format: extensions are in extensions/ subdirectory
+      const aeSrcDir = path.join(extractedDir, 'extensions', 'ae-extension');
+      const pproSrcDir = path.join(extractedDir, 'extensions', 'premiere-extension');
       
-      // Node modules are now bundled in the package; no runtime installation
+      // Copy the appropriate extension based on current APP_ID
+      if (APP_ID === 'ae' && fs.existsSync(aeSrcDir)) {
+        if (isWindows) {
+          await runRobocopy(aeSrcDir, EXT_ROOT);
+          await runRobocopy(path.join(extractedDir, 'ui'), path.join(EXT_ROOT, 'ui'));
+          await runRobocopy(path.join(extractedDir, 'server'), path.join(EXT_ROOT, 'server'));
+          await runRobocopy(path.join(extractedDir, 'icons'), path.join(EXT_ROOT, 'icons'));
+          await runRobocopy(extractedDir, EXT_ROOT, 'index.html');
+          await runRobocopy(path.join(extractedDir, 'lib'), path.join(EXT_ROOT, 'lib'));
+        } else {
+          await exec(`cp -R "${aeSrcDir}"/* "${EXT_ROOT}/"`);
+          await exec(`cp -R "${extractedDir}"/ui "${EXT_ROOT}/"`);
+          await exec(`cp -R "${extractedDir}"/server "${EXT_ROOT}/"`);
+          await exec(`cp -R "${extractedDir}"/icons "${EXT_ROOT}/"`);
+          await exec(`cp "${extractedDir}"/index.html "${EXT_ROOT}/"`);
+          await exec(`cp "${extractedDir}"/lib "${EXT_ROOT}/" -R`);
+        }
+      } else if (APP_ID === 'premiere' && fs.existsSync(pproSrcDir)) {
+        if (isWindows) {
+          await runRobocopy(pproSrcDir, EXT_ROOT);
+          await runRobocopy(path.join(extractedDir, 'ui'), path.join(EXT_ROOT, 'ui'));
+          await runRobocopy(path.join(extractedDir, 'server'), path.join(EXT_ROOT, 'server'));
+          await runRobocopy(path.join(extractedDir, 'icons'), path.join(EXT_ROOT, 'icons'));
+          await runRobocopy(extractedDir, EXT_ROOT, 'index.html');
+          await runRobocopy(path.join(extractedDir, 'lib'), path.join(EXT_ROOT, 'lib'));
+          await runRobocopy(path.join(extractedDir, 'extensions', 'premiere-extension', 'epr'), path.join(EXT_ROOT, 'epr'));
+        } else {
+          await exec(`cp -R "${pproSrcDir}"/* "${EXT_ROOT}/"`);
+          await exec(`cp -R "${extractedDir}"/ui "${EXT_ROOT}/"`);
+          await exec(`cp -R "${extractedDir}"/server "${EXT_ROOT}/"`);
+          await exec(`cp -R "${extractedDir}"/icons "${EXT_ROOT}/"`);
+          await exec(`cp "${extractedDir}"/index.html "${EXT_ROOT}/"`);
+          await exec(`cp "${extractedDir}"/lib "${EXT_ROOT}/" -R`);
+          await exec(`cp "${extractedDir}"/extensions/premiere-extension/epr "${EXT_ROOT}/" -R`);
+        }
+      }
     }
+    
+    try { tlog('update:manual:copy:complete'); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     
     // Cleanup
     try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch(_){}
@@ -941,7 +1040,26 @@ async function r2Upload(localPath){
   if (!r2Client) {
     throw new Error('R2 client not configured. Missing R2_ACCESS_KEY or R2_SECRET_KEY environment variables.');
   }
-  if (!fs.existsSync(localPath)) throw new Error('file not found: ' + localPath);
+  if (!(await safeExists(localPath))) throw new Error('file not found: ' + localPath);
+  
+  // Add timeout protection to prevent hanging on network issues
+  const timeoutMs = 120000; // 2 minute timeout for uploads
+  const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('R2 upload timeout')), timeoutMs)
+  );
+  
+  try {
+    return await Promise.race([
+      r2UploadInternal(localPath),
+      timeoutPromise
+    ]);
+  } catch(e) {
+    try { tlog('r2Upload:error', e && e.message ? e.message : String(e)); } catch(_){}
+    throw e;
+  }
+}
+
+async function r2UploadInternal(localPath){
   const base = path.basename(localPath);
   const key  = `${R2_PREFIX}uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}`;
   slog('[r2] put start', localPath, '→', `${R2_BUCKET}/${key}`);
@@ -999,10 +1117,10 @@ app.get('/jobs/:id', (req,res)=>{
   res.json(job);
 });
 
-function normalizePaths(obj){
+async function normalizePaths(obj){
   if (!obj) return obj;
-  if (obj.videoPath) obj.videoPath = resolveSafeLocalPath(obj.videoPath);
-  if (obj.audioPath) obj.audioPath = resolveSafeLocalPath(obj.audioPath);
+  if (obj.videoPath) obj.videoPath = await resolveSafeLocalPath(obj.videoPath);
+  if (obj.audioPath) obj.audioPath = await resolveSafeLocalPath(obj.audioPath);
   return obj;
 }
 
@@ -1017,10 +1135,10 @@ function normalizeOutputDir(p){
 app.post('/jobs', async (req, res) => {
   try{
     let { videoPath, audioPath, videoUrl, audioUrl, isTempVideo, isTempAudio, model, temperature, activeSpeakerOnly, detectObstructions, options = {}, apiKey, outputDir } = req.body || {};
-    ({ videoPath, audioPath } = normalizePaths({ videoPath, audioPath }));
+    ({ videoPath, audioPath } = await normalizePaths({ videoPath, audioPath }));
     // Auto-convert AIFF from AE to WAV so the rest of the pipeline can read it
     try { if (audioPath) { audioPath = await convertIfAiff(audioPath); } } catch(_){}
-    const vStat = safeStat(videoPath); const aStat = safeStat(audioPath);
+    const vStat = await safeStat(videoPath); const aStat = await safeStat(audioPath);
     const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
     slog('[jobs:create]', 'model=', model||'lipsync-2-pro', 'overLimit=', overLimit, 'v=', vStat&&vStat.size, 'a=', aStat&&aStat.size, 'r2=', true, 'bucket=', R2_BUCKET);
     
@@ -1029,7 +1147,9 @@ app.post('/jobs', async (req, res) => {
     }
     if (!videoUrl || !audioUrl){
       if (!videoPath || !audioPath) return res.status(400).json({ error: 'Video and audio required' });
-      if (!fs.existsSync(videoPath) || !fs.existsSync(audioPath)) return res.status(400).json({ error: 'Video or audio file not found' });
+      const videoExists = await safeExists(videoPath);
+      const audioExists = await safeExists(audioPath);
+      if (!videoExists || !audioExists) return res.status(400).json({ error: 'Video or audio file not found' });
     }
 
     const limit1GB = 1024*1024*1024;
@@ -1065,11 +1185,17 @@ app.post('/jobs', async (req, res) => {
       await createGeneration(job);
       // Cleanup temp inputs if present and uploaded
       try {
-        if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; }
-      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+        if (job.isTempVideo && job.videoPath && await safeExists(job.videoPath)) { 
+          await fs.promises.unlink(job.videoPath); 
+          job.videoPath = ''; 
+        }
+      } catch(e){ await tlog("silent catch:", e.message); }
       try {
-        if (job.isTempAudio && job.audioPath && fs.existsSync(job.audioPath)) { fs.unlinkSync(job.audioPath); job.audioPath = ''; }
-      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+        if (job.isTempAudio && job.audioPath && await safeExists(job.audioPath)) { 
+          await fs.promises.unlink(job.audioPath); 
+          job.audioPath = ''; 
+        }
+      } catch(e){ await tlog("silent catch:", e.message); }
       saveJobs();
       res.json(job);
       pollSyncJob(job);
@@ -1083,10 +1209,10 @@ app.post('/jobs', async (req, res) => {
   }catch(e){ slog('[jobs:create] error', e && e.message ? e.message : String(e)); res.status(500).json({ error: String(e?.message||e) }); }
 });
 
-app.get('/jobs/:id/download', (req,res)=>{
+app.get('/jobs/:id/download', async (req,res)=>{
   const job = jobs.find(j => String(j.id) === String(req.params.id));
   if (!job) return res.status(404).json({ error:'Job not found' });
-  if (!job.outputPath || !fs.existsSync(job.outputPath)) return res.status(404).json({ error:'Output not ready' });
+  if (!job.outputPath || !(await safeExists(job.outputPath))) return res.status(404).json({ error:'Output not ready' });
   try{
     const allowed = [DOCS_DEFAULT_DIR, TEMP_DEFAULT_DIR];
     if (job.outputDir && typeof job.outputDir === 'string') allowed.push(job.outputDir);
@@ -1111,16 +1237,20 @@ app.post('/jobs/:id/save', async (req,res)=>{
 
     // Enforce per-project when selected: if 'project', require targetDir; otherwise fallback to temp, not Documents
     const outDir = (location === 'documents') ? DOCS_DEFAULT_DIR : (targetDir || job.outputDir || TEMP_DEFAULT_DIR);
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    try {
+      await fs.promises.access(outDir);
+    } catch {
+      await fs.promises.mkdir(outDir, { recursive: true });
+    }
 
-    if (job.outputPath && fs.existsSync(job.outputPath) && path.dirname(job.outputPath) === outDir){
+    if (job.outputPath && await safeExists(job.outputPath) && path.dirname(job.outputPath) === outDir){
       return res.json({ ok:true, outputPath: job.outputPath });
     }
 
-    if (job.outputPath && fs.existsSync(job.outputPath)){
+    if (job.outputPath && await safeExists(job.outputPath)){
       const newPath = path.join(outDir, `${job.id}_output.mp4`);
-      try { fs.copyFileSync(job.outputPath, newPath); } catch(_){ }
-      try { if (path.dirname(job.outputPath) !== outDir) fs.unlinkSync(job.outputPath); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+      try { await fs.promises.copyFile(job.outputPath, newPath); } catch(_){ }
+      try { if (path.dirname(job.outputPath) !== outDir) await fs.promises.unlink(job.outputPath); } catch(e){ await tlog("silent catch:", e.message); }
       job.outputPath = newPath;
       saveJobs();
       return res.json({ ok:true, outputPath: job.outputPath });
@@ -1151,16 +1281,18 @@ app.post('/costs', async (req, res) => {
   try{
     slog('[costs] received POST');
     let { videoPath, audioPath, videoUrl, audioUrl, model = 'lipsync-2-pro', apiKey, options = {} } = req.body || {};
-    ({ videoPath, audioPath } = normalizePaths({ videoPath, audioPath }));
+    ({ videoPath, audioPath } = await normalizePaths({ videoPath, audioPath }));
     if (!apiKey) return res.status(400).json({ error: 'API key required' });
     // If URLs aren't provided, use local paths and upload to R2
     if (!videoUrl || !audioUrl){
       if (!videoPath || !audioPath) return res.status(400).json({ error: 'Video and audio required' });
-      if (!fs.existsSync(videoPath) || !fs.existsSync(audioPath)) return res.status(400).json({ error: 'Video or audio file not found' });
+      const videoExists = await safeExists(videoPath);
+      const audioExists = await safeExists(audioPath);
+      if (!videoExists || !audioExists) return res.status(400).json({ error: 'Video or audio file not found' });
 
       slog('[costs] uploading sources to R2 for cost estimate');
-      videoUrl = await r2Upload(resolveSafeLocalPath(videoPath));
-      audioUrl = await r2Upload(resolveSafeLocalPath(audioPath));
+      videoUrl = await r2Upload(await resolveSafeLocalPath(videoPath));
+      audioUrl = await r2Upload(await resolveSafeLocalPath(audioPath));
     } else {
       slog('[costs] using provided URLs', 'videoUrl=', videoUrl, 'audioUrl=', audioUrl);
     }
@@ -1201,9 +1333,28 @@ function pipeToFile(stream, dest){
 }
 
 async function createGeneration(job){
-  const vStat = safeStat(job.videoPath);
-  const aStat = safeStat(job.audioPath);
+  const vStat = await safeStat(job.videoPath);
+  const aStat = await safeStat(job.audioPath);
   const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
+  
+  // Add timeout protection to prevent hanging
+  const timeoutMs = 60000; // 60 second timeout
+  const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('Generation timeout')), timeoutMs)
+  );
+  
+  try{
+    return await Promise.race([
+      createGenerationInternal(job, vStat, aStat, overLimit),
+      timeoutPromise
+    ]);
+  } catch(e) {
+    try { tlog('createGeneration:error', e && e.message ? e.message : String(e)); } catch(_){}
+    throw e;
+  }
+}
+
+async function createGenerationInternal(job, vStat, aStat, overLimit){
   try{
     // Preferred: if panel provided URLs, use them directly
     if (job.videoUrl && job.audioUrl){
@@ -1222,11 +1373,11 @@ async function createGeneration(job){
     }
     if (overLimit) {
       slog('[upload] using r2 url mode');
-      const videoUrl = await r2Upload(resolveSafeLocalPath(job.videoPath));
-      const audioUrl = await r2Upload(resolveSafeLocalPath(job.audioPath));
+      const videoUrl = await r2Upload(await resolveSafeLocalPath(job.videoPath));
+      const audioUrl = await r2Upload(await resolveSafeLocalPath(job.audioPath));
       // Cleanup temp sources if flagged
-      try { if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; } } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-      try { if (job.isTempAudio && job.audioPath && fs.existsSync(job.audioPath)) { fs.unlinkSync(job.audioPath); job.audioPath = ''; } } catch(_){ }
+      try { if (job.isTempVideo && job.videoPath && await safeExists(job.videoPath)) { await fs.promises.unlink(job.videoPath); job.videoPath = ''; } } catch(e){ await tlog("silent catch:", e.message); }
+      try { if (job.isTempAudio && job.audioPath && await safeExists(job.audioPath)) { await fs.promises.unlink(job.audioPath); job.audioPath = ''; } } catch(_){ }
       const body = {
         model: job.model,
         input: [ { type:'video', url: videoUrl }, { type:'audio', url: audioUrl } ],
@@ -1247,11 +1398,11 @@ async function createGeneration(job){
   
   // Always use R2 - no direct file uploads
   slog('[upload] using r2 url mode (forced)');
-  const videoUrl = await r2Upload(resolveSafeLocalPath(job.videoPath));
-  const audioUrl = await r2Upload(resolveSafeLocalPath(job.audioPath));
+  const videoUrl = await r2Upload(await resolveSafeLocalPath(job.videoPath));
+  const audioUrl = await r2Upload(await resolveSafeLocalPath(job.audioPath));
   // Cleanup temp sources if flagged
-  try { if (job.isTempVideo && job.videoPath && fs.existsSync(job.videoPath)) { fs.unlinkSync(job.videoPath); job.videoPath = ''; } } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
-  try { if (job.isTempAudio && job.audioPath && fs.existsSync(job.audioPath)) { fs.unlinkSync(job.audioPath); job.audioPath = ''; } } catch(_){ }
+  try { if (job.isTempVideo && job.videoPath && await safeExists(job.videoPath)) { await fs.promises.unlink(job.videoPath); job.videoPath = ''; } } catch(e){ await tlog("silent catch:", e.message); }
+  try { if (job.isTempAudio && job.audioPath && await safeExists(job.audioPath)) { await fs.promises.unlink(job.audioPath); job.audioPath = ''; } } catch(_){ }
   const body = {
     model: job.model,
     input: [ { type:'video', url: videoUrl }, { type:'audio', url: audioUrl } ],
@@ -1282,7 +1433,11 @@ async function downloadIfReady(job){
   const response = await fetch(meta.outputUrl);
   if (!response.ok || !response.body) return false;
   const outDir = (job.outputDir && typeof job.outputDir === 'string' ? normalizeOutputDir(job.outputDir) : '') || TEMP_DEFAULT_DIR;
-  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  try {
+    await fs.promises.access(outDir);
+  } catch {
+    await fs.promises.mkdir(outDir, { recursive: true });
+  }
   const outputPath = path.join(outDir, `${job.id}_output.mp4`);
   await pipeToFile(response.body, outputPath);
   job.outputPath = outputPath;
@@ -1293,24 +1448,85 @@ async function pollSyncJob(job){
   const pollInterval = 5000;
   const maxAttempts = 120;
   let attempts = 0;
+  let pollTimeout = null;
+  
   const tick = async ()=>{
     attempts++;
     try{
       if (await downloadIfReady(job)){
         job.status = 'completed';
         saveJobs();
+        if (pollTimeout) clearTimeout(pollTimeout);
         return;
       }
-      if (attempts < maxAttempts){ setTimeout(tick, pollInterval); }
-      else { job.status='failed'; job.error='Timeout'; saveJobs(); }
-    }catch(e){ job.status='failed'; job.error=String(e?.message||e); saveJobs(); }
+      if (attempts < maxAttempts){ 
+        pollTimeout = setTimeout(tick, pollInterval);
+      } else { 
+        job.status='failed'; 
+        job.error='Timeout'; 
+        saveJobs(); 
+        if (pollTimeout) clearTimeout(pollTimeout);
+      }
+    }catch(e){ 
+      job.status='failed'; 
+      job.error=String(e?.message||e); 
+      saveJobs(); 
+      if (pollTimeout) clearTimeout(pollTimeout);
+    }
   };
-  setTimeout(tick, pollInterval);
+  
+  // Start polling with initial timeout
+  pollTimeout = setTimeout(tick, pollInterval);
+  
+  // Safety timeout to prevent infinite polling
+  setTimeout(() => {
+    if (pollTimeout) {
+      clearTimeout(pollTimeout);
+      pollTimeout = null;
+      if (job.status === 'processing') {
+        job.status = 'failed';
+        job.error = 'Polling timeout';
+        saveJobs();
+      }
+    }
+  }, maxAttempts * pollInterval + 30000); // Extra 30 seconds buffer
 }
 
 async function safeText(resp){ try{ return await resp.text(); }catch(_){ return ''; } }
 
-function safeStat(p){ try{ return fs.statSync(p); }catch(_){ return null; } }
+// Async version to prevent blocking with timeout protection
+async function safeStat(p){ 
+  try{ 
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('File stat timeout')), 5000)
+    );
+    return await Promise.race([
+      fs.promises.stat(p),
+      timeoutPromise
+    ]);
+  }catch(_){ 
+    return null; 
+  } 
+}
+
+// Synchronous version for critical operations only
+function safeStatSync(p){ try{ return fs.statSync(p); }catch(_){ return null; } }
+
+// Async file existence check with timeout
+async function safeExists(p){
+  try{
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('File exists timeout')), 5000)
+    );
+    await Promise.race([
+      fs.promises.access(p),
+      timeoutPromise
+    ]);
+    return true;
+  }catch{
+    return false;
+  }
+}
 
 function log(){ try{ console.log.apply(console, arguments);}catch(_){} }
 
@@ -1338,65 +1554,88 @@ async function findAvailablePort() {
 }
 
 // Start server on fixed port 3000 (best‑effort)
+let startupLock = false;
 async function startServer() {
-  const PORT = 3000;
-  // If an instance is already healthy on 3000, exit quickly without error
+  if (startupLock) {
+    console.log('Server startup already in progress, skipping...');
+    return;
+  }
+  startupLock = true;
+  
   try {
-    const r = await fetch(`http://${HOST}:${PORT}/health`, { method: 'GET' });
-    if (r && r.ok) {
-      console.log(`Existing Sync Extension server detected on http://${HOST}:${PORT}`);
-      // Try to determine version drift; if drift, request exit of old server
-      try {
-        const currentManifestVersion = await getCurrentVersion();
-        const vResp = await fetch(`http://${HOST}:${PORT}/update/version`, { method: 'GET' }).catch(()=>null);
-        const vJson = vResp ? await vResp.json().catch(()=>null) : null;
-        const otherVersion = vJson && vJson.version ? String(vJson.version) : '';
-        if (currentManifestVersion && otherVersion && compareSemver(currentManifestVersion, otherVersion) > 0){
-          console.log(`Existing server version ${otherVersion} older than manifest ${currentManifestVersion}, requesting shutdown...`);
-          await fetch(`http://${HOST}:${PORT}/admin/exit`, { method:'POST' }).catch(()=>{});
-          await new Promise(r2=>setTimeout(r2, 600));
-        } else {
+    const PORT = 3000;
+    // If an instance is already healthy on 3000, exit quickly without error
+    try {
+      const r = await fetch(`http://${HOST}:${PORT}/health`, { 
+        method: 'GET',
+        timeout: 5000 // 5 second timeout for health check
+      });
+      if (r && r.ok) {
+        console.log(`Existing Sync Extension server detected on http://${HOST}:${PORT}`);
+        // Try to determine version drift; if drift, request exit of old server
+        try {
+          const currentManifestVersion = await getCurrentVersion();
+          const vResp = await fetch(`http://${HOST}:${PORT}/update/version`, { 
+            method: 'GET',
+            timeout: 5000
+          }).catch(()=>null);
+          const vJson = vResp ? await vResp.json().catch(()=>null) : null;
+          const otherVersion = vJson && vJson.version ? String(vJson.version) : '';
+          if (currentManifestVersion && otherVersion && compareSemver(currentManifestVersion, otherVersion) > 0){
+            console.log(`Existing server version ${otherVersion} older than manifest ${currentManifestVersion}, requesting shutdown...`);
+            await fetch(`http://${HOST}:${PORT}/admin/exit`, { 
+              method:'POST',
+              timeout: 5000
+            }).catch(()=>{});
+            await new Promise(r2=>setTimeout(r2, 600));
+          } else {
+            console.log(`Port ${PORT} in use by healthy server; exiting child`);
+            process.exit(0);
+          }
+        } catch(_){
           console.log(`Port ${PORT} in use by healthy server; exiting child`);
           process.exit(0);
         }
-      } catch(_){
-        console.log(`Port ${PORT} in use by healthy server; exiting child`);
-        process.exit(0);
       }
-    }
-  } catch(_) { /* ignore */ }
-  const srv = app.listen(PORT, HOST, () => {
-    console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
-    console.log(`Jobs file: ${jobsFile}`);
-    try { tlog('server started on', `${HOST}:${PORT}`); } catch(_){ }
-    // Start cleanup scheduling
-    scheduleCleanup();
-  });
-  srv.on('error', async (err) => {
-    if (err && err.code === 'EADDRINUSE') {
-      try {
-        const r = await fetch(`http://${HOST}:${PORT}/health`, { method: 'GET' });
-        if (r && r.ok) {
-          console.log(`Port ${PORT} in use by healthy server; exiting child`);
-          // Another healthy instance is already serving requests on this port.
-          // Exit cleanly so any spawner (e.g., the CEP panel) doesn't leave a zombie process.
-          process.exit(0);
-        }
-      } catch(_) {}
-      console.error(`Port ${PORT} in use and health check failed`);
-      process.exit(1);
-    } else {
-      console.error('Server error', err && err.message ? err.message : String(err));
-      process.exit(1);
-    }
-  });
-  return PORT;
+    } catch(_) { /* ignore */ }
+    const srv = app.listen(PORT, HOST, () => {
+      console.log(`Sync Extension server running on http://${HOST}:${PORT}`);
+      console.log(`Jobs file: ${jobsFile}`);
+      try { tlog('server started on', `${HOST}:${PORT}`); } catch(_){ }
+      // Start cleanup scheduling
+      scheduleCleanup();
+    });
+    srv.on('error', async (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        try {
+          const r = await fetch(`http://${HOST}:${PORT}/health`, { 
+            method: 'GET',
+            timeout: 5000
+          });
+          if (r && r.ok) {
+            console.log(`Port ${PORT} in use by healthy server; exiting child`);
+            // Another healthy instance is already serving requests on this port.
+            // Exit cleanly so any spawner (e.g., the CEP panel) doesn't leave a zombie process.
+            process.exit(0);
+          }
+        } catch(_) {}
+        console.error(`Port ${PORT} in use and health check failed`);
+        process.exit(1);
+      } else {
+        console.error('Server error', err && err.message ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+    return PORT;
+  } finally {
+    startupLock = false;
+  }
 }
 
 startServer();
 
 
-function resolveSafeLocalPath(p){
+async function resolveSafeLocalPath(p){
   try{
     if (!p || typeof p !== 'string') {
       tlog('resolveSafeLocalPath: invalid input', typeof p);
@@ -1411,14 +1650,18 @@ function resolveSafeLocalPath(p){
     if (!isTempItems) return p;
     // macOS workaround: copy from TemporaryItems to readable location
     const docs = path.join(os.homedir(), 'Documents', 'sync_extension_temp');
-    if (!fs.existsSync(docs)) fs.mkdirSync(docs, { recursive: true });
+    try {
+      await fs.promises.access(docs);
+    } catch {
+      await fs.promises.mkdir(docs, { recursive: true });
+    }
     const target = path.join(docs, path.basename(p));
     try { 
-      fs.copyFileSync(p, target); 
-      tlog('resolveSafeLocalPath: copied from TemporaryItems', p, '→', target);
+      await fs.promises.copyFile(p, target); 
+      await tlog('resolveSafeLocalPath: copied from TemporaryItems', p, '→', target);
       return target; 
     } catch(e){ 
-      tlog('resolveSafeLocalPath: copy failed', e.message);
+      await tlog('resolveSafeLocalPath: copy failed', e.message);
       return p; 
     }
   }catch(e){ 

@@ -447,7 +447,7 @@ function PPRO_revealFile(payloadJson) {
 
 function _extensionRoot() {
   try {
-    // Derive from this script path: <ext>/host/ppro.jsx → <ext>
+    // Method 1: Derive from this script path: <ext>/host/ppro.jsx → <ext>
     var here = new File($.fileName);
     if (here && here.exists) {
       var hostDir = here.parent; // /host
@@ -457,22 +457,38 @@ function _extensionRoot() {
       }
     }
   } catch(e) {}
+  
   try {
+    // Method 2: Use CEP API to get extension path
     var extPath = $.eval('cs.getSystemPath(cs.SystemPath.EXTENSION)');
     if (extPath) return extPath;
   } catch(e) {}
+  
   try {
+    // Method 3: Check both user and system-wide locations
     var userHome = Folder.userDocuments.parent.fsName;
     var isWindows = false; 
     try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
     
-    var fallback;
+    var userPath, systemPath;
     if (isWindows) {
-      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
+      userPath = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
+      systemPath = "C:\\Program Files\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
     } else {
-      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
+      userPath = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
+      systemPath = "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
     }
-    return fallback;
+    
+    // Check user location first
+    var userExt = new File(userPath);
+    if (userExt && userExt.exists) return userPath;
+    
+    // Check system location
+    var systemExt = new File(systemPath);
+    if (systemExt && systemExt.exists) return systemPath;
+    
+    // Fallback to user location (for development)
+    return userPath;
   } catch(e2) {}
   return '';
 }
