@@ -6,8 +6,6 @@
   <ExecutionEnvironment>
     <HostList>
       <Host Name="AEFT" Version="[24.0,99.9]"/>
-      <Host Name="AEFT" Version="[24.0,99.9]"/>
-      <Host Name="AEFT" Version="[24.0,99.9]"/>
     </HostList>
     <LocaleList>
       <Locale Code="All"/>
@@ -19,8 +17,6 @@
   <DispatchInfoList>
     <Extension Id="com.sync.extension.ae" Version="0.8.28">
       <HostList>
-        <Host Name="AEFT" Version="[24.0,99.9]"/>
-        <Host Name="AEFT" Version="[24.0,99.9]"/>
         <Host Name="AEFT" Version="[24.0,99.9]"/>
       </HostList>
       <DispatchInfo>
