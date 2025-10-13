@@ -51,6 +51,255 @@
         }
       }
 
+      // Custom Dropdown for Sync Mode
+      (function initCustomDropdown() {
+        const trigger = document.getElementById('syncModeBtn');
+        const menu = document.getElementById('syncModeMenu');
+        const valueDisplay = document.getElementById('syncModeValue');
+        const hiddenInput = document.getElementById('syncMode');
+        const options = document.querySelectorAll('.custom-dropdown-option');
+
+        if (!trigger || !menu) return;
+
+        // Load saved value
+        function loadSyncMode() {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          const syncMode = settings.syncMode || 'loop';
+          hiddenInput.value = syncMode;
+          
+          // Update display text
+          const displayText = syncMode === 'cutoff' ? 'cut off' : syncMode;
+          valueDisplay.textContent = displayText;
+          
+          // Mark active option
+          options.forEach(opt => {
+            if (opt.dataset.value === syncMode) {
+              opt.classList.add('active');
+            } else {
+              opt.classList.remove('active');
+            }
+          });
+        }
+
+        // Toggle dropdown
+        trigger.addEventListener('click', (e) => {
+          e.stopPropagation();
+          menu.classList.toggle('show');
+          
+          // Reinitialize Lucide icons for newly visible elements
+          setTimeout(() => {
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+              lucide.createIcons();
+            }
+          }, 50);
+        });
+
+        // Close on outside click
+        document.addEventListener('click', (e) => {
+          if (!trigger.contains(e.target) && !menu.contains(e.target)) {
+            menu.classList.remove('show');
+          }
+        });
+
+        // Handle option selection
+        options.forEach(option => {
+          option.addEventListener('click', () => {
+            const value = option.dataset.value;
+            hiddenInput.value = value;
+            
+            // Update display text
+            const displayText = value === 'cutoff' ? 'cut off' : value;
+            valueDisplay.textContent = displayText;
+            
+            // Update active state
+            options.forEach(opt => opt.classList.remove('active'));
+            option.classList.add('active');
+            
+            // Close menu
+            menu.classList.remove('show');
+            
+            // Save to settings
+            const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+            settings.syncMode = value;
+            localStorage.setItem('syncSettings', JSON.stringify(settings));
+            
+            if (typeof saveSettings === 'function') {
+              saveSettings();
+            }
+          });
+        });
+
+        loadSyncMode();
+      })();
+
+      // Model Selector functionality
+      (function initModelSelector() {
+        const overlay = document.getElementById('modelSelectorOverlay');
+        const openBtn = document.getElementById('modelSelectorBtn');
+        const closeBtn = document.getElementById('modelSelectorClose');
+        const modelRadios = document.querySelectorAll('input[name="model"]');
+        const tempSlider = document.getElementById('modelTemperature');
+        const tempValue = document.getElementById('modelTempValue');
+        const activeSpeakerCheckbox = document.getElementById('modelActiveSpeaker');
+        const detectObstructionsCheckbox = document.getElementById('modelDetectObstructions');
+
+        if (!overlay || !openBtn) return;
+
+        // Function to update checkmark visibility
+        function updateModelCheckmarks() {
+          const modelOptions = document.querySelectorAll('.model-option');
+          modelOptions.forEach(option => {
+            const radio = option.querySelector('input[name="model"]');
+            const iconDiv = option.querySelector('.model-option-icon');
+            
+            if (radio && iconDiv) {
+              // Clear existing content
+              iconDiv.innerHTML = '';
+              
+              // Add checkmark if this option is selected
+              if (radio.checked) {
+                const checkIcon = document.createElement('i');
+                checkIcon.setAttribute('data-lucide', 'check');
+                iconDiv.appendChild(checkIcon);
+                
+                // Reinitialize Lucide icons
+                if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                  lucide.createIcons();
+                }
+              }
+            }
+          });
+        }
+
+        // Load current settings into modal
+        function loadModalSettings() {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          
+          // Set model radio
+          const model = settings.model || 'lipsync-2-pro';
+          modelRadios.forEach(radio => {
+            if (radio.value === model) {
+              radio.checked = true;
+            }
+          });
+          
+          // Update checkmarks to match selected model
+          updateModelCheckmarks();
+          
+          // Set temperature
+          if (tempSlider && tempValue) {
+            const temp = settings.temperature !== undefined ? settings.temperature : 0.5;
+            tempSlider.value = temp;
+            tempValue.textContent = temp;
+          }
+          
+          // Set toggles
+          if (activeSpeakerCheckbox) {
+            activeSpeakerCheckbox.checked = settings.activeSpeakerOnly || false;
+          }
+          if (detectObstructionsCheckbox) {
+            detectObstructionsCheckbox.checked = settings.detectObstructions || false;
+          }
+        }
+
+        // Open modal
+        openBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          loadModalSettings();
+          overlay.classList.add('show');
+          
+          // Reinitialize Lucide icons for newly visible elements
+          setTimeout(() => {
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+              lucide.createIcons();
+            }
+          }, 50);
+        });
+
+        // Close modal
+        function closeModal() {
+          overlay.classList.remove('show');
+        }
+
+        if (closeBtn) {
+          closeBtn.addEventListener('click', closeModal);
+        }
+
+        // Close on overlay click
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            closeModal();
+          }
+        });
+
+        // Handle model selection
+        modelRadios.forEach(radio => {
+          radio.addEventListener('change', () => {
+            if (radio.checked) {
+              const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+              settings.model = radio.value;
+              localStorage.setItem('syncSettings', JSON.stringify(settings));
+              
+              // Update checkmark visibility
+              updateModelCheckmarks();
+              
+              // Update display in bottom bar
+              updateModelDisplay();
+              
+              // Call existing saveSettings if available
+              if (typeof saveSettings === 'function') {
+                saveSettings();
+              }
+            }
+          });
+        });
+
+        // Handle temperature slider
+        if (tempSlider && tempValue) {
+          tempSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            tempValue.textContent = value;
+            
+            const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+            settings.temperature = parseFloat(value);
+            localStorage.setItem('syncSettings', JSON.stringify(settings));
+            
+            if (typeof saveSettings === 'function') {
+              saveSettings();
+            }
+          });
+        }
+
+        // Handle active speaker checkbox
+        if (activeSpeakerCheckbox) {
+          activeSpeakerCheckbox.addEventListener('change', () => {
+            const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+            settings.activeSpeakerOnly = activeSpeakerCheckbox.checked;
+            localStorage.setItem('syncSettings', JSON.stringify(settings));
+            
+            if (typeof saveSettings === 'function') {
+              saveSettings();
+            }
+          });
+        }
+
+        // Handle detect obstructions checkbox
+        if (detectObstructionsCheckbox) {
+          detectObstructionsCheckbox.addEventListener('change', () => {
+            const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+            settings.detectObstructions = detectObstructionsCheckbox.checked;
+            localStorage.setItem('syncSettings', JSON.stringify(settings));
+            
+            if (typeof saveSettings === 'function') {
+              saveSettings();
+            }
+          });
+        }
+
+        // Initialize display on load
+        updateModelDisplay();
+      })();
+
       function loadSettings() {
         const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
         if (settings.model) {
@@ -89,25 +338,59 @@
       }
 
       function saveSettings() {
-        const settings = {
-          model: document.querySelector('input[name="model"]:checked').value,
-          temperature: parseFloat(document.getElementById('temperature').value),
-          activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
-          detectObstructions: document.getElementById('detectObstructions').checked,
-          syncMode: (document.getElementById('syncMode')||{}).value || 'loop',
-          apiKey: document.getElementById('apiKey').value,
-          saveLocation: (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project',
-          renderVideo: document.getElementById('renderVideo').value || 'h264',
-          renderAudio: document.getElementById('renderAudio').value || 'wav'
-        };
-        try { localStorage.setItem('syncSettings', JSON.stringify(settings)); } catch(_){ }
+        try {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          
+          // Get model from either old or new selector
+          const modelRadio = document.querySelector('input[name="model"]:checked');
+          if (modelRadio) settings.model = modelRadio.value;
+          
+          // Get temperature from either old or new slider
+          const tempEl = document.getElementById('temperature') || document.getElementById('modelTemperature');
+          if (tempEl) settings.temperature = parseFloat(tempEl.value);
+          
+          // Get checkboxes from either old or new UI
+          const activeSpeakerEl = document.getElementById('activeSpeakerOnly') || document.getElementById('modelActiveSpeaker');
+          if (activeSpeakerEl) settings.activeSpeakerOnly = activeSpeakerEl.checked;
+          
+          const detectObstructionsEl = document.getElementById('detectObstructions') || document.getElementById('modelDetectObstructions');
+          if (detectObstructionsEl) settings.detectObstructions = detectObstructionsEl.checked;
+          
+          // Optional old fields
+          const syncModeEl = document.getElementById('syncMode');
+          if (syncModeEl) settings.syncMode = syncModeEl.value || 'loop';
+          
+          const apiKeyEl = document.getElementById('apiKey');
+          if (apiKeyEl) settings.apiKey = apiKeyEl.value;
+          
+          const saveLocationRadio = document.querySelector('input[name="saveLocation"]:checked');
+          if (saveLocationRadio) settings.saveLocation = saveLocationRadio.value;
+          else if (!settings.saveLocation) settings.saveLocation = 'project';
+          
+          const renderVideoEl = document.getElementById('renderVideo');
+          if (renderVideoEl) settings.renderVideo = renderVideoEl.value || 'h264';
+          else if (!settings.renderVideo) settings.renderVideo = 'h264';
+          
+          const renderAudioEl = document.getElementById('renderAudio');
+          if (renderAudioEl) settings.renderAudio = renderAudioEl.value || 'wav';
+          else if (!settings.renderAudio) settings.renderAudio = 'wav';
+          
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+          
         // Persist to backend as a secondary store in case localStorage resets on AE reload
         try {
           const port = getServerPort();
           fetch(`http://127.0.0.1:${port}/settings`, { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ settings }) }).catch(()=>{});
         }catch(_){ }
+          
         updateModelDisplay();
+          
+          if (typeof scheduleEstimate === 'function') {
         scheduleEstimate();
+          }
+        } catch(e) {
+          console.error('Failed to save settings:', e);
+        }
       }
 
       // On load, if localStorage missing, try to hydrate from backend
@@ -251,9 +534,290 @@
 
       // listeners
       document.addEventListener('change', saveSettings);
-      document.getElementById('apiKey').addEventListener('input', saveSettings);
-      document.getElementById('temperature').addEventListener('input', function(e) {
-        document.getElementById('tempValue').textContent = e.target.value;
+      const apiKeyEl = document.getElementById('apiKey');
+      if (apiKeyEl) {
+        apiKeyEl.addEventListener('input', saveSettings);
+      }
+      const temperatureEl = document.getElementById('temperature');
+      const tempValueEl = document.getElementById('tempValue');
+      if (temperatureEl && tempValueEl) {
+        temperatureEl.addEventListener('input', function(e) {
+          tempValueEl.textContent = e.target.value;
+        });
+      }
+
+      // New API Key validation and management for sync. and elevenlabs keys
+      function validateAndShowCheckmark(input) {
+        const value = input.value.trim();
+        const prefix = input.dataset.keyPrefix;
+        const checkmarkId = input.id + 'Check';
+        const checkmark = document.getElementById(checkmarkId);
+        
+        if (checkmark && value.startsWith(prefix)) {
+          checkmark.classList.add('visible');
+          setTimeout(() => {
+            checkmark.classList.remove('visible');
+          }, 3000);
+        }
+      }
+      
+      // API Key inputs for sync. and elevenlabs
+      const syncApiKeyInput = document.getElementById('syncApiKey');
+      const elevenlabsApiKeyInput = document.getElementById('elevenlabsApiKey');
+      
+      if (syncApiKeyInput) {
+        syncApiKeyInput.addEventListener('input', (e) => {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          settings.syncApiKey = e.target.value;
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+        });
+        
+        syncApiKeyInput.addEventListener('blur', (e) => {
+          validateAndShowCheckmark(e.target);
+        });
+        
+        syncApiKeyInput.addEventListener('paste', (e) => {
+          setTimeout(() => validateAndShowCheckmark(e.target), 10);
+        });
+      }
+      
+      if (elevenlabsApiKeyInput) {
+        elevenlabsApiKeyInput.addEventListener('input', (e) => {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          settings.elevenlabsApiKey = e.target.value;
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+        });
+        
+        elevenlabsApiKeyInput.addEventListener('blur', (e) => {
+          validateAndShowCheckmark(e.target);
+        });
+        
+        elevenlabsApiKeyInput.addEventListener('paste', (e) => {
+          setTimeout(() => validateAndShowCheckmark(e.target), 10);
+        });
+      }
+      
+      // Copy button functionality
+      document.querySelectorAll('.copy-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const targetId = btn.dataset.target;
+          const input = document.getElementById(targetId);
+          
+          if (input && input.value) {
+            try {
+              await navigator.clipboard.writeText(input.value);
+              
+              // Add orange highlight immediately, then fade back
+              btn.classList.add('copied');
+              // Remove after transition completes to allow smooth fade
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  btn.classList.remove('copied');
+                });
+              });
+            } catch (err) {
+              console.error('Failed to copy:', err);
+            }
+          }
+        });
       });
+      
+      // Info button functionality
+      document.querySelectorAll('.info-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const url = btn.dataset.url;
+          if (url) {
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }
+        });
+      });
+      
+      // Save location buttons
+      document.querySelectorAll('.save-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const location = btn.dataset.saveLocation;
+          
+          // Update active state
+          document.querySelectorAll('.save-option').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          
+          // Save to localStorage
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          settings.saveLocation = location;
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+          
+          // Reinitialize Lucide icons for updated state
+          if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+          }
+        });
+      });
+      
+      // Load saved settings for new API keys on page load
+      (function loadNewApiKeys() {
+        try {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          
+          if (settings.syncApiKey && syncApiKeyInput) {
+            syncApiKeyInput.value = settings.syncApiKey;
+          }
+          
+          if (settings.elevenlabsApiKey && elevenlabsApiKeyInput) {
+            elevenlabsApiKeyInput.value = settings.elevenlabsApiKey;
+          }
+          
+          if (settings.saveLocation) {
+            document.querySelectorAll('.save-option').forEach(btn => {
+              if (btn.dataset.saveLocation === settings.saveLocation) {
+                btn.classList.add('active');
+              } else {
+                btn.classList.remove('active');
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Failed to load settings:', e);
+        }
+      })();
+
+      // Render Settings - Video Format Selection (MP4)
+      const mp4Button = document.querySelector('[data-video-format="mp4"]');
+      if (mp4Button) {
+        mp4Button.addEventListener('click', () => {
+          // Deactivate all video options
+          document.querySelectorAll('.video-option').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.prores-option').forEach(b => b.classList.remove('active'));
+          
+          // Activate MP4
+          mp4Button.classList.add('active');
+          
+          // Save to localStorage using existing key
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          settings.renderVideo = 'h264';
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+          if (typeof saveSettings === 'function') saveSettings();
+        });
+      }
+
+      // Render Settings - ProRes Container Click
+      const proresContainer = document.querySelector('[data-video-format="prores"]');
+      if (proresContainer) {
+        proresContainer.addEventListener('click', (e) => {
+          // If clicking directly on container (not a prores-option button)
+          if (!e.target.classList.contains('prores-option') && 
+              !e.target.closest('.prores-option')) {
+            // Deactivate all video options and prores options
+            document.querySelectorAll('.video-option').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.prores-option').forEach(b => b.classList.remove('active'));
+            
+            // Activate prores container and default 422
+            proresContainer.classList.add('active');
+            const default422 = document.querySelector('[data-prores-type="422"]');
+            if (default422) {
+              default422.classList.add('active');
+            }
+            
+            // Save to localStorage using existing key - default to prores422
+            const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+            settings.renderVideo = 'prores422';
+            localStorage.setItem('syncSettings', JSON.stringify(settings));
+            if (typeof saveSettings === 'function') saveSettings();
+          }
+        });
+      }
+
+      // Render Settings - ProRes Type Selection
+      document.querySelectorAll('.prores-option').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          
+          const proresType = btn.dataset.proresType;
+          
+          // Deactivate all video options and prores options
+          document.querySelectorAll('.video-option').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.prores-option').forEach(b => b.classList.remove('active'));
+          
+          // Activate this prores option and the container
+          btn.classList.add('active');
+          if (proresContainer) {
+            proresContainer.classList.add('active');
+          }
+          
+          // Save to localStorage using existing key
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          settings.renderVideo = 'prores' + proresType.replace('-', '');
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+          if (typeof saveSettings === 'function') saveSettings();
+        });
+      });
+
+      // Render Settings - Audio Format Selection
+      document.querySelectorAll('.audio-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const format = btn.dataset.audioFormat;
+          
+          // Deactivate all audio options
+          document.querySelectorAll('.audio-option').forEach(b => b.classList.remove('active'));
+          
+          // Activate this one
+          btn.classList.add('active');
+          
+          // Save to localStorage using existing key
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          settings.renderAudio = format;
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
+          if (typeof saveSettings === 'function') saveSettings();
+        });
+      });
+
+      // Load saved render settings on page load
+      (function loadRenderSettings() {
+        try {
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          
+          // Load video format from renderVideo setting
+          if (settings.renderVideo) {
+            const renderVideo = settings.renderVideo;
+            
+            // Deactivate all first
+            document.querySelectorAll('.video-option').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.prores-option').forEach(b => b.classList.remove('active'));
+            
+            if (renderVideo === 'h264') {
+              // Activate MP4
+              const mp4 = document.querySelector('[data-video-format="mp4"]');
+              if (mp4) mp4.classList.add('active');
+            } else if (renderVideo.startsWith('prores')) {
+              // Activate prores container
+              const proresContainer = document.querySelector('[data-video-format="prores"]');
+              if (proresContainer) proresContainer.classList.add('active');
+              
+              // Activate specific prores type
+              let proresType = renderVideo.replace('prores', '');
+              // Convert prores422hq to 422hq, etc.
+              if (proresType === '422hq') proresType = '422hq';
+              else if (proresType === '422proxy') proresType = '422proxy';
+              else if (proresType === '422lt') proresType = '422lt';
+              else if (proresType === '422') proresType = '422';
+              
+              const proresBtn = document.querySelector(`[data-prores-type="${proresType}"]`);
+              if (proresBtn) proresBtn.classList.add('active');
+            }
+          }
+          
+          // Load audio format from renderAudio setting
+          if (settings.renderAudio) {
+            document.querySelectorAll('.audio-option').forEach(btn => {
+              if (btn.dataset.audioFormat === settings.renderAudio) {
+                btn.classList.add('active');
+              } else {
+                btn.classList.remove('active');
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Failed to load render settings:', e);
+        }
+      })();
 
 
