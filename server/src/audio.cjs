@@ -230,30 +230,11 @@ async function convertAiffToMp3(srcPath, destPath){
   // Load lamejs for MP3 encoding
   let lamejs;
   try {
-    // Load MPEGMode and make it global (required by Mp3Encoder)
-    const MPEGMode = require('lamejs/src/js/MPEGMode.js');
-    global.MPEGMode = MPEGMode;
-    tlog('MPEGMode loaded and made global');
-    
-    // Load other required dependencies
-    global.Lame = require('lamejs/src/js/Lame.js');
-    global.BitStream = require('lamejs/src/js/BitStream.js');
-    global.Presets = require('lamejs/src/js/Presets.js');
-    global.GainAnalysis = require('lamejs/src/js/GainAnalysis.js');
-    global.QuantizePVT = require('lamejs/src/js/QuantizePVT.js');
-    global.Quantize = require('lamejs/src/js/Quantize.js');
-    global.Takehiro = require('lamejs/src/js/Takehiro.js');
-    global.Reservoir = require('lamejs/src/js/Reservoir.js');
-    global.Version = require('lamejs/src/js/Version.js');
-    global.VBRTag = require('lamejs/src/js/VBRTag.js');
-    global.Encoder = require('lamejs/src/js/Encoder.js');
-    global.common = require('lamejs/src/js/common.js');
-    
     lamejs = require('lamejs');
     tlog('lamejs loaded successfully');
   } catch(e) {
     tlog('Failed to load lamejs:', e.message);
-    throw new Error('MP3 encoding requires lamejs dependency');
+    throw new Error('MP3 encoding requires lamejs dependency: ' + e.message);
   }
   
   // Parse AIFF header to get audio metadata
@@ -273,8 +254,15 @@ async function convertAiffToMp3(srcPath, destPath){
     fs.closeSync(fd);
   }
   
-  // Create MP3 encoder
-  const mp3enc = new lamejs.Mp3Encoder(meta.numChannels, Math.round(meta.sampleRate), 128);
+  // Create MP3 encoder with error handling
+  let mp3enc;
+  try {
+    mp3enc = new lamejs.Mp3Encoder(meta.numChannels, Math.round(meta.sampleRate), 128);
+    tlog('MP3 encoder created successfully');
+  } catch(e) {
+    tlog('Failed to create MP3 encoder:', e.message);
+    throw new Error('Failed to create MP3 encoder: ' + e.message);
+  }
   const mp3Data = [];
   
   // Convert AIFF to MP3
@@ -301,25 +289,35 @@ async function convertAiffToMp3(srcPath, destPath){
       leftover = work.slice(aligned);
       const payload = (meta.compressionType === 'NONE') ? swapEndianInPlace(body, meta.bytesPerSample) : body;
       if (payload.length) {
-        const samples = pcmToInt16Array(payload, meta.bytesPerSample);
-        if (meta.numChannels === 1) {
-          const mp3buf = mp3enc.encodeBuffer(samples, samples);
-          if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
-        } else {
-          const left = new Int16Array(samples.length / 2);
-          const right = new Int16Array(samples.length / 2);
-          for (let i = 0; i < samples.length; i += 2) {
-            left[i/2] = samples[i];
-            right[i/2] = samples[i+1];
+        try {
+          const samples = pcmToInt16Array(payload, meta.bytesPerSample);
+          if (meta.numChannels === 1) {
+            const mp3buf = mp3enc.encodeBuffer(samples, samples);
+            if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
+          } else {
+            const left = new Int16Array(samples.length / 2);
+            const right = new Int16Array(samples.length / 2);
+            for (let i = 0; i < samples.length; i += 2) {
+              left[i/2] = samples[i];
+              right[i/2] = samples[i+1];
+            }
+            const mp3buf = mp3enc.encodeBuffer(left, right);
+            if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
           }
-          const mp3buf = mp3enc.encodeBuffer(left, right);
-          if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
+        } catch(e) {
+          tlog('MP3 encoding error:', e.message);
+          throw new Error('MP3 encoding failed: ' + e.message);
         }
       }
     }
     
-    const mp3buf = mp3enc.flush();
-    if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
+    try {
+      const mp3buf = mp3enc.flush();
+      if (mp3buf.length > 0) mp3Data.push(Buffer.from(mp3buf));
+    } catch(e) {
+      tlog('MP3 flush error:', e.message);
+      throw new Error('MP3 flush failed: ' + e.message);
+    }
     
     const mp3Buffer = Buffer.concat(mp3Data);
     fs.writeFileSync(finalPath, mp3Buffer);

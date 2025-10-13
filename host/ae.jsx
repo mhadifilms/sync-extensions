@@ -899,15 +899,15 @@ function AEFT_exportInOutAudio(payloadJson) {
       }
     }
     
-    // Fallback to AIFF if MP3 conversion failed
+    // Fallback to AIFF if conversion failed - but don't upload AIFF files
     try {
       var debugLogPath = _syncDebugLogPath();
       var dbg6 = new File(debugLogPath);
       dbg6.open('a');
-      dbg6.writeln('[' + new Date().toString() + '] returning AIFF path to UI: ' + String(aif && aif.fsName) + ' len=' + String(aif && aif.length));
+      dbg6.writeln('[' + new Date().toString() + '] conversion failed, returning error instead of AIFF');
       dbg6.close();
     } catch(_){ }
-    return _respond({ ok:true, path: aif.fsName, note:'aiff direct' });
+    return _respond({ ok:false, error:'Audio conversion failed. Please check server logs and try again.' });
   } catch (e) {
     try {
       var logFile = _syncDebugLogFile();

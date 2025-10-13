@@ -1063,23 +1063,36 @@ async function r2UploadInternal(localPath){
   const base = path.basename(localPath);
   const key  = `${R2_PREFIX}uploads/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}`;
   slog('[r2] put start', localPath, '→', `${R2_BUCKET}/${key}`);
-  const body = fs.createReadStream(localPath);
-  const contentType = guessMime(localPath);
-  await r2Client.send(new PutObjectCommand({
-    Bucket: R2_BUCKET,
-    Key: key,
-    Body: body,
-    ContentType: contentType
-  }));
   
-  // Generate signed URL for external access
-  const command = new GetObjectCommand({
-    Bucket: R2_BUCKET,
-    Key: key
-  });
-  const signedUrl = await getSignedUrl(r2Client, command, { expiresIn: 3600 }); // 1 hour expiry
-  slog('[r2] put ok', signedUrl);
-  return signedUrl;
+  try {
+    const body = fs.createReadStream(localPath);
+    const contentType = guessMime(localPath);
+    
+    await r2Client.send(new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType
+    }));
+    
+    // Generate signed URL for external access
+    const command = new GetObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key
+    });
+    
+    const signedUrl = await getSignedUrl(r2Client, command, { 
+      expiresIn: 3600,
+      signableHeaders: new Set(['host']),
+      unsignableHeaders: new Set(['host'])
+    }); // 1 hour expiry
+    
+    slog('[r2] put ok', signedUrl);
+    return signedUrl;
+  } catch (error) {
+    slog('[r2] put error', error.message);
+    throw error;
+  }
 }
 
 const SYNC_API_BASE = 'https://api.sync.so/v2';
