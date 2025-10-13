@@ -1355,7 +1355,7 @@ async function createGeneration(job){
   const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
   
   // Add timeout protection to prevent hanging
-  const timeoutMs = 60000; // 60 second timeout
+  const timeoutMs = 180000; // 3 minute timeout (increased for Premiere Pro)
   const timeoutPromise = new Promise((_, reject) => 
     setTimeout(() => reject(new Error('Generation timeout')), timeoutMs)
   );
