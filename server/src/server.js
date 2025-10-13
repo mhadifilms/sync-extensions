@@ -425,7 +425,7 @@ app.use((req, res, next) => {
       try { tlog('request:timeout', req.method, req.path); } catch(_){}
       res.status(408).json({ error: 'Request timeout' });
     }
-  }, 180000); // 3 minute timeout (increased for Premiere Pro jobs)
+  }, 30000); // 30 second timeout
   
   res.on('finish', () => clearTimeout(timeout));
   res.on('close', () => clearTimeout(timeout));
@@ -588,7 +588,7 @@ app.post('/audio/convert', async (req, res) => {
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
     try { const sz = fs.statSync(out).size; tlog('convert ok', 'out=', out, 'bytes=', sz); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     res.json({ ok:true, path: out });
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Also support a simple GET form to avoid body quoting issues:
@@ -620,7 +620,7 @@ app.get('/audio/convert', async (req, res) => {
     if (!out || !fs.existsSync(out)) return res.status(500).json({ error:'conversion failed' });
     try { const sz = fs.statSync(out).size; tlog('convert ok (GET)', 'out=', out, 'bytes=', sz); } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     res.json({ ok:true, path: out });
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Public waveform file reader (before auth middleware)
@@ -644,7 +644,7 @@ app.get('/waveform/file', async (req, res) => {
         if (wasTemp && real.indexOf(COPY_DIR) === 0) { fs.unlink(real, ()=>{}); }
       } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
     });
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Updates: version and check (PUBLIC)
@@ -652,7 +652,7 @@ app.get('/update/version', async (_req,res)=>{
   try{
     const current = await getCurrentVersion();
     res.json({ ok:true, version: current });
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 app.get('/update/check', async (_req,res)=>{
@@ -664,7 +664,7 @@ app.get('/update/check', async (_req,res)=>{
     }
     const cmp = (current && latest.version) ? compareSemver(latest.version, current) : 0;
     res.json({ ok:true, current, latest: latest.version, tag: latest.tag, html_url: latest.html_url, canUpdate: cmp > 0, repo: UPDATES_REPO });
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Auth middleware
@@ -702,7 +702,9 @@ app.post('/debug', async (req, res) => {
     
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: String(e?.message || e) });
+    if (!res.headersSent) {
+      res.status(500).json({ error: String(e?.message || e) });
+    }
   }
 });
 
@@ -724,7 +726,9 @@ app.post('/upload', async (req, res) => {
     
     res.json({ ok: true, url: fileUrl });
   } catch (e) {
-    res.status(500).json({ error: String(e?.message || e) });
+    if (!res.headersSent) {
+      res.status(500).json({ error: String(e?.message || e) });
+    }
   }
 });
 
@@ -782,7 +786,7 @@ app.get('/settings', (req,res)=>{
   res.json({ ok:true, settings: PANEL_SETTINGS });
 });
 app.post('/settings', (req,res)=>{
-  try{ PANEL_SETTINGS = (req.body && req.body.settings) ? req.body.settings : null; res.json({ ok:true }); }catch(e){ res.status(400).json({ error:String(e?.message||e) }); }
+  try{ PANEL_SETTINGS = (req.body && req.body.settings) ? req.body.settings : null; res.json({ ok:true }); }catch(e){ if (!res.headersSent) res.status(400).json({ error:String(e?.message||e) }); }
 });
 
 // Updates: apply (AUTH)
@@ -1005,7 +1009,7 @@ app.post('/update/apply', async (req,res)=>{
       console.error('Update failed:', e.message);
       console.error('Update error stack:', e.stack);
     }
-    res.status(500).json({ error:String(e?.message||e) }); 
+    if (!res.headersSent) res.status(500).json({ error:String(e?.message||e) }); 
   }
 });
 
@@ -1106,7 +1110,7 @@ app.get('/models', async (req, res) => {
     const j = await r.json().catch(()=>({}));
     if (!r.ok) return res.status(r.status).json(j);
     res.json(j);
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Proxy list generations
@@ -1120,7 +1124,7 @@ app.get('/generations', async (req, res) => {
     const j = await r.json().catch(()=>({}));
     if (!r.ok) return res.status(r.status).json(j);
     res.json(j);
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 app.get('/jobs', (req,res)=> res.json(jobs));
@@ -1217,9 +1221,9 @@ app.post('/jobs', async (req, res) => {
       job.status = 'failed';
       job.error = String(e?.message||e);
       saveJobs();
-      res.status(500).json({ error: job.error });
+      if (!res.headersSent) res.status(500).json({ error: job.error });
     }
-  }catch(e){ slog('[jobs:create] error', e && e.message ? e.message : String(e)); res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ slog('[jobs:create] error', e && e.message ? e.message : String(e)); if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 app.get('/jobs/:id/download', async (req,res)=>{
@@ -1282,7 +1286,7 @@ app.post('/jobs/:id/save', async (req,res)=>{
       }
     }
     res.status(400).json({ error:'Output not available yet' });
-  }catch(e){ res.status(500).json({ error: String(e?.message||e) }); }
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
 // Simple GET endpoint for quick checks
@@ -1351,8 +1355,7 @@ async function createGeneration(job){
   const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
   
   // Add timeout protection to prevent hanging
-  // Premiere Pro jobs may take longer due to different export pipeline
-  const timeoutMs = 180000; // 3 minute timeout (increased from 60s)
+  const timeoutMs = 60000; // 60 second timeout
   const timeoutPromise = new Promise((_, reject) => 
     setTimeout(() => reject(new Error('Generation timeout')), timeoutMs)
   );
