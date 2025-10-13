@@ -721,10 +721,27 @@ app.post('/upload', async (req, res) => {
       return res.status(404).json({ error: 'File not found' });
     }
     
-    // Upload to R2 and return the cloud URL
-    const fileUrl = await r2Upload(filePath);
+    // Set a timeout for the entire upload process
+    const uploadTimeout = setTimeout(() => {
+      if (!res.headersSent) {
+        res.status(408).json({ error: 'Upload timeout' });
+      }
+    }, 240000); // 4 minute timeout for the entire upload
     
-    res.json({ ok: true, url: fileUrl });
+    try {
+      // Upload to R2 and return the cloud URL
+      const fileUrl = await r2Upload(filePath);
+      
+      clearTimeout(uploadTimeout);
+      if (!res.headersSent) {
+        res.json({ ok: true, url: fileUrl });
+      }
+    } catch (uploadError) {
+      clearTimeout(uploadTimeout);
+      if (!res.headersSent) {
+        res.status(500).json({ error: String(uploadError?.message || uploadError) });
+      }
+    }
   } catch (e) {
     if (!res.headersSent) {
       res.status(500).json({ error: String(e?.message || e) });
@@ -1047,7 +1064,7 @@ async function r2Upload(localPath){
   if (!(await safeExists(localPath))) throw new Error('file not found: ' + localPath);
   
   // Add timeout protection to prevent hanging on network issues
-  const timeoutMs = 120000; // 2 minute timeout for uploads
+  const timeoutMs = 180000; // 3 minute timeout for uploads (increased from 2 minutes)
   const timeoutPromise = new Promise((_, reject) => 
     setTimeout(() => reject(new Error('R2 upload timeout')), timeoutMs)
   );
@@ -1059,6 +1076,10 @@ async function r2Upload(localPath){
     ]);
   } catch(e) {
     try { tlog('r2Upload:error', e && e.message ? e.message : String(e)); } catch(_){}
+    // Don't re-throw EPIPE errors - they're usually recoverable
+    if (e.message && e.message.includes('EPIPE')) {
+      throw new Error('Upload connection lost. Please try again.');
+    }
     throw e;
   }
 }
@@ -1071,6 +1092,11 @@ async function r2UploadInternal(localPath){
   try {
     const body = fs.createReadStream(localPath);
     const contentType = guessMime(localPath);
+    
+    // Add error handling for the stream
+    body.on('error', (err) => {
+      slog('[r2] stream error', err.message);
+    });
     
     await r2Client.send(new PutObjectCommand({
       Bucket: R2_BUCKET,
@@ -1095,6 +1121,10 @@ async function r2UploadInternal(localPath){
     return signedUrl;
   } catch (error) {
     slog('[r2] put error', error.message);
+    // Handle specific EPIPE errors gracefully
+    if (error.message && error.message.includes('EPIPE')) {
+      throw new Error('Upload connection lost. Please try again.');
+    }
     throw error;
   }
 }
@@ -1198,32 +1228,36 @@ app.post('/jobs', async (req, res) => {
     if (jobs.length > 500) { jobs = jobs.slice(-500); }
     saveJobs();
 
-    try{
-      await createGeneration(job);
-      // Cleanup temp inputs if present and uploaded
+    // Send response immediately to prevent socket hang up
+    res.json(job);
+    
+    // Start generation asynchronously after response is sent
+    setImmediate(async () => {
       try {
-        if (job.isTempVideo && job.videoPath && await safeExists(job.videoPath)) { 
-          await fs.promises.unlink(job.videoPath); 
-          job.videoPath = ''; 
-        }
-      } catch(e){ await tlog("silent catch:", e.message); }
-      try {
-        if (job.isTempAudio && job.audioPath && await safeExists(job.audioPath)) { 
-          await fs.promises.unlink(job.audioPath); 
-          job.audioPath = ''; 
-        }
-      } catch(e){ await tlog("silent catch:", e.message); }
-      saveJobs();
-      res.json(job);
-      // Start polling after response is sent to avoid ERR_HTTP_HEADERS_SENT
-      setImmediate(() => pollSyncJob(job));
-    }catch(e){
-      slog('[jobs:create] generation error', e && e.message ? e.message : String(e));
-      job.status = 'failed';
-      job.error = String(e?.message||e);
-      saveJobs();
-      if (!res.headersSent) res.status(500).json({ error: job.error });
-    }
+        await createGeneration(job);
+        // Cleanup temp inputs if present and uploaded
+        try {
+          if (job.isTempVideo && job.videoPath && await safeExists(job.videoPath)) { 
+            await fs.promises.unlink(job.videoPath); 
+            job.videoPath = ''; 
+          }
+        } catch(e){ await tlog("silent catch:", e.message); }
+        try {
+          if (job.isTempAudio && job.audioPath && await safeExists(job.audioPath)) { 
+            await fs.promises.unlink(job.audioPath); 
+            job.audioPath = ''; 
+          }
+        } catch(e){ await tlog("silent catch:", e.message); }
+        saveJobs();
+        // Start polling after generation is complete
+        pollSyncJob(job);
+      } catch(e) {
+        slog('[jobs:create] generation error', e && e.message ? e.message : String(e));
+        job.status = 'failed';
+        job.error = String(e?.message||e);
+        saveJobs();
+      }
+    });
   }catch(e){ slog('[jobs:create] error', e && e.message ? e.message : String(e)); if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
@@ -1553,7 +1587,7 @@ function log(){ try{ console.log.apply(console, arguments);}catch(_){} }
 
 // Simple in-memory log buffer for panel debugging
 const LOGS = [];
-function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); LOGS.push(new Date().toISOString()+" "+msg); if (LOGS.length>500) LOGS.shift(); try{ console.log.apply(console, arguments);}catch(_){} }
+function slog(){ const msg = Array.from(arguments).map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' '); LOGS.push(new Date().toISOString()+" "+msg); if (LOGS.length>500) LOGS.shift(); try{ console.log.apply(console, arguments);}catch(e){ /* Ignore EPIPE and other console errors to prevent crashes */ } }
 app.get('/logs', (_req,res)=>{ res.json({ ok:true, logs: LOGS.slice(-200) }); });
 // Keep only the slog + LOGS; public /logs is declared above
 

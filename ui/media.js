@@ -534,27 +534,65 @@
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
               await ensureAuthToken();
-              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
-              const j = await r.json().catch(()=>null);
-              if (r.ok && j && j.ok && j.url){ 
-                uploadedVideoUrl = j.url;
-                window.uploadedVideoUrl = j.url;
-                // Debug logging
+              
+              // Add timeout and retry logic for uploads
+              let uploadSuccess = false;
+              let lastError = null;
+              
+              for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
-                  fetch('http://127.0.0.1:3000/debug', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      type: 'upload_complete',
-                      fileType: 'video',
-                      url: j.url,
-                      uploadedVideoUrl: uploadedVideoUrl,
-                      hostConfig: window.HOST_CONFIG
-                    })
-                  }).catch(() => {});
-                } catch(_){ }
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                  
+                  const r = await fetch('http://127.0.0.1:3000/upload', { 
+                    method:'POST', 
+                    headers: authHeaders({'Content-Type':'application/json'}), 
+                    body: JSON.stringify(body),
+                    signal: controller.signal
+                  });
+                  
+                  clearTimeout(timeoutId);
+                  const j = await r.json().catch(()=>null);
+                  
+                  if (r.ok && j && j.ok && j.url){ 
+                    uploadedVideoUrl = j.url;
+                    window.uploadedVideoUrl = j.url;
+                    uploadSuccess = true;
+                    
+                    // Debug logging
+                    try {
+                      fetch('http://127.0.0.1:3000/debug', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          type: 'upload_complete',
+                          fileType: 'video',
+                          url: j.url,
+                          uploadedVideoUrl: uploadedVideoUrl,
+                          attempt: attempt,
+                          hostConfig: window.HOST_CONFIG
+                        })
+                      }).catch(() => {});
+                    } catch(_){ }
+                    break;
+                  } else {
+                    lastError = j?.error || `HTTP ${r.status}`;
+                  }
+                } catch (error) {
+                  lastError = error.message;
+                  if (attempt < 3) {
+                    try { statusEl.textContent = `uploading video… (retry ${attempt}/3)`; } catch(_){ }
+                    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+                  }
+                }
               }
-            }catch(_){ }
+              
+              if (!uploadSuccess) {
+                try { statusEl.textContent = `upload failed: ${lastError}`; } catch(_){ }
+              }
+            }catch(e){ 
+              try { statusEl.textContent = `upload error: ${e.message}`; } catch(_){ }
+            }
             try { statusEl.textContent = ''; } catch(_){ }
             
             // Schedule cost estimation after upload completes
@@ -706,27 +744,65 @@
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
               await ensureAuthToken();
-              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
-              const j = await r.json().catch(()=>null);
-              if (r.ok && j && j.ok && j.url){ 
-                uploadedAudioUrl = j.url;
-                window.uploadedAudioUrl = j.url;
-                // Debug logging
+              
+              // Add timeout and retry logic for uploads
+              let uploadSuccess = false;
+              let lastError = null;
+              
+              for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
-                  fetch('http://127.0.0.1:3000/debug', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      type: 'upload_complete',
-                      fileType: 'audio',
-                      url: j.url,
-                      uploadedAudioUrl: uploadedAudioUrl,
-                      hostConfig: window.HOST_CONFIG
-                    })
-                  }).catch(() => {});
-                } catch(_){ }
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                  
+                  const r = await fetch('http://127.0.0.1:3000/upload', { 
+                    method:'POST', 
+                    headers: authHeaders({'Content-Type':'application/json'}), 
+                    body: JSON.stringify(body),
+                    signal: controller.signal
+                  });
+                  
+                  clearTimeout(timeoutId);
+                  const j = await r.json().catch(()=>null);
+                  
+                  if (r.ok && j && j.ok && j.url){ 
+                    uploadedAudioUrl = j.url;
+                    window.uploadedAudioUrl = j.url;
+                    uploadSuccess = true;
+                    
+                    // Debug logging
+                    try {
+                      fetch('http://127.0.0.1:3000/debug', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          type: 'upload_complete',
+                          fileType: 'audio',
+                          url: j.url,
+                          uploadedAudioUrl: uploadedAudioUrl,
+                          attempt: attempt,
+                          hostConfig: window.HOST_CONFIG
+                        })
+                      }).catch(() => {});
+                    } catch(_){ }
+                    break;
+                  } else {
+                    lastError = j?.error || `HTTP ${r.status}`;
+                  }
+                } catch (error) {
+                  lastError = error.message;
+                  if (attempt < 3) {
+                    try { statusEl.textContent = `uploading audio… (retry ${attempt}/3)`; } catch(_){ }
+                    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+                  }
+                }
               }
-            }catch(_){ }
+              
+              if (!uploadSuccess) {
+                try { statusEl.textContent = `upload failed: ${lastError}`; } catch(_){ }
+              }
+            }catch(e){ 
+              try { statusEl.textContent = `upload error: ${e.message}`; } catch(_){ }
+            }
             try { statusEl.textContent = ''; } catch(_){ }
             
             // Schedule cost estimation after upload completes

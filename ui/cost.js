@@ -125,7 +125,18 @@
           // If URLs not ready, show estimating and wait
           if (!hasUrls) {
             if (display){ display.textContent='cost: estimating…'; }
-            if (!auto && statusEl) statusEl.textContent = 'uploading files...';
+            
+            // Show more specific status messages
+            if (!auto && statusEl) {
+              if (!window.uploadedVideoUrl && !window.uploadedAudioUrl) {
+                statusEl.textContent = 'uploading files...';
+              } else if (!window.uploadedVideoUrl) {
+                statusEl.textContent = 'uploading video...';
+              } else if (!window.uploadedAudioUrl) {
+                statusEl.textContent = 'uploading audio...';
+              }
+            }
+            
             try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: estimating…'; }catch(_){ }
             
             // Debug logging
@@ -144,9 +155,14 @@
               }).catch(() => {});
             } catch(_){ }
             
-            // Retry after a delay if URLs still not ready
-            if (retry !== false) {
-              setTimeout(() => estimateCost(auto, false), 1000);
+            // Retry after a delay if URLs still not ready, but limit retries
+            if (retry !== false && (retry === undefined || retry < 30)) {
+              setTimeout(() => estimateCost(auto, (retry || 0) + 1), 2000);
+            } else if (retry >= 30) {
+              // After 30 retries (60 seconds), show error
+              if (display){ display.textContent='cost: n/a'; }
+              if (statusEl) statusEl.textContent = 'upload timeout - please try again';
+              try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: n/a'; }catch(_){ }
             }
             return;
           }
@@ -184,7 +200,19 @@
                 })
               }).catch(() => {});
             } catch(_){ }
-            resp = await fetch('http://127.0.0.1:3000/costs', { method: 'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+            
+            // Add timeout to cost estimation request
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout
+            
+            resp = await fetch('http://127.0.0.1:3000/costs', { 
+              method: 'POST', 
+              headers: authHeaders({'Content-Type':'application/json'}), 
+              body: JSON.stringify(body),
+              signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
             data = await resp.json().catch(()=>null);
             // Debug logging for cost API response
             try {
