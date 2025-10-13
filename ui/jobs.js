@@ -113,7 +113,12 @@
               }, 3000).catch(() => {});
             } catch(_){ }
             
-            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(jobData), signal: currentFetchController.signal });
+            const resp = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/jobs`, { 
+              method: 'POST', 
+              headers: authHeaders({ 'Content-Type': 'application/json' }), 
+              body: JSON.stringify(jobData), 
+              signal: currentFetchController.signal 
+            }, 30000); // 30 second timeout for job submission
             const text = await resp.text();
             let data = {};
             try { data = JSON.parse(text || '{}'); } catch(_) { data = { error: text }; }
