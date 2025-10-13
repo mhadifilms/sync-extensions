@@ -539,10 +539,11 @@ function AEFT_exportInOutAudio(payloadJson) {
         } catch(_){ }
         
         // Use curl to call the server and get JSON response
-    var cmd = '';
+        var cmd = '';
         if (isWindows) {
-          cmd = 'powershell -Command "Invoke-WebRequest -Uri \'' + url + '\' | Select-Object -ExpandProperty Content"';
-    } else {
+          // Use curl instead of PowerShell to avoid Defender issues
+          cmd = 'cmd.exe /c curl -s "' + url + '"';
+        } else {
           cmd = 'curl -s "' + url + '"';
         }
         
@@ -652,206 +653,85 @@ function AEFT_exportInOutAudio(payloadJson) {
         var extPath = _extensionRoot();
         var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
         
-        // Find bundled Node.js executable
-        var nodePath = null;
-        try {
-          var extRoot2 = _extensionRoot();
-          if (extRoot2) {
-            var cand2 = isWindows ? (extRoot2 + '\\bin\\win32-x64\\node.exe') : (extRoot2 + '/bin/darwin-arm64/node');
-            var fn2 = new File(cand2);
-            if (fn2 && fn2.exists) { nodePath = fn2.fsName; }
-          }
-        } catch(_){ }
-        
-        if (!nodePath) {
-          return _respond({ ok:false, error:'Bundled Node.js not found - extension requires bundled Node.js' });
-        }
-        
-        // Create a simple inline Node.js script for WAV conversion
-        var script = 'const fs = require(\'fs\');\n' +
-          'const path = require(\'path\');\n' +
-          'function readUInt32BE(buf, off) { return buf.readUInt32BE(off); }\n' +
-          'function readUInt16BE(buf, off) { return buf.readUInt16BE(off); }\n' +
-          'function readFloat80BE(buf, off) {\n' +
-          '  const b0 = buf[off];\n' +
-          '  const b1 = buf[off+1];\n' +
-          '  const sign = (b0 & 0x80) ? -1 : 1;\n' +
-          '  const exp = ((b0 & 0x7F) << 8) | b1;\n' +
-          '  const hi = buf.readUInt32BE(off+2);\n' +
-          '  const lo = buf.readUInt32BE(off+6);\n' +
-          '  if (exp === 0 && hi === 0 && lo === 0) return 0;\n' +
-          '  if (exp === 0x7FFF) return sign * Infinity;\n' +
-          '  const mantissa = (hi * Math.pow(2, 32)) + lo;\n' +
-          '  const frac = mantissa / Math.pow(2, 63);\n' +
-          '  return sign * frac * Math.pow(2, exp - 16383);\n' +
-          '}\n' +
-          'function parseAiffHeader(fd) {\n' +
-          '  const head = Buffer.alloc(12);\n' +
-          '  fs.readSync(fd, head, 0, 12, 0);\n' +
-          '  if (head.toString(\'ascii\', 0, 4) !== \'FORM\') throw new Error(\'Not an AIFF file\');\n' +
-          '  const formType = Buffer.alloc(4);\n' +
-          '  fs.readSync(fd, formType, 0, 4, 8);\n' +
-          '  const isAIFC = formType.toString(\'ascii\') === \'AIFC\';\n' +
-          '  if (!(isAIFC || formType.toString(\'ascii\') === \'AIFF\')) throw new Error(\'Unsupported AIFF FORM\');\n' +
-          '  let pos = 12;\n' +
-          '  let numChannels = 0, numFrames = 0, sampleSize = 0, sampleRate = 0;\n' +
-          '  let compressionType = \'NONE\';\n' +
-          '  let ssndDataStart = -1, dataBytes = 0;\n' +
-          '  const stat = fs.fstatSync(fd);\n' +
-          '  const fileSize = stat.size;\n' +
-          '  while (pos + 8 <= fileSize) {\n' +
-          '    const hdr = Buffer.alloc(8);\n' +
-          '    fs.readSync(fd, hdr, 0, 8, pos);\n' +
-          '    const ckId = hdr.toString(\'ascii\', 0, 4);\n' +
-          '    const ckSize = readUInt32BE(hdr, 4);\n' +
-          '    const ckStart = pos + 8;\n' +
-          '    if (ckId === \'COMM\') {\n' +
-          '      const comm = Buffer.alloc(Math.min(ckSize, 64));\n' +
-          '      fs.readSync(fd, comm, 0, comm.length, ckStart);\n' +
-          '      numChannels = readUInt16BE(comm, 0);\n' +
-          '      numFrames = readUInt32BE(comm, 2);\n' +
-          '      sampleSize = readUInt16BE(comm, 6);\n' +
-          '      sampleRate = readFloat80BE(comm, 8);\n' +
-          '      if (isAIFC && ckSize >= 22) {\n' +
-          '        const cTypeBuf = Buffer.alloc(4);\n' +
-          '        fs.readSync(fd, cTypeBuf, 0, 4, ckStart + 18);\n' +
-          '        compressionType = cTypeBuf.toString(\'ascii\');\n' +
-          '      }\n' +
-          '    } else if (ckId === \'SSND\') {\n' +
-          '      const ssndHdr = Buffer.alloc(8);\n' +
-          '      fs.readSync(fd, ssndHdr, 0, 8, ckStart);\n' +
-          '      const offset = readUInt32BE(ssndHdr, 0);\n' +
-          '      ssndDataStart = ckStart + 8 + offset;\n' +
-          '      dataBytes = ckSize - 8 - offset;\n' +
-          '    }\n' +
-          '    pos = ckStart + ckSize + (ckSize % 2);\n' +
-          '    if (numChannels && numFrames && sampleSize && ssndDataStart !== -1) break;\n' +
-          '  }\n' +
-          '  if (numChannels <= 0 || numFrames <= 0 || sampleSize <= 0 || ssndDataStart < 0)\n' +
-          '    throw new Error(\'AIFF missing required chunks\');\n' +
-          '  if (!isFinite(sampleRate) || sampleRate < 800 || sampleRate > 768000) {\n' +
-          '    sampleRate = 48000;\n' +
-          '  }\n' +
-          '  const bytesPerSample = Math.ceil(sampleSize / 8);\n' +
-          '  const pcmBytes = numFrames * numChannels * bytesPerSample;\n' +
-          '  dataBytes = Math.min(dataBytes || pcmBytes, Math.max(0, (fileSize - ssndDataStart)));\n' +
-          '  return { isAIFC, compressionType, numChannels, numFrames, sampleSize, sampleRate, bytesPerSample, dataBytes, ssndDataStart };\n' +
-          '}\n' +
-          'function writeWavHeader(fd, meta) {\n' +
-          '  const { numChannels, sampleRate, sampleSize, dataBytes } = meta;\n' +
-          '  const blockAlign = Math.ceil(sampleSize/8) * numChannels;\n' +
-          '  const byteRate = sampleRate * blockAlign;\n' +
-          '  const riffSize = 36 + dataBytes;\n' +
-          '  const buf = Buffer.alloc(44);\n' +
-          '  buf.write(\'RIFF\', 0, 4, \'ascii\');\n' +
-          '  buf.writeUInt32LE(riffSize, 4);\n' +
-          '  buf.write(\'WAVE\', 8, 4, \'ascii\');\n' +
-          '  buf.write(\'fmt \', 12, 4, \'ascii\');\n' +
-          '  buf.writeUInt32LE(16, 16);\n' +
-          '  buf.writeUInt16LE(1, 20);\n' +
-          '  buf.writeUInt16LE(numChannels, 22);\n' +
-          '  buf.writeUInt32LE(Math.round(sampleRate), 24);\n' +
-          '  buf.writeUInt32LE(Math.round(byteRate), 28);\n' +
-          '  buf.writeUInt16LE(blockAlign, 32);\n' +
-          '  buf.writeUInt16LE(sampleSize, 34);\n' +
-          '  buf.write(\'data\', 36, 4, \'ascii\');\n' +
-          '  buf.writeUInt32LE(dataBytes, 40);\n' +
-          '  fs.writeSync(fd, buf, 0, 44);\n' +
-          '}\n' +
-          'function swapEndianInPlace(buf, bytesPerSample) {\n' +
-          '  if (bytesPerSample === 1) return buf;\n' +
-          '  const out = Buffer.allocUnsafe(buf.length);\n' +
-          '  if (bytesPerSample === 2) {\n' +
-          '    for (let i=0; i<buf.length; i+=2) { out[i] = buf[i+1]; out[i+1] = buf[i]; }\n' +
-          '  } else if (bytesPerSample === 3) {\n' +
-          '    for (let i=0; i<buf.length; i+=3) { out[i] = buf[i+2]; out[i+1] = buf[i+1]; out[i+2] = buf[i]; }\n' +
-          '  } else if (bytesPerSample === 4) {\n' +
-          '    for (let i=0; i<buf.length; i+=4) { out[i] = buf[i+3]; out[i+1] = buf[i+2]; out[i+2] = buf[i+1]; out[i+3] = buf[i]; }\n' +
-          '  } else {\n' +
-          '    buf.copy(out);\n' +
-          '  }\n' +
-          '  return out;\n' +
-          '}\n' +
-          'try {\n' +
-          '  const srcPath = process.argv[2];\n' +
-          '  const destPath = process.argv[3];\n' +
-          '  const fd = fs.openSync(srcPath, \'r\');\n' +
-          '  try {\n' +
-          '    const meta = parseAiffHeader(fd);\n' +
-          '    if (!(meta.compressionType === \'NONE\' || meta.compressionType === \'sowt\')) {\n' +
-          '      throw new Error(\'Unsupported AIFF compression: \' + meta.compressionType);\n' +
-          '    }\n' +
-          '    const ofd = fs.openSync(destPath, \'w\');\n' +
-          '    try {\n' +
-          '      writeWavHeader(ofd, meta);\n' +
-          '      const chunkSize = 64 * 1024;\n' +
-          '      const bytesPerSample = meta.bytesPerSample;\n' +
-          '      let remaining = meta.dataBytes;\n' +
-          '      let pos = meta.ssndDataStart;\n' +
-          '      let leftover = Buffer.alloc(0);\n' +
-          '      while (remaining > 0) {\n' +
-          '        const toRead = Math.min(remaining, chunkSize);\n' +
-          '        const buf = Buffer.alloc(toRead);\n' +
-          '        const n = fs.readSync(fd, buf, 0, toRead, pos);\n' +
-          '        if (!n) break;\n' +
-          '        pos += n; remaining -= n;\n' +
-          '        let work = buf.slice(0, n);\n' +
-          '        if (leftover.length) {\n' +
-          '          work = Buffer.concat([leftover, work]);\n' +
-          '          leftover = Buffer.alloc(0);\n' +
-          '        }\n' +
-          '        const aligned = Math.floor(work.length / bytesPerSample) * bytesPerSample;\n' +
-          '        const body = work.slice(0, aligned);\n' +
-          '        leftover = work.slice(aligned);\n' +
-          '        const payload = (meta.compressionType === \'NONE\') ? swapEndianInPlace(body, bytesPerSample) : body;\n' +
-          '        if (payload.length) fs.writeSync(ofd, payload);\n' +
-          '      }\n' +
-          '    } finally { fs.closeSync(ofd); }\n' +
-          '  } finally { fs.closeSync(fd); }\n' +
-          '  console.log(\'SUCCESS\');\n' +
-          '} catch (e) {\n' +
-          '  console.error(\'ERROR: \' + e.message);\n' +
-          '  process.exit(1);\n' +
-          '}';
-        
-        // Write script to temp file
-        var scriptFile = new File(Folder.temp.fsName + '/sync_aiff_convert.js');
-        try { scriptFile.open('w'); scriptFile.write(script); scriptFile.close(); } catch(_){ }
-        
-        var cmd = '';
-        if (isWindows) {
-          var np = String(nodePath||'').replace(/"/g,'');
-          cmd = 'cmd.exe /c "' + np + '" "' + String(scriptFile.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(aif.fsName||'').replace(/\\/g,'\\\\') + '" "' + String(outputFile.fsName||'').replace(/\\/g,'\\\\') + '"';
-        } else {
-          var np2 = String(nodePath||'');
-          var s1 = String(scriptFile.fsName||'');
-          var a1 = String(aif.fsName||'');
-          var o1 = String(outputFile.fsName||'');
-          try { if (np2 && np2.indexOf('/bin/darwin-arm64/node') !== -1) { system.callSystem('/bin/chmod 755 ' + _shq(np2)); } } catch(_){ }
-          var inner = '"' + np2 + '" ' + '"' + s1 + '" ' + '"' + a1 + '" ' + '"' + o1 + '"' + ' >/dev/null 2>&1 || true';
-          cmd = '/bin/bash -lc ' + _shq(inner);
-        }
+        // Use server-side WAV conversion via HTTP request (same as MP3)
+        var url = 'http://127.0.0.1:3000/audio/convert?format=wav&srcPath=' + encodeURIComponent(aif.fsName);
         
         try {
           var debugLogPath = _syncDebugLogPath();
           var dbg3 = new File(debugLogPath);
           dbg3.open('a');
-          dbg3.writeln('[' + new Date().toString() + '] node convert cmd: ' + String(cmd));
+          dbg3.writeln('[' + new Date().toString() + '] calling server for wav: ' + String(url));
           dbg3.close();
+        } catch(_){ }
+        
+        // Use curl to call the server and get JSON response
+        var cmd = '';
+        if (isWindows) {
+          // Use curl instead of PowerShell to avoid Defender issues
+          cmd = 'cmd.exe /c curl -s "' + url + '"';
+        } else {
+          cmd = 'curl -s "' + url + '"';
+        }
+        
+        try {
+          var debugLogPath = _syncDebugLogPath();
+          var dbg4 = new File(debugLogPath);
+          dbg4.open('a');
+          dbg4.writeln('[' + new Date().toString() + '] curl wav cmd: ' + String(cmd));
+          dbg4.close();
         } catch(_){ }
         
         var result = system.callSystem(cmd);
         
         try {
           var debugLogPath = _syncDebugLogPath();
-          var dbg4 = new File(debugLogPath);
-          dbg4.open('a');
-          dbg4.writeln('[' + new Date().toString() + '] node convert result: ' + String(result));
-          dbg4.close();
+          var dbg5 = new File(debugLogPath);
+          dbg5.open('a');
+          dbg5.writeln('[' + new Date().toString() + '] curl wav result: ' + String(result));
+          dbg5.close();
         } catch(_){ }
         
-        // Cleanup temp script
-        try { scriptFile.remove(); } catch(_){ }
+        // Parse JSON response to get the WAV file path
+        var wavPath = '';
+        try {
+          var jsonResponse = JSON.parse(result);
+          if (jsonResponse && jsonResponse.ok && jsonResponse.path) {
+            wavPath = jsonResponse.path;
+          }
+        } catch(e) {
+          try {
+            var debugLogPath = _syncDebugLogPath();
+            var dbg6 = new File(debugLogPath);
+            dbg6.open('a');
+            dbg6.writeln('[' + new Date().toString() + '] JSON parse error: ' + String(e));
+            dbg6.close();
+          } catch(_){ }
+        }
+        
+        // Copy the WAV file from server path to our output path
+        if (wavPath && wavPath.length > 0) {
+          try {
+            var serverWavFile = new File(wavPath);
+            if (serverWavFile && serverWavFile.exists) {
+              serverWavFile.copy(outputFile);
+              try {
+                var debugLogPath = _syncDebugLogPath();
+                var dbg7 = new File(debugLogPath);
+                dbg7.open('a');
+                dbg7.writeln('[' + new Date().toString() + '] copied wav from server: ' + String(wavPath) + ' to: ' + String(outputFile.fsName));
+                dbg7.close();
+              } catch(_){ }
+            }
+          } catch(e) {
+            try {
+              var debugLogPath = _syncDebugLogPath();
+              var dbg8 = new File(debugLogPath);
+              dbg8.open('a');
+              dbg8.writeln('[' + new Date().toString() + '] copy wav error: ' + String(e));
+              dbg8.close();
+            } catch(_){ }
+          }
+        }
         
         // Wait for file to be created
         var waited = 0;
@@ -861,24 +741,25 @@ function AEFT_exportInOutAudio(payloadJson) {
           waited += 200;
         }
         
+        // Check if WAV file was successfully copied
         try {
           var debugLogPath = _syncDebugLogPath();
-          var dbg5 = new File(debugLogPath);
-          dbg5.open('a');
-          dbg5.writeln('[' + new Date().toString() + '] output exists: ' + String(outputFile&&outputFile.exists) + ' len: ' + String(outputFile&&outputFile.length));
-          dbg5.close();
+          var dbg9 = new File(debugLogPath);
+          dbg9.open('a');
+          dbg9.writeln('[' + new Date().toString() + '] wav output exists: ' + String(outputFile&&outputFile.exists) + ' len: ' + String(outputFile&&outputFile.length));
+          dbg9.close();
         } catch(_){ }
         
         if (outputFile && outputFile.exists && outputFile.length > 0) { 
           try { aif.remove(); } catch(_){ } 
-          return _respond({ ok:true, path: outputFile.fsName, note:'node convert wav' }); 
+          return _respond({ ok:true, path: outputFile.fsName, note:'server convert wav' }); 
         }
       } catch(e){ 
         try {
           var debugLogPath = _syncDebugLogPath();
           var dbg6 = new File(debugLogPath);
           dbg6.open('a');
-          dbg6.writeln('[' + new Date().toString() + '] node convert error: ' + String(e));
+          dbg6.writeln('[' + new Date().toString() + '] node wav convert error: ' + String(e));
           dbg6.close();
         } catch(_){ }
       }
@@ -906,7 +787,8 @@ function AEFT_exportInOutAudio(payloadJson) {
         var cmd = '';
         var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
         if (isWindows) {
-          cmd = 'powershell -Command "Invoke-WebRequest -Uri \'' + url + '\' | Select-Object -ExpandProperty Content"';
+          // Use curl instead of PowerShell to avoid Defender issues
+          cmd = 'cmd.exe /c curl -s "' + url + '"';
         } else {
           cmd = 'curl -s "' + url + '"';
         }

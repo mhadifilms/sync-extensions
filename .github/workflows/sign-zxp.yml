@@ -33,6 +33,21 @@ jobs:
         working-directory: server
         run: npm ci --omit=dev
 
+      - name: Create .env file from secrets
+        shell: bash
+        run: |
+          cat > .env << EOF
+          # R2 Configuration
+          R2_ENDPOINT_URL=${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET=${{ secrets.R2_BUCKET }}
+          R2_PREFIX=${{ secrets.R2_PREFIX }}
+          EOF
+          echo "Created .env file:"
+          ls -la .env
+          echo "Contents:"
+          cat .env
 
       - name: Build CEP folders for macOS
         shell: bash
@@ -55,7 +70,7 @@ jobs:
             cp -a bin "$dest/bin"
             cp -a index.html "$dest/"
             cp -a host "$dest/host"
-            cp -a .env "$dest/.env"
+            cp -a .env "$dest/.env" || echo "Warning: .env file not found or copy failed"
             mkdir -p "$dest/ui"
             # Copy shared UI but do NOT overwrite per-extension host-detection.js
             if command -v rsync >/dev/null 2>&1; then
@@ -103,6 +118,21 @@ jobs:
         working-directory: server
         run: npm ci --omit=dev
 
+      - name: Create .env file from secrets
+        shell: bash
+        run: |
+          cat > .env << EOF
+          # R2 Configuration
+          R2_ENDPOINT_URL=${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET=${{ secrets.R2_BUCKET }}
+          R2_PREFIX=${{ secrets.R2_PREFIX }}
+          EOF
+          echo "Created .env file:"
+          ls -la .env
+          echo "Contents:"
+          cat .env
 
       - name: Build CEP folders for Windows
         shell: pwsh
@@ -133,7 +163,7 @@ jobs:
             Copy-Item "bin" "$dest/bin" -Recurse
             Copy-Item "index.html" "$dest/"
             Copy-Item "host" "$dest/host" -Recurse
-            Copy-Item ".env" "$dest/.env"
+            Copy-Item ".env" "$dest/.env" -ErrorAction SilentlyContinue; if (-not (Test-Path "$dest/.env")) { Write-Warning ".env file not found or copy failed" }
             # Copy main UI files to the existing ui directory (merge, don't replace)
             Copy-Item "ui/*" "$dest/ui/" -Recurse -Force
             # Restore per-extension host-detection.js after shared UI copy
