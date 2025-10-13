@@ -1215,7 +1215,8 @@ app.post('/jobs', async (req, res) => {
       } catch(e){ await tlog("silent catch:", e.message); }
       saveJobs();
       res.json(job);
-      pollSyncJob(job);
+      // Start polling after response is sent to avoid ERR_HTTP_HEADERS_SENT
+      setImmediate(() => pollSyncJob(job));
     }catch(e){
       slog('[jobs:create] generation error', e && e.message ? e.message : String(e));
       job.status = 'failed';
