@@ -230,6 +230,25 @@ async function convertAiffToMp3(srcPath, destPath){
   // Load lamejs for MP3 encoding
   let lamejs;
   try {
+    // Load MPEGMode and make it global (required by Mp3Encoder)
+    const MPEGMode = require('lamejs/src/js/MPEGMode.js');
+    global.MPEGMode = MPEGMode;
+    tlog('MPEGMode loaded and made global');
+    
+    // Load other required dependencies
+    global.Lame = require('lamejs/src/js/Lame.js');
+    global.BitStream = require('lamejs/src/js/BitStream.js');
+    global.Presets = require('lamejs/src/js/Presets.js');
+    global.GainAnalysis = require('lamejs/src/js/GainAnalysis.js');
+    global.QuantizePVT = require('lamejs/src/js/QuantizePVT.js');
+    global.Quantize = require('lamejs/src/js/Quantize.js');
+    global.Takehiro = require('lamejs/src/js/Takehiro.js');
+    global.Reservoir = require('lamejs/src/js/Reservoir.js');
+    global.Version = require('lamejs/src/js/Version.js');
+    global.VBRTag = require('lamejs/src/js/VBRTag.js');
+    global.Encoder = require('lamejs/src/js/Encoder.js');
+    global.common = require('lamejs/src/js/common.js');
+    
     lamejs = require('lamejs');
     tlog('lamejs loaded successfully');
   } catch(e) {
