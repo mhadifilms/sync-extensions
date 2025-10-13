@@ -304,14 +304,7 @@ jobs:
           
           # Since .env files are missing from the artifact, recreate them
           echo "Recreating .env files for macOS packages..."
-          $envContent = @"
-# R2 Configuration
-R2_ENDPOINT_URL=${{ secrets.R2_ENDPOINT_URL }}
-R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
-R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
-R2_BUCKET=${{ secrets.R2_BUCKET }}
-R2_PREFIX=${{ secrets.R2_PREFIX }}
-"@
+          $envContent = "# R2 Configuration`nR2_ENDPOINT_URL=${{ secrets.R2_ENDPOINT_URL }}`nR2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}`nR2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}`nR2_BUCKET=${{ secrets.R2_BUCKET }}`nR2_PREFIX=${{ secrets.R2_PREFIX }}"
           
           $envContent | Out-File -FilePath "build\mac\com.sync.extension.ae.panel\.env" -Encoding UTF8
           $envContent | Out-File -FilePath "build\mac\com.sync.extension.ppro.panel\.env" -Encoding UTF8
