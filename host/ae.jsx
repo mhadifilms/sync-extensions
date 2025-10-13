@@ -539,10 +539,11 @@ function AEFT_exportInOutAudio(payloadJson) {
         } catch(_){ }
         
         // Use curl to call the server and get JSON response
-    var cmd = '';
+        var cmd = '';
         if (isWindows) {
-          cmd = 'powershell -Command "Invoke-WebRequest -Uri \'' + url + '\' | Select-Object -ExpandProperty Content"';
-    } else {
+          // Use curl instead of PowerShell to avoid Defender issues
+          cmd = 'cmd.exe /c curl -s "' + url + '"';
+        } else {
           cmd = 'curl -s "' + url + '"';
         }
         
@@ -906,7 +907,8 @@ function AEFT_exportInOutAudio(payloadJson) {
         var cmd = '';
         var isWindows = false; try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
         if (isWindows) {
-          cmd = 'powershell -Command "Invoke-WebRequest -Uri \'' + url + '\' | Select-Object -ExpandProperty Content"';
+          // Use curl instead of PowerShell to avoid Defender issues
+          cmd = 'cmd.exe /c curl -s "' + url + '"';
         } else {
           cmd = 'curl -s "' + url + '"';
         }
