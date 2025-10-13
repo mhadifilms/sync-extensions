@@ -1106,7 +1106,7 @@ app.get('/models', async (req, res) => {
   try{
     const { apiKey } = req.query;
     if (!apiKey) return res.status(400).json({ error: 'API key required' });
-    const r = await fetch(`${SYNC_API_BASE}/models`, { headers: { 'x-api-key': String(apiKey) }});
+    const r = await fetch(`${SYNC_API_BASE}/models`, { headers: { 'x-api-key': String(apiKey) }, signal: AbortSignal.timeout(10000) });
     const j = await r.json().catch(()=>({}));
     if (!r.ok) return res.status(r.status).json(j);
     res.json(j);
@@ -1120,7 +1120,7 @@ app.get('/generations', async (req, res) => {
     if (!apiKey) return res.status(400).json({ error: 'API key required' });
     const url = new URL(`${SYNC_API_BASE}/generations`);
     if (status) url.searchParams.set('status', String(status));
-    const r = await fetch(url.toString(), { headers: { 'x-api-key': String(apiKey) }});
+    const r = await fetch(url.toString(), { headers: { 'x-api-key': String(apiKey) }, signal: AbortSignal.timeout(10000) });
     const j = await r.json().catch(()=>({}));
     if (!r.ok) return res.status(r.status).json(j);
     res.json(j);
@@ -1322,7 +1322,7 @@ app.post('/costs', async (req, res) => {
       options: opts
     };
     try { slog('[costs] request', 'model=', body.model, 'video=', videoUrl, 'audio=', audioUrl, 'options=', JSON.stringify(opts)); } catch(_){ }
-    const resp = await fetch(`${SYNC_API_BASE}/analyze/cost`, { method:'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body) });
+    const resp = await fetch(`${SYNC_API_BASE}/analyze/cost`, { method:'POST', headers: { 'x-api-key': apiKey, 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
     const text = await safeText(resp);
     try { slog('[costs] response', resp.status, (text||'').slice(0,200)); } catch(_){ }
     if (!resp.ok) { slog('[costs] sync api error', resp.status, text); return res.status(resp.status).json({ error: text || 'cost failed' }); }
@@ -1355,7 +1355,7 @@ async function createGeneration(job){
   const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
   
   // Add timeout protection to prevent hanging
-  const timeoutMs = 180000; // 3 minute timeout (increased for Premiere Pro)
+  const timeoutMs = 60000; // 60 second timeout
   const timeoutPromise = new Promise((_, reject) => 
     setTimeout(() => reject(new Error('Generation timeout')), timeoutMs)
   );
@@ -1381,7 +1381,8 @@ async function createGenerationInternal(job, vStat, aStat, overLimit){
         options: (job.options && typeof job.options === 'object') ? job.options : {}
       };
       const resp = await fetch(`${SYNC_API_BASE}/generate`, {
-        method: 'POST', headers: { 'x-api-key': job.apiKey, 'accept':'application/json', 'content-type':'application/json' }, body: JSON.stringify(body)
+        method: 'POST', headers: { 'x-api-key': job.apiKey, 'accept':'application/json', 'content-type':'application/json' }, body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120000) // 2 minute timeout
       });
       if (!resp.ok){ const t = await safeText(resp); slog('[create:url:direct] error', resp.status, t); throw new Error(`create(url) failed ${resp.status} ${t}`); }
       const data = await resp.json();
@@ -1404,7 +1405,8 @@ async function createGenerationInternal(job, vStat, aStat, overLimit){
       const resp = await fetch(`${SYNC_API_BASE}/generate`, {
         method: 'POST',
         headers: { 'x-api-key': job.apiKey, 'accept':'application/json', 'content-type':'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120000) // 2 minute timeout
       });
       if (!resp.ok){ const t = await safeText(resp); slog('[create:url] error', resp.status, t); throw new Error(`create(url) failed ${resp.status} ${t}`); }
       const data = await resp.json();
@@ -1428,7 +1430,8 @@ async function createGenerationInternal(job, vStat, aStat, overLimit){
   const resp = await fetch(`${SYNC_API_BASE}/generate`, {
     method: 'POST',
     headers: { 'x-api-key': job.apiKey, 'accept':'application/json', 'content-type':'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120000) // 2 minute timeout
   });
   if (!resp.ok){ const t = await safeText(resp); slog('[create:url] error', resp.status, t); throw new Error(`create(url) failed ${resp.status} ${t}`); }
   const data = await resp.json();
@@ -1436,9 +1439,9 @@ async function createGenerationInternal(job, vStat, aStat, overLimit){
 }
 
 async function fetchGeneration(job){
-  let resp = await fetch(`${SYNC_API_BASE}/generate/${job.syncJobId}`, { headers: { 'x-api-key': job.apiKey }});
+  let resp = await fetch(`${SYNC_API_BASE}/generate/${job.syncJobId}`, { headers: { 'x-api-key': job.apiKey }, signal: AbortSignal.timeout(10000) });
   if (!resp.ok && resp.status === 404){
-    resp = await fetch(`${SYNC_API_BASE}/generations/${job.syncJobId}`, { headers: { 'x-api-key': job.apiKey }});
+    resp = await fetch(`${SYNC_API_BASE}/generations/${job.syncJobId}`, { headers: { 'x-api-key': job.apiKey }, signal: AbortSignal.timeout(10000) });
   }
   if (!resp.ok) return null;
   return await resp.json();
