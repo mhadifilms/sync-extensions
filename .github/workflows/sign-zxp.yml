@@ -48,6 +48,26 @@ jobs:
           ls -la .env
           echo "Contents:"
           cat .env
+          
+          # Validate .env file exists and contains required variables
+          if [ ! -f .env ]; then
+            echo "ERROR: .env file was not created"
+            exit 1
+          fi
+          
+          # Check for required R2 variables
+          if ! grep -q "R2_ENDPOINT_URL=" .env || ! grep -q "R2_ACCESS_KEY=" .env || ! grep -q "R2_SECRET_KEY=" .env; then
+            echo "ERROR: .env file missing required R2 configuration variables"
+            exit 1
+          fi
+          
+          # Ensure variables are not empty
+          if grep -q "R2_ACCESS_KEY=$" .env || grep -q "R2_SECRET_KEY=$" .env; then
+            echo "ERROR: .env file contains empty R2 credentials"
+            exit 1
+          fi
+          
+          echo "✅ .env file validation passed"
 
       - name: Build CEP folders for macOS
         shell: bash
@@ -70,7 +90,7 @@ jobs:
             cp -a bin "$dest/bin"
             cp -a index.html "$dest/"
             cp -a host "$dest/host"
-            cp -a .env "$dest/.env" || echo "Warning: .env file not found or copy failed"
+            cp -a .env "$dest/.env" || { echo "ERROR: .env file copy failed for $dest"; exit 1; }
             mkdir -p "$dest/ui"
             # Copy shared UI but do NOT overwrite per-extension host-detection.js
             if command -v rsync >/dev/null 2>&1; then
@@ -90,6 +110,21 @@ jobs:
 
           # Strip Windows bins from mac packages
           rm -rf "$ae_mac/bin/win32-x64" "$pp_mac/bin/win32-x64" || true
+          
+          # Verify .env files were copied correctly
+          echo "Verifying .env files in built packages..."
+          for pkg in "$ae_mac" "$pp_mac"; do
+            echo "Checking $pkg/.env..."
+            if [ ! -f "$pkg/.env" ]; then
+              echo "ERROR: .env file missing in $pkg"
+              exit 1
+            fi
+            if ! grep -q "R2_ACCESS_KEY=" "$pkg/.env" || ! grep -q "R2_SECRET_KEY=" "$pkg/.env"; then
+              echo "ERROR: .env file missing R2 credentials in $pkg"
+              exit 1
+            fi
+            echo "✅ $pkg/.env verified"
+          done
 
       - name: Upload mac build
         uses: actions/upload-artifact@v4
@@ -133,6 +168,26 @@ jobs:
           ls -la .env
           echo "Contents:"
           cat .env
+          
+          # Validate .env file exists and contains required variables
+          if [ ! -f .env ]; then
+            echo "ERROR: .env file was not created"
+            exit 1
+          fi
+          
+          # Check for required R2 variables
+          if ! grep -q "R2_ENDPOINT_URL=" .env || ! grep -q "R2_ACCESS_KEY=" .env || ! grep -q "R2_SECRET_KEY=" .env; then
+            echo "ERROR: .env file missing required R2 configuration variables"
+            exit 1
+          fi
+          
+          # Ensure variables are not empty
+          if grep -q "R2_ACCESS_KEY=$" .env || grep -q "R2_SECRET_KEY=$" .env; then
+            echo "ERROR: .env file contains empty R2 credentials"
+            exit 1
+          fi
+          
+          echo "✅ .env file validation passed"
 
       - name: Build CEP folders for Windows
         shell: pwsh
@@ -163,7 +218,7 @@ jobs:
             Copy-Item "bin" "$dest/bin" -Recurse
             Copy-Item "index.html" "$dest/"
             Copy-Item "host" "$dest/host" -Recurse
-            Copy-Item ".env" "$dest/.env" -ErrorAction SilentlyContinue; if (-not (Test-Path "$dest/.env")) { Write-Warning ".env file not found or copy failed" }
+            Copy-Item ".env" "$dest/.env" -ErrorAction Stop; if (-not (Test-Path "$dest/.env")) { throw ".env file not found or copy failed for $dest" }
             # Copy main UI files to the existing ui directory (merge, don't replace)
             Copy-Item "ui/*" "$dest/ui/" -Recurse -Force
             # Restore per-extension host-detection.js after shared UI copy
@@ -181,6 +236,20 @@ jobs:
           }
 
           echo "Created CEP folders (Windows): $ae_win, $pp_win"
+          
+          # Verify .env files were copied correctly
+          echo "Verifying .env files in Windows packages..."
+          foreach ($pkg in @($ae_win, $pp_win)) {
+            echo "Checking $pkg\.env..."
+            if (-not (Test-Path "$pkg\.env")) {
+              throw ".env file missing in $pkg"
+            }
+            $envContent = Get-Content "$pkg\.env" -Raw
+            if (-not ($envContent -match "R2_ACCESS_KEY=") -or -not ($envContent -match "R2_SECRET_KEY=")) {
+              throw ".env file missing R2 credentials in $pkg"
+            }
+            echo "✅ $pkg\.env verified"
+          }
 
       - name: Download mac build
         uses: actions/download-artifact@v4
@@ -298,14 +367,29 @@ jobs:
             # Check manifest.xml and index.html exist at ZXP root
             $manifestPath = Join-Path $zxpDir "CSXS\manifest.xml"
             $indexPath = Join-Path $zxpDir "index.html"
+            $envPath = Join-Path $zxpDir ".env"
             if (-not (Test-Path $manifestPath)) {
               throw "Required manifest.xml missing: $manifestPath"
             }
             if (-not (Test-Path $indexPath)) {
               throw "Required index.html missing: $indexPath"
             }
+            if (-not (Test-Path $envPath)) {
+              throw "Required .env file missing: $envPath"
+            }
             echo "Found manifest.xml at: $manifestPath"
             echo "Found index.html at: $indexPath"
+            echo "Found .env at: $envPath"
+            
+            # Validate .env contains required R2 variables
+            $envContent = Get-Content $envPath -Raw
+            if (-not ($envContent -match "R2_ENDPOINT_URL=") -or -not ($envContent -match "R2_ACCESS_KEY=") -or -not ($envContent -match "R2_SECRET_KEY=")) {
+              throw ".env file missing required R2 configuration variables in $zxpDir"
+            }
+            if ($envContent -match "R2_ACCESS_KEY=$" -or $envContent -match "R2_SECRET_KEY=$") {
+              throw ".env file contains empty R2 credentials in $zxpDir"
+            }
+            echo "✅ .env validation passed for $zxpDir"
             
             # Check Node.js binaries exist and set permissions (macOS only)
             if ($zxpDir -like "*mac*") {
@@ -392,6 +476,7 @@ jobs:
             echo "$zxp verified successfully"
           }
           
+          
           # Note: Quarantine attributes are added by macOS when files are downloaded
           # Users need to remove them manually: xattr -d com.apple.provenance *.zxp
           echo "Note: If ZXP installer rejects the extension, remove quarantine attributes:"
@@ -431,6 +516,9 @@ jobs:
             - Premiere Pro: `sync-extension-premiere-windows-signed.zxp` and `sync-extension-premiere-mac-signed.zxp`
             
             Choose the appropriate package for your platform and application.
+            
+            **Security & Trust:**
+            - All packages are digitally signed and verified
           files: |
             sync-extension-ae-windows-signed.zxp
             sync-extension-premiere-windows-signed.zxp
