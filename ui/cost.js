@@ -102,7 +102,7 @@
           
           // If lacking API key, show $--
           if (!apiKey) {
-            const txt = 'cost: $--';
+            const txt = 'cost: $0.00';
             if (display){ display.textContent = txt; }
             if (!auto && statusEl) statusEl.textContent = 'add API key in settings';
             try{ const below=document.getElementById('costBelow'); if (below) below.textContent=txt; }catch(_){ }
@@ -160,9 +160,9 @@
               setTimeout(() => estimateCost(auto, (retry || 0) + 1), 2000);
             } else if (retry >= 30) {
               // After 30 retries (60 seconds), show error
-              if (display){ display.textContent='cost: n/a'; }
+              if (display){ display.textContent='cost: $0.00'; }
               if (statusEl) statusEl.textContent = 'upload timeout - please try again';
-              try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: n/a'; }catch(_){ }
+              try{ const below=document.getElementById('costBelow'); if (below) below.textContent='cost: $0.00'; }catch(_){ }
             }
             return;
           }
@@ -279,12 +279,12 @@
             }
           } else {
             if (myToken !== costToken) return; // stale
-            if (badge){ badge.style.display='block'; badge.textContent = 'cost: n/a'; }
-            if (display){ display.textContent = 'cost: n/a'; }
+            if (badge){ badge.style.display='block'; badge.textContent = 'cost: $0.00'; }
+            if (display){ display.textContent = 'cost: $0.00'; }
             try { if (statusEl && data && data.error) statusEl.textContent = String(data.error).slice(0,200); } catch(_){ }
-            try { const below = document.getElementById('costBelow'); if (below){ below.textContent = 'cost: n/a'; } } catch(_){ }
+            try { const below = document.getElementById('costBelow'); if (below){ below.textContent = 'cost: $0.00'; } } catch(_){ }
           }
-        }catch(e){ if (myToken !== costToken) return; if (badge){ badge.style.display='block'; badge.textContent = 'cost: n/a'; } if (display){ display.textContent = 'cost: n/a'; } try { const below=document.getElementById('costBelow'); if (below){ below.textContent = 'cost: n/a'; } } catch(_){ } }
+        }catch(e){ if (myToken !== costToken) return; if (badge){ badge.style.display='block'; badge.textContent = 'cost: $0.00'; } if (display){ display.textContent = 'cost: $0.00'; } try { const below=document.getElementById('costBelow'); if (below){ below.textContent = 'cost: $0.00'; } } catch(_){ } }
       }
       
       // When backend is ready, if both inputs were already selected, re-estimate cost

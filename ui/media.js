@@ -1313,9 +1313,13 @@
         if (!job || !job.outputPath) return;
         
         const videoSection = document.getElementById('videoSection');
+        const videoDropzone = document.getElementById('videoDropzone');
         const videoPreview = document.getElementById('videoPreview');
         
         if (videoSection && videoPreview) {
+          // Ensure video preview is visible for output display
+          videoDropzone.style.display = 'none';
+          videoPreview.style.display = 'block';
           videoPreview.innerHTML = `
             <div class="custom-video-player">
               <video id="outputVideo" class="video-element" src="file://${job.outputPath.replace(/ /g, '%20')}">

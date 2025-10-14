@@ -141,12 +141,16 @@
             
             if (!resp.ok) { throw new Error(data && data.error ? data.error : (text || 'job creation failed')); }
             if (myToken !== runToken) return;
-            statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. rendering/transcoding…';
+            statusEl.textContent = 'job successfully submitted';
             jobs = jobs.map(j => j.id === placeholderId ? data : j);
             saveJobsLocal();
             updateHistory();
             // show history immediately
             try { showTab('history'); } catch(_) {}
+            // Reset button state to allow multiple submissions
+            btn.disabled = false;
+            btn.textContent = 'lipsync';
+            document.getElementById('clearBtn').style.display = 'inline-block';
             pollJobStatus(data.id);
           } catch (error) {
             console.error('Error creating job:', error);
@@ -177,14 +181,21 @@
               saveJobsLocal();
               updateHistory();
               
-              const statusEl = document.getElementById('statusMessage');
-              if (statusEl) statusEl.textContent = 'lipsync completed';
-              const btn = document.getElementById('lipsyncBtn');
-              btn.style.display = 'none';
-              const audioSection = document.getElementById('audioSection');
-              if (audioSection) audioSection.style.display = 'none';
-              renderOutputVideo(data);
-              showPostLipsyncActions(data);
+              // Only show result if this is the latest completed job
+              const latestCompleted = jobs
+                .filter(j => j.status === 'completed')
+                .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+              
+              if (latestCompleted && latestCompleted.id === jobId) {
+                const statusEl = document.getElementById('statusMessage');
+                if (statusEl) statusEl.textContent = 'lipsync completed';
+                const btn = document.getElementById('lipsyncBtn');
+                btn.style.display = 'none';
+                const audioSection = document.getElementById('audioSection');
+                if (audioSection) audioSection.style.display = 'none';
+                renderOutputVideo(data);
+                showPostLipsyncActions(data);
+              }
             } else if (data.status === 'failed') {
               clearInterval(interval);
               activePollingIntervals.delete(interval);
@@ -232,7 +243,7 @@
         const preview = document.getElementById('preview');
         const badge = document.getElementById('costIndicator');
         preview.innerHTML = '';
-        if (badge) { preview.appendChild(badge); badge.textContent = 'cost: —'; }
+        if (badge) { preview.appendChild(badge); badge.textContent = 'cost: $0.00'; }
         try { updateInputStatus(); } catch(_){ }
       }
 

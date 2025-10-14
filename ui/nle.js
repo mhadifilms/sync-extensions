@@ -283,22 +283,32 @@
                       return;
                     }
                     
-                    updateDebugStatus('Spawning (detached, stdio ignored): ' + nodePath + ' ' + serverPath);
+                    updateDebugStatus('Spawning (detached, stdio piped): ' + nodePath + ' ' + serverPath);
 
-                    // Fully detached spawn with stdio ignored to avoid broken pipe (EPIPE) issues
+                    // Detached spawn with stdout/stderr pipes so we can consume output
                     var spawn = require('child_process').spawn;
                     var child = spawn(nodePath, [serverPath], {
                       cwd: extPath + '/server',
                       detached: true,
-                      stdio: 'ignore'
+                      stdio: ['ignore', 'pipe', 'pipe']
                     });
 
-                    // Do not attach stdout/stderr listeners when stdio is ignored
+                    // Read server output safely into panel debug log
+                    if (child.stdout) {
+                      child.stdout.on('data', function(data) {
+                        try { updateDebugStatus('Server stdout: ' + data.toString()); } catch(_){ }
+                      });
+                    }
+                    if (child.stderr) {
+                      child.stderr.on('data', function(data) {
+                        try { updateDebugStatus('Server stderr: ' + data.toString()); } catch(_){ }
+                      });
+                    }
+
                     child.on('error', function(err) {
                       updateDebugStatus('Server spawn error: ' + err.message);
                     });
 
-                    // We won't get exit events when fully detached on some platforms, but keep for completeness
                     child.on('exit', function(code, signal) {
                       updateDebugStatus('Server exited with code: ' + code + ', signal: ' + signal);
                     });
@@ -322,7 +332,7 @@
                         .catch(function() {
                           updateDebugStatus('Server spawned but not responding');
                         });
-                    }, 2000);
+                    }, 4000);
                     
                   } catch(spawnError) {
                     updateDebugStatus('Spawn error: ' + spawnError.message);
