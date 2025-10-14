@@ -4,10 +4,7 @@
       function loadJobsLocal() {
         try {
           const raw = localStorage.getItem('syncJobs');
-          if (raw) { 
-            jobs = JSON.parse(raw) || [];
-            window.jobs = jobs; // Update global reference
-          }
+          if (raw) { jobs = JSON.parse(raw) || []; }
         } catch(_) {}
       }
 
@@ -15,8 +12,7 @@
         if (!selectedVideo || !selectedAudio) return;
         
         // Check for API key before proceeding
-        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
-        const apiKey = settings.syncApiKey || settings.apiKey || '';
+        const apiKey = document.getElementById('apiKey').value;
         if (!apiKey || apiKey.trim() === '') {
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'API key required - add it in settings';
@@ -85,7 +81,7 @@
             temperature: parseFloat(document.getElementById('temperature').value),
             activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
             detectObstructions: document.getElementById('detectObstructions').checked,
-            apiKey: apiKey,
+            apiKey: document.getElementById('apiKey').value,
             outputDir: outputDir,
             options: {
               sync_mode: (document.getElementById('syncMode')||{}).value || 'loop',
@@ -97,7 +93,6 @@
           const placeholderId = 'local-' + Date.now();
           const localJob = { id: placeholderId, videoPath: selectedVideo, audioPath: selectedAudio, model: jobData.model, status: 'processing', createdAt: new Date().toISOString(), syncJobId: null, error: null };
           jobs.push(localJob);
-          window.jobs = jobs; // Ensure global reference is maintained
           saveJobsLocal();
           updateHistory();
           
@@ -148,7 +143,6 @@
             if (myToken !== runToken) return;
             statusEl.textContent = 'job successfully submitted';
             jobs = jobs.map(j => j.id === placeholderId ? data : j);
-            window.jobs = jobs; // Update global reference
             saveJobsLocal();
             updateHistory();
             // show history immediately
@@ -163,7 +157,6 @@
             if (myToken !== runToken) return;
             statusEl.textContent = 'job error: ' + error.message;
             jobs = jobs.map(j => j.id === placeholderId ? { ...j, status: 'failed', error: error.message } : j);
-            window.jobs = jobs; // Update global reference
             saveJobsLocal();
             updateHistory();
             btn.disabled = false;
@@ -185,7 +178,6 @@
               clearInterval(interval);
               activePollingIntervals.delete(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
-              window.jobs = jobs; // Update global reference
               saveJobsLocal();
               updateHistory();
               
@@ -208,7 +200,6 @@
               clearInterval(interval);
               activePollingIntervals.delete(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
-              window.jobs = jobs; // Update global reference
               saveJobsLocal();
               updateHistory();
               const btn = document.getElementById('lipsyncBtn');
@@ -259,77 +250,36 @@
       function markSaved(buttonId) {
         const btn = document.getElementById(buttonId);
         if (!btn) return;
-        const span = btn.querySelector('span');
-        if (span) {
-          const original = span.textContent;
-          span.textContent = 'saved';
-          btn.disabled = false;
-          setTimeout(()=>{ span.textContent = original; }, 2000);
-        }
-        // Show toast notification
-        if (window.showToast) {
-          showToast('saved to project bin');
-        }
+        const original = btn.textContent;
+        const originalBg = btn.style.background;
+        const originalBorder = btn.style.borderColor;
+        btn.textContent = '✓ saved';
+        btn.style.background = '#166534';
+        btn.style.borderColor = '#166534';
+        setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
       }
       function markWorking(buttonId, label){
         const btn = document.getElementById(buttonId);
         if (!btn) return ()=>{};
-        const span = btn.querySelector('span');
-        const originalText = span ? span.textContent : btn.textContent;
-        if (span) {
-          span.textContent = label || 'working…';
-        } else {
-          btn.textContent = label || 'working…';
-        }
+        const original = btn.textContent;
+        btn.textContent = label || 'working…';
         btn.disabled = true;
-        return function reset(){ 
-          if (span) {
-            span.textContent = originalText;
-          } else {
-            btn.textContent = originalText;
-          }
-          btn.disabled = false; 
-        };
+        return function reset(){ btn.textContent = original; btn.disabled = false; };
       }
       function markError(buttonId, message){
         const btn = document.getElementById(buttonId);
         if (!btn) return;
-        const span = btn.querySelector('span');
-        const originalText = span ? span.textContent : btn.textContent;
-        if (span) {
-          span.textContent = message || 'error';
-        } else {
-          btn.textContent = message || 'error';
-        }
-        btn.disabled = false;
-        setTimeout(()=>{ 
-          if (span) {
-            span.textContent = originalText;
-          } else {
-            btn.textContent = originalText;
-          }
-        }, 2000);
-        // Show toast notification
-        if (window.showToast) {
-          showToast(message || 'operation failed', 'error');
-        }
-      }
-
-      // Helper functions
-      function getServerPort() {
-        return window.__syncServerPort || 3000;
-      }
-      
-      function authHeaders(extra){
-        const h = Object.assign({}, extra||{});
-        h['X-CEP-Panel'] = 'sync'; // Required by server for CORS validation
-        if (window.__authToken) h['Authorization'] = 'Bearer ' + window.__authToken;
-        return h;
+        const original = btn.textContent;
+        const originalBg = btn.style.background;
+        const originalBorder = btn.style.borderColor;
+        btn.textContent = message || 'error';
+        btn.style.background = '#7f1d1d';
+        btn.style.borderColor = '#7f1d1d';
+        setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
       }
 
       async function saveJob(jobId) {
         const job = jobs.find(j => String(j.id) === String(jobId)) || { id: jobId, status: 'completed' };
-        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
         const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
@@ -339,24 +289,22 @@
               const r = await window.nle.getProjectDir();
               if (r && r.ok && r.outputDir) targetDir = r.outputDir;
             } else {
-              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
-              const getProjFunc = isAE ? 'AEFT_getProjectDir' : 'PPRO_getProjectDir';
               await new Promise((resolve) => {
-                cs.evalScript(`${getProjFunc}()`, function(resp){
+                cs.evalScript('PPRO_getProjectDir()', function(resp){
                   try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
                   resolve();
                 });
               });
             }
           } catch(_){ }
-          // If project selected but host didn't resolve, fallback to Documents in AE
+          // If project selected but host didn’t resolve, fallback to Documents in AE
           try {
             if (!targetDir && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
               location = 'documents';
             }
           } catch(_){ }
         }
-        const apiKey = settings.syncApiKey || settings.apiKey || '';
+        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
         let savedPath = '';
         const reset = markWorking('save-'+jobId, 'saving…');
         try {
@@ -387,7 +335,6 @@
         reset();
         if (savedPath) {
           const fp = savedPath.replace(/\"/g,'\\\"');
-          
           try {
             if (!cs) cs = new CSInterface();
             const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
@@ -485,7 +432,6 @@
       async function insertJob(jobId) {
         if (insertingGuard) return; insertingGuard = true;
         const job = jobs.find(j => String(j.id) === String(jobId)) || { id: jobId, status: 'completed' };
-        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
         const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
@@ -495,24 +441,22 @@
               const r = await window.nle.getProjectDir();
               if (r && r.ok && r.outputDir) targetDir = r.outputDir;
             } else {
-              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
-              const getProjFunc = isAE ? 'AEFT_getProjectDir' : 'PPRO_getProjectDir';
               await new Promise((resolve) => {
-                cs.evalScript(`${getProjFunc}()`, function(resp){
+                cs.evalScript('PPRO_getProjectDir()', function(resp){
                   try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
                   resolve();
                 });
               });
             }
           } catch(_){ }
-          // If project selected but host didn't resolve, fallback to Documents in AE
+          // If project selected but host didn’t resolve, fallback to Documents in AE
           try {
             if (!targetDir && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
               location = 'documents';
             }
-            } catch(_){ }
+          } catch(_){ }
         }
-        const apiKey = settings.syncApiKey || settings.apiKey || '';
+        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
         let savedPath = '';
         const reset = markWorking('insert-'+jobId, 'inserting…');
         const mainInsertBtn = document.getElementById('insertBtn');
@@ -530,7 +474,6 @@
         reset();
         if (!savedPath) { markError('insert-'+jobId, 'not ready'); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
         const fp = savedPath.replace(/\"/g,'\\\"');
-        
         try {
           if (!cs) cs = new CSInterface();
           const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
@@ -601,21 +544,13 @@
                 }
                 
                 try {
+                  const statusEl = document.getElementById('statusMessage');
                   if (out && out.ok === true) { 
                     logToFile('[AE Insert] SUCCESS - marking inserted');
-                    // Update button
-                    const btn = document.getElementById('insert-'+jobId);
-                    if (btn) {
-                      const span = btn.querySelector('span');
-                      if (span) span.textContent = 'inserted';
-                      btn.disabled = false;
-                      setTimeout(() => { if (span) span.textContent = 'insert'; }, 2000);
-                    }
-                    // Show toast
-                    if (window.showToast) showToast('inserted at playhead');
+                    if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); 
                   } else { 
                     logToFile('[AE Insert] FAILED - marking error: ' + (out && out.error ? out.error : 'unknown'));
-                    markError('insert-'+jobId, 'error');
+                    if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); 
                   }
                 } catch(_){ }
                 if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
@@ -623,7 +558,8 @@
               });
             } catch(e) {
               logToFile('[AE Insert] Error: ' + String(e));
-              markError('insert-'+jobId, 'error');
+              const statusEl = document.getElementById('statusMessage');
+              if (statusEl) statusEl.textContent = 'insert failed (Error)';
               if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
               insertingGuard = false;
             }
@@ -633,23 +569,10 @@
             cs.evalScript(`PPRO_insertFileAtPlayhead(\"${payload}\")`, function(r){
                try {
                  const out = (typeof r === 'string') ? JSON.parse(r) : r;
-                 if (out && out.ok === true) { 
-                   // Update button
-                   const btn = document.getElementById('insert-'+jobId);
-                   if (btn) {
-                     const span = btn.querySelector('span');
-                     if (span) span.textContent = 'inserted';
-                     btn.disabled = false;
-                     setTimeout(() => { if (span) span.textContent = 'insert'; }, 2000);
-                   }
-                   // Show toast
-                   if (window.showToast) showToast('inserted at playhead');
-                 } else { 
-                   markError('insert-'+jobId, 'error');
-                 }
-               } catch(_){ 
-                 markError('insert-'+jobId, 'error');
-               }
+                 const statusEl = document.getElementById('statusMessage');
+                 if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
+                 else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
+               } catch(_){ }
                if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
                insertingGuard = false;
              });
@@ -682,14 +605,18 @@
         }
       }
 
-      window.loadJobsFromServer = async function loadJobsFromServer() {
+      async function loadJobsFromServer() {
+        const historyList = document.getElementById('historyList');
+        if (!historyList) return;
+        
+        // Detect if UI already has items to prevent flashing loading state
+        let hasRenderedItems = false;
+        try { hasRenderedItems = /history-item/.test(historyList.innerHTML); } catch(_){ hasRenderedItems = false; }
+        
         try {
-          const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
-          // Check both old and new property names for backwards compatibility
-          const apiKey = settings.syncApiKey || settings.apiKey || '';
-          
-          // Return early if no API key
+          const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
           if (!apiKey) {
+            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no api key found</div>';
             return;
           }
           
@@ -698,67 +625,51 @@
           try { 
             const r = await fetchWithTimeout('http://127.0.0.1:3000/health', { cache:'no-store' }, 5000); 
             healthy = !!(r && r.ok); 
-          } catch(e){ 
+          } catch(_){ 
             healthy = false; 
           }
           
-          // Return early if server is not healthy
           if (!healthy) {
+            if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
             return;
           }
           
+          // Show loading state only when empty
+          if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
+          
           await ensureAuthToken();
           const gen = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }, 15000).then(function(r){ return r.json(); }).catch(function(){ return null; });
-
-          // Normalize possible API response shapes
-          function asArray(x){
-            if (!x) return null;
-            if (Array.isArray(x)) return x;
-            if (Array.isArray(x.generations)) return x.generations;
-            if (Array.isArray(x.data)) return x.data;
-            if (Array.isArray(x.items)) return x.items;
-            if (Array.isArray(x.results)) return x.results;
-            return null;
-          }
-
-          const genArr = asArray(gen);
-
-          if (Array.isArray(genArr)) {
-            jobs = genArr.map(function(g){
+          
+          if (Array.isArray(gen)) {
+            jobs = gen.map(function(g){
               var arr = (g && g.input && g.input.slice) ? g.input.slice() : [];
               var vid = null, aud = null;
               for (var i=0;i<arr.length;i++){ var it = arr[i]; if (it && it.type==='video' && !vid) vid = it; if (it && it.type==='audio' && !aud) aud = it; }
               return {
                 id: g && g.id,
-                status: String(g && g.status || 'processing').toLowerCase(),
+                status: (String(g && g.status || '').toLowerCase()==='completed' ? 'completed' : String(g && g.status || 'processing').toLowerCase()),
                 model: g && g.model,
                 createdAt: g && g.createdAt,
-                completedAt: g && g.completedAt,
                 videoPath: (vid && vid.url) || '',
                 audioPath: (aud && aud.url) || '',
                 syncJobId: g && g.id,
-                outputPath: (g && g.outputUrl) || '',
-                options: g && g.options || {}
+                outputPath: (g && g.outputUrl) || ''
               };
             });
-            // Expose jobs globally for history.js
-            window.jobs = jobs;
             saveJobsLocal();
-            // Refresh history immediately
-            try { if (typeof window.updateHistory === 'function') window.updateHistory(); } catch(_){ }
-            return;
-          }
-          
-          // Handle error responses (object instead of array)
-          if (gen && typeof gen === 'object' && gen.error) {
-            console.warn('Server returned error:', gen.error);
+            updateHistory();
+            
+            if (gen.length === 0) {
+              historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
+            }
             return;
           }
           
           // If we get here, the request failed or returned invalid data
-          console.warn('Failed to load jobs from server - invalid response:', gen);
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
         } catch (e) {
-          console.warn('Failed to load cloud history:', e);
+          console.warn('Failed to load cloud history');
+          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
         }
       }
 
