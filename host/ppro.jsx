@@ -447,7 +447,7 @@ function PPRO_revealFile(payloadJson) {
 
 function _extensionRoot() {
   try {
-    // Derive from this script path: <ext>/host/ppro.jsx → <ext>
+    // Method 1: Derive from this script path: <ext>/host/ppro.jsx → <ext>
     var here = new File($.fileName);
     if (here && here.exists) {
       var hostDir = here.parent; // /host
@@ -457,22 +457,38 @@ function _extensionRoot() {
       }
     }
   } catch(e) {}
+  
   try {
+    // Method 2: Use CEP API to get extension path
     var extPath = $.eval('cs.getSystemPath(cs.SystemPath.EXTENSION)');
     if (extPath) return extPath;
   } catch(e) {}
+  
   try {
+    // Method 3: Check both user and system-wide locations
     var userHome = Folder.userDocuments.parent.fsName;
     var isWindows = false; 
     try { isWindows = ($.os && $.os.toString().indexOf('Windows') !== -1); } catch(_){ isWindows = false; }
     
-    var fallback;
+    var userPath, systemPath;
     if (isWindows) {
-      fallback = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
+      userPath = userHome + "\\AppData\\Roaming\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
+      systemPath = "C:\\Program Files\\Adobe\\CEP\\extensions\\com.sync.extension.ppro";
     } else {
-      fallback = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
+      userPath = userHome + "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
+      systemPath = "/Library/Application Support/Adobe/CEP/extensions/com.sync.extension.ppro";
     }
-    return fallback;
+    
+    // Check user location first
+    var userExt = new File(userPath);
+    if (userExt && userExt.exists) return userPath;
+    
+    // Check system location
+    var systemExt = new File(systemPath);
+    if (systemExt && systemExt.exists) return systemPath;
+    
+    // Fallback to user location (for development)
+    return userPath;
   } catch(e2) {}
   return '';
 }
@@ -848,4 +864,105 @@ function PPRO_diag(){
     };
     return _respond(info);
   }catch(e){ return _respond({ ok:false, error:String(e) }); }
+}
+
+// Thumbnail support functions
+function PPRO_ensureDir(dirPath) {
+  try {
+    var folder = new Folder(dirPath);
+    if (!folder.exists) {
+      folder.create();
+    }
+    return _respond({ ok: folder.exists });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
+}
+
+function PPRO_fileExists(filePath) {
+  try {
+    var file = new File(filePath);
+    return _respond({ ok: true, exists: file.exists });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
+}
+
+function PPRO_readThumbnail(filePath) {
+  try {
+    var file = new File(filePath);
+    if (!file.exists) {
+      return _respond({ ok: false, error: 'File does not exist' });
+    }
+    
+    file.open('r');
+    var data = file.read();
+    file.close();
+    
+    // Convert binary data to base64
+    var base64 = '';
+    for (var i = 0; i < data.length; i++) {
+      base64 += String.fromCharCode(data.charCodeAt(i) & 0xFF);
+    }
+    
+    var dataUrl = 'data:image/jpeg;base64,' + btoa(base64);
+    return _respond({ ok: true, dataUrl: dataUrl });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
+}
+
+function PPRO_saveThumbnail(payload) {
+  try {
+    var data = JSON.parse(payload);
+    var path = data.path;
+    var dataUrl = data.dataUrl;
+    
+    // Extract base64 data from data URL
+    var base64Data = dataUrl.split(',')[1];
+    
+    // Decode base64 and write to file
+    var file = new File(path);
+    file.encoding = 'BINARY';
+    file.open('w');
+    file.write(base64Decode(base64Data));
+    file.close();
+    
+    return _respond({ ok: true, path: path });
+  } catch(e) {
+    return _respond({ ok: false, error: String(e) });
+  }
+}
+
+// Base64 decoder for ExtendScript
+function base64Decode(input) {
+  var keyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  var output = "";
+  var chr1, chr2, chr3;
+  var enc1, enc2, enc3, enc4;
+  var i = 0;
+  
+  input = input.replace(/[^A-Za-z0-9\+\/\=]/g, "");
+  
+  while (i < input.length) {
+    enc1 = keyStr.indexOf(input.charAt(i++));
+    enc2 = keyStr.indexOf(input.charAt(i++));
+    enc3 = keyStr.indexOf(input.charAt(i++));
+    enc4 = keyStr.indexOf(input.charAt(i++));
+    
+    chr1 = (enc1 << 2) | (enc2 >> 4);
+    chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+    chr3 = ((enc3 & 3) << 6) | enc4;
+    
+    output = output + String.fromCharCode(chr1);
+    
+    if (enc3 != 64) {
+      output = output + String.fromCharCode(chr2);
+    }
+    if (enc4 != 64) {
+      output = output + String.fromCharCode(chr3);
+    }
+  }
+  
+  return output;
 }

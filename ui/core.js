@@ -2,6 +2,7 @@
       let selectedVideo = null;
       let selectedAudio = null;
       let jobs = [];
+      window.jobs = jobs; // Expose jobs globally for history.js
       let insertingGuard = false;
       let runToken = 0;
       let currentFetchController = null;
@@ -19,14 +20,35 @@
       window.uploadedVideoUrl = uploadedVideoUrl;
       window.uploadedAudioUrl = uploadedAudioUrl;
       
+      // Timeout wrapper for fetch requests to prevent hanging
+      async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          return response;
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+          }
+          throw error;
+        }
+      }
+      
       // Per-install auth token for local server
       let __authToken = '';
       async function ensureAuthToken(){
         if (__authToken) return __authToken;
         try{
-          const r = await fetch('http://127.0.0.1:3000/auth/token', {
+          const r = await fetchWithTimeout('http://127.0.0.1:3000/auth/token', {
             headers: { 'X-CEP-Panel': 'sync' }
-          });
+          }, 5000); // 5 second timeout
           const j = await r.json().catch(()=>null);
           if (r.ok && j && j.token){ __authToken = j.token; }
         }catch(_){ }
@@ -187,7 +209,7 @@
       let __pickerBusy = false;
       
       try {
-        fetch('http://127.0.0.1:3000/debug', {
+        fetchWithTimeout('http://127.0.0.1:3000/debug', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -195,9 +217,9 @@
             hostConfig: window.HOST_CONFIG,
             timestamp: Date.now()
           })
-        }).then(r => {
+        }, 3000).then(r => {
           // Debug: fetch response
-          fetch('http://127.0.0.1:3000/debug', {
+          fetchWithTimeout('http://127.0.0.1:3000/debug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -205,29 +227,29 @@
               status: r.status,
               ok: r.ok
             })
-          }).catch(() => {});
+          }, 3000).catch(() => {});
         }).catch(e => {
           // Debug: fetch error
-          fetch('http://127.0.0.1:3000/debug', {
+          fetchWithTimeout('http://127.0.0.1:3000/debug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               type: 'ui_loaded_error', 
               error: String(e.message || e)
             })
-          }).catch(() => {});
+          }, 3000).catch(() => {});
         });
       } catch(e) {
         // Debug: try-catch error
         try {
-          fetch('http://127.0.0.1:3000/debug', {
+          fetchWithTimeout('http://127.0.0.1:3000/debug', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               type: 'ui_loaded_try_catch_error', 
               error: String(e.message || e)
             })
-          }).catch(() => {});
+          }, 3000).catch(() => {});
         } catch(_) {}
       }
       async function openFileDialog(kind) {
@@ -239,7 +261,7 @@
           
           // Debug logging
           try {
-            fetch('http://127.0.0.1:3000/debug', {
+            fetchWithTimeout('http://127.0.0.1:3000/debug', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
@@ -247,7 +269,7 @@
                 kind: k,
                 hostConfig: window.HOST_CONFIG
               })
-            }).catch(() => {});
+            }, 3000).catch(() => {});
           } catch(_) {}
           // Ensure only current host script is loaded before invoking
           try {
@@ -265,7 +287,7 @@
               cs.evalScript(`${fn}(\"${payload}\")`, function(r){
                 // Debug logging
                 try {
-                    fetch('http://127.0.0.1:3000/debug', {
+                    fetchWithTimeout('http://127.0.0.1:3000/debug', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ 
@@ -277,7 +299,7 @@
                         responsePreview: String(r).substring(0, 200),
                         hostConfig: window.HOST_CONFIG
                       })
-                    }).catch(() => {});
+                    }, 3000).catch(() => {});
                 } catch(_) {}
                 
                 try { 
@@ -294,7 +316,7 @@
                 } catch(e){ 
                   // Debug JSON parse error
                   try {
-                    fetch('http://127.0.0.1:3000/debug', {
+                    fetchWithTimeout('http://127.0.0.1:3000/debug', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -304,7 +326,7 @@
                         function: fn,
                         hostConfig: window.HOST_CONFIG
                       })
-                    }).catch(() => {});
+                    }, 3000).catch(() => {});
                   } catch(_){ }
                   
                   // If JSON parsing failed but we got a string that looks like a path, use it
@@ -322,12 +344,12 @@
         }
       }
       
-      function showTab(tabName) {
+      window.showTab = function showTab(tabName) {
         // Hide all tabs
-        document.querySelectorAll('.tab-content').forEach(tab => {
+        document.querySelectorAll('.tab-pane').forEach(tab => {
           tab.classList.remove('active');
         });
-        document.querySelectorAll('.tab').forEach(tab => {
+        document.querySelectorAll('.tab-switch').forEach(tab => {
           tab.classList.remove('active');
         });
         
@@ -338,12 +360,11 @@
 
         // Show selected tab
         document.getElementById(tabName).classList.add('active');
-        document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
         
         // Ensure history is always populated when shown
         if (tabName === 'history') {
           try { updateHistory(); } catch(_) {}
-          try { loadJobsFromServer(); } catch(_) {}
           // Start auto-refresh for history tab
           try { 
             if (typeof startHistoryAutoRefresh === 'function') startHistoryAutoRefresh(); 
@@ -370,7 +391,10 @@
       async function waitForHealth(maxAttempts = 20, delayMs = 250, expectedToken) {
         for (let i = 0; i < maxAttempts; i++) {
           try {
-            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/health`, { headers: { 'X-CEP-Panel': 'sync' }, cache: 'no-store' });
+            const resp = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/health`, { 
+              headers: { 'X-CEP-Panel': 'sync' }, 
+              cache: 'no-store' 
+            }, 5000); // 5 second timeout per attempt
             if (resp.ok) return true;
           } catch (e) {
             // ignore until attempts exhausted
@@ -395,7 +419,7 @@
       function formatTime(seconds) {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
       }
 
       // Block Premiere keyboard shortcuts from this panel.
@@ -445,6 +469,37 @@
           return true;
         } catch(_) { return false; }
       }
+      // External link handler for CEP extensions
+      window.openExternalURL = function(url) {
+        if (!url) return;
+        try {
+          if (!cs) cs = new CSInterface();
+          cs.openURLInDefaultBrowser(url);
+        } catch(e) {
+          console.error('Failed to open URL:', e);
+        }
+      }
+      
+      // Intercept all external link clicks and open them in browser
+      document.addEventListener('click', function(e) {
+        let target = e.target;
+        // Traverse up to find an anchor tag
+        while (target && target.tagName !== 'A') {
+          target = target.parentElement;
+        }
+        
+        if (target && target.tagName === 'A') {
+          const href = target.getAttribute('href');
+          // Check if it's an external link (http/https/mailto)
+          if (href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:'))) {
+            e.preventDefault();
+            e.stopPropagation();
+            openExternalURL(href);
+            return false;
+          }
+        }
+      }, true);
+      
       document.addEventListener('keydown', function(e){
         const targetEditable = isEditable(e.target);
         // Allow standard edit combos in editable fields
@@ -470,6 +525,47 @@
       }, true);
       document.addEventListener('keyup', function(e){ e.stopImmediatePropagation(); }, true);
       document.addEventListener('keypress', function(e){ e.stopImmediatePropagation(); }, true);
+
+      (function wireSourcesButtons(){
+        try{
+          function on(selector, handler){ try { const el = document.querySelector(selector); if (el) el.addEventListener('click', handler); } catch(_){} }
+          // Video buttons
+          on('.video-upload .action-btn[data-action="video-upload"]', function(){ try{ selectVideo(); }catch(_){ } });
+          on('.video-upload .action-btn[data-action="video-inout"]', function(){ try{ selectVideoInOut(); }catch(_){ } });
+          // No-ops with press interaction only
+          on('.video-upload .action-btn[data-action="video-record"]', function(){ /* noop */ });
+          on('.video-upload .action-btn[data-action="video-link"]', function(){ /* noop */ });
+
+          // Audio buttons
+          on('.audio-upload .action-btn[data-action="audio-upload"]', function(){ try{ selectAudio(); }catch(_){ } });
+          on('.audio-upload .action-btn[data-action="audio-inout"]', function(){ try{ selectAudioInOut(); }catch(_){ } });
+          on('.audio-upload .action-btn[data-action="audio-from-video"]', function(){ try{ selectAudioInOut(); }catch(_){ } });
+          // TTS/Dubbing stub dropdowns (toggle only)
+          on('.audio-upload .action-btn[data-action="audio-tts"]', function(){ try{ const m=document.getElementById('ttsMenu'); if(m){ m.style.display = (m.style.display==='none'||!m.style.display)?'block':'none'; } }catch(_){ } });
+          on('.audio-upload .action-btn-icon[data-action="audio-dubbing"]', function(){ try{ const m=document.getElementById('dubbingMenu'); if(m){ m.style.display = (m.style.display==='none'||!m.style.display)?'block':'none'; } }catch(_){ } });
+          // Also treat audio/link as no-op
+          on('.audio-upload .action-btn-icon[data-action="audio-link"]', function(){ /* noop */ });
+
+          // Close stub menus on outside click
+          document.addEventListener('click', function(e){
+            try{
+              const t = e.target;
+              const inTTS = t && (t.closest && t.closest('#ttsMenu'));
+              const inDub = t && (t.closest && t.closest('#dubbingMenu'));
+              const ttsBtn = t && (t.closest && t.closest('[data-action="audio-tts"]'));
+              const dubBtn = t && (t.closest && t.closest('[data-action="audio-dubbing"]'));
+              if (!inTTS && !ttsBtn) { const m=document.getElementById('ttsMenu'); if(m) m.style.display='none'; }
+              if (!inDub && !dubBtn) { const m=document.getElementById('dubbingMenu'); if(m) m.style.display='none'; }
+            }catch(_){ }
+          });
+        }catch(_){ }
+      })();
+
+      (function ensureDnDZones(){
+        try{
+          if (typeof initDragAndDrop === 'function') initDragAndDrop();
+        }catch(_){ }
+      })();
 
 
 

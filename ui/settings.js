@@ -318,8 +318,11 @@
         if (settings.syncMode) {
           const sm = document.getElementById('syncMode'); if (sm) sm.value = settings.syncMode;
         }
-        if (settings.apiKey) {
-          document.getElementById('apiKey').value = settings.apiKey;
+        // Handle legacy apiKey field - no longer used in UI
+        if (settings.apiKey && !settings.syncApiKey) {
+          // Migrate legacy apiKey to syncApiKey
+          settings.syncApiKey = settings.apiKey;
+          localStorage.setItem('syncSettings', JSON.stringify(settings));
         }
         if (settings.saveLocation) {
           const opt = document.querySelector(`input[name="saveLocation"][value="${settings.saveLocation}"]`);
@@ -360,8 +363,8 @@
           const syncModeEl = document.getElementById('syncMode');
           if (syncModeEl) settings.syncMode = syncModeEl.value || 'loop';
           
-          const apiKeyEl = document.getElementById('apiKey');
-          if (apiKeyEl) settings.apiKey = apiKeyEl.value;
+          // API key is now handled by syncApiKey input field
+          // Legacy apiKey field no longer exists in UI
           
           const saveLocationRadio = document.querySelector('input[name="saveLocation"]:checked');
           if (saveLocationRadio) settings.saveLocation = saveLocationRadio.value;
@@ -534,10 +537,7 @@
 
       // listeners
       document.addEventListener('change', saveSettings);
-      const apiKeyEl = document.getElementById('apiKey');
-      if (apiKeyEl) {
-        apiKeyEl.addEventListener('input', saveSettings);
-      }
+      // Legacy apiKey element no longer exists - syncApiKey handles this
       const temperatureEl = document.getElementById('temperature');
       const tempValueEl = document.getElementById('tempValue');
       if (temperatureEl && tempValueEl) {
@@ -564,6 +564,11 @@
       // API Key inputs for sync. and elevenlabs
       const syncApiKeyInput = document.getElementById('syncApiKey');
       const elevenlabsApiKeyInput = document.getElementById('elevenlabsApiKey');
+      
+      console.log('[Settings] API key elements found:', {
+        syncApiKeyInput: !!syncApiKeyInput,
+        elevenlabsApiKeyInput: !!elevenlabsApiKeyInput
+      });
       
       if (syncApiKeyInput) {
         syncApiKeyInput.addEventListener('input', (e) => {

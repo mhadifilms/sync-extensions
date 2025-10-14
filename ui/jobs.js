@@ -4,7 +4,10 @@
       function loadJobsLocal() {
         try {
           const raw = localStorage.getItem('syncJobs');
-          if (raw) { jobs = JSON.parse(raw) || []; }
+          if (raw) { 
+            jobs = JSON.parse(raw) || [];
+            window.jobs = jobs; // Update global reference
+          }
         } catch(_) {}
       }
 
@@ -12,7 +15,8 @@
         if (!selectedVideo || !selectedAudio) return;
         
         // Check for API key before proceeding
-        const apiKey = document.getElementById('apiKey').value;
+        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+        const apiKey = settings.syncApiKey || settings.apiKey || '';
         if (!apiKey || apiKey.trim() === '') {
           const statusEl = document.getElementById('statusMessage');
           if (statusEl) statusEl.textContent = 'API key required - add it in settings';
@@ -81,7 +85,7 @@
             temperature: parseFloat(document.getElementById('temperature').value),
             activeSpeakerOnly: document.getElementById('activeSpeakerOnly').checked,
             detectObstructions: document.getElementById('detectObstructions').checked,
-            apiKey: document.getElementById('apiKey').value,
+            apiKey: apiKey,
             outputDir: outputDir,
             options: {
               sync_mode: (document.getElementById('syncMode')||{}).value || 'loop',
@@ -93,6 +97,7 @@
           const placeholderId = 'local-' + Date.now();
           const localJob = { id: placeholderId, videoPath: selectedVideo, audioPath: selectedAudio, model: jobData.model, status: 'processing', createdAt: new Date().toISOString(), syncJobId: null, error: null };
           jobs.push(localJob);
+          window.jobs = jobs; // Ensure global reference is maintained
           saveJobsLocal();
           updateHistory();
           
@@ -102,7 +107,7 @@
             
             // Debug logging
             try {
-              fetch('http://127.0.0.1:3000/debug', {
+              fetchWithTimeout('http://127.0.0.1:3000/debug', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -110,17 +115,22 @@
                   jobData: jobData,
                   hostConfig: window.HOST_CONFIG
                 })
-              }).catch(() => {});
+              }, 3000).catch(() => {});
             } catch(_){ }
             
-            const resp = await fetch(`http://127.0.0.1:${getServerPort()}/jobs`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(jobData), signal: currentFetchController.signal });
+            const resp = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/jobs`, { 
+              method: 'POST', 
+              headers: authHeaders({ 'Content-Type': 'application/json' }), 
+              body: JSON.stringify(jobData), 
+              signal: currentFetchController.signal 
+            }, 30000); // 30 second timeout for job submission
             const text = await resp.text();
             let data = {};
             try { data = JSON.parse(text || '{}'); } catch(_) { data = { error: text }; }
             
             // Debug logging
             try {
-              fetch('http://127.0.0.1:3000/debug', {
+              fetchWithTimeout('http://127.0.0.1:3000/debug', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -131,23 +141,29 @@
                   data: data,
                   hostConfig: window.HOST_CONFIG
                 })
-              }).catch(() => {});
+              }, 3000).catch(() => {});
             } catch(_){ }
             
             if (!resp.ok) { throw new Error(data && data.error ? data.error : (text || 'job creation failed')); }
             if (myToken !== runToken) return;
-            statusEl.textContent = 'job created: ' + (data.syncJobId || data.id) + '. rendering/transcoding…';
+            statusEl.textContent = 'job successfully submitted';
             jobs = jobs.map(j => j.id === placeholderId ? data : j);
+            window.jobs = jobs; // Update global reference
             saveJobsLocal();
             updateHistory();
             // show history immediately
             try { showTab('history'); } catch(_) {}
+            // Reset button state to allow multiple submissions
+            btn.disabled = false;
+            btn.textContent = 'lipsync';
+            document.getElementById('clearBtn').style.display = 'inline-block';
             pollJobStatus(data.id);
           } catch (error) {
             console.error('Error creating job:', error);
             if (myToken !== runToken) return;
             statusEl.textContent = 'job error: ' + error.message;
             jobs = jobs.map(j => j.id === placeholderId ? { ...j, status: 'failed', error: error.message } : j);
+            window.jobs = jobs; // Update global reference
             saveJobsLocal();
             updateHistory();
             btn.disabled = false;
@@ -157,28 +173,42 @@
         })();
       }
 
+      // Track active polling intervals for cleanup
+      const activePollingIntervals = new Set();
+      
       function pollJobStatus(jobId) {
         const interval = setInterval(() => {
-          fetch(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() })
+          fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/jobs/${jobId}`, { headers: authHeaders() }, 10000)
           .then(response => response.json())
           .then(data => {
             if (data.status === 'completed') {
               clearInterval(interval);
+              activePollingIntervals.delete(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
+              window.jobs = jobs; // Update global reference
               saveJobsLocal();
               updateHistory();
               
-              const statusEl = document.getElementById('statusMessage');
-              if (statusEl) statusEl.textContent = 'lipsync completed';
-              const btn = document.getElementById('lipsyncBtn');
-              btn.style.display = 'none';
-              const audioSection = document.getElementById('audioSection');
-              if (audioSection) audioSection.style.display = 'none';
-              renderOutputVideo(data);
-              showPostLipsyncActions(data);
+              // Only show result if this is the latest completed job
+              const latestCompleted = jobs
+                .filter(j => j.status === 'completed')
+                .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+              
+              if (latestCompleted && latestCompleted.id === jobId) {
+                const statusEl = document.getElementById('statusMessage');
+                if (statusEl) statusEl.textContent = 'lipsync completed';
+                const btn = document.getElementById('lipsyncBtn');
+                btn.style.display = 'none';
+                const audioSection = document.getElementById('audioSection');
+                if (audioSection) audioSection.style.display = 'none';
+                renderOutputVideo(data);
+                showPostLipsyncActions(data);
+              }
             } else if (data.status === 'failed') {
               clearInterval(interval);
+              activePollingIntervals.delete(interval);
               jobs = jobs.map(j => j.id === jobId ? data : j);
+              window.jobs = jobs; // Update global reference
               saveJobsLocal();
               updateHistory();
               const btn = document.getElementById('lipsyncBtn');
@@ -190,8 +220,19 @@
           .catch(error => {
             console.error('Error polling job:', error);
             clearInterval(interval);
+            activePollingIntervals.delete(interval);
           });
         }, 2000);
+        
+        activePollingIntervals.add(interval);
+        
+        // Auto-cleanup after 10 minutes to prevent memory leaks
+        setTimeout(() => {
+          if (activePollingIntervals.has(interval)) {
+            clearInterval(interval);
+            activePollingIntervals.delete(interval);
+          }
+        }, 600000); // 10 minutes
       }
 
       function clearSelection() {
@@ -211,43 +252,84 @@
         const preview = document.getElementById('preview');
         const badge = document.getElementById('costIndicator');
         preview.innerHTML = '';
-        if (badge) { preview.appendChild(badge); badge.textContent = 'cost: —'; }
+        if (badge) { preview.appendChild(badge); badge.textContent = 'cost: $0.00'; }
         try { updateInputStatus(); } catch(_){ }
       }
 
       function markSaved(buttonId) {
         const btn = document.getElementById(buttonId);
         if (!btn) return;
-        const original = btn.textContent;
-        const originalBg = btn.style.background;
-        const originalBorder = btn.style.borderColor;
-        btn.textContent = '✓ saved';
-        btn.style.background = '#166534';
-        btn.style.borderColor = '#166534';
-        setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
+        const span = btn.querySelector('span');
+        if (span) {
+          const original = span.textContent;
+          span.textContent = 'saved';
+          btn.disabled = false;
+          setTimeout(()=>{ span.textContent = original; }, 2000);
+        }
+        // Show toast notification
+        if (window.showToast) {
+          showToast('saved to project bin');
+        }
       }
       function markWorking(buttonId, label){
         const btn = document.getElementById(buttonId);
         if (!btn) return ()=>{};
-        const original = btn.textContent;
-        btn.textContent = label || 'working…';
+        const span = btn.querySelector('span');
+        const originalText = span ? span.textContent : btn.textContent;
+        if (span) {
+          span.textContent = label || 'working…';
+        } else {
+          btn.textContent = label || 'working…';
+        }
         btn.disabled = true;
-        return function reset(){ btn.textContent = original; btn.disabled = false; };
+        return function reset(){ 
+          if (span) {
+            span.textContent = originalText;
+          } else {
+            btn.textContent = originalText;
+          }
+          btn.disabled = false; 
+        };
       }
       function markError(buttonId, message){
         const btn = document.getElementById(buttonId);
         if (!btn) return;
-        const original = btn.textContent;
-        const originalBg = btn.style.background;
-        const originalBorder = btn.style.borderColor;
-        btn.textContent = message || 'error';
-        btn.style.background = '#7f1d1d';
-        btn.style.borderColor = '#7f1d1d';
-        setTimeout(()=>{ btn.textContent = original; btn.style.background = originalBg; btn.style.borderColor = originalBorder; }, 2000);
+        const span = btn.querySelector('span');
+        const originalText = span ? span.textContent : btn.textContent;
+        if (span) {
+          span.textContent = message || 'error';
+        } else {
+          btn.textContent = message || 'error';
+        }
+        btn.disabled = false;
+        setTimeout(()=>{ 
+          if (span) {
+            span.textContent = originalText;
+          } else {
+            btn.textContent = originalText;
+          }
+        }, 2000);
+        // Show toast notification
+        if (window.showToast) {
+          showToast(message || 'operation failed', 'error');
+        }
+      }
+
+      // Helper functions
+      function getServerPort() {
+        return window.__syncServerPort || 3000;
+      }
+      
+      function authHeaders(extra){
+        const h = Object.assign({}, extra||{});
+        h['X-CEP-Panel'] = 'sync'; // Required by server for CORS validation
+        if (window.__authToken) h['Authorization'] = 'Bearer ' + window.__authToken;
+        return h;
       }
 
       async function saveJob(jobId) {
         const job = jobs.find(j => String(j.id) === String(jobId)) || { id: jobId, status: 'completed' };
+        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
         const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
@@ -257,22 +339,24 @@
               const r = await window.nle.getProjectDir();
               if (r && r.ok && r.outputDir) targetDir = r.outputDir;
             } else {
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+              const getProjFunc = isAE ? 'AEFT_getProjectDir' : 'PPRO_getProjectDir';
               await new Promise((resolve) => {
-                cs.evalScript('PPRO_getProjectDir()', function(resp){
+                cs.evalScript(`${getProjFunc}()`, function(resp){
                   try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
                   resolve();
                 });
               });
             }
           } catch(_){ }
-          // If project selected but host didn’t resolve, fallback to Documents in AE
+          // If project selected but host didn't resolve, fallback to Documents in AE
           try {
             if (!targetDir && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
               location = 'documents';
             }
           } catch(_){ }
         }
-        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+        const apiKey = settings.syncApiKey || settings.apiKey || '';
         let savedPath = '';
         const reset = markWorking('save-'+jobId, 'saving…');
         try {
@@ -303,6 +387,7 @@
         reset();
         if (savedPath) {
           const fp = savedPath.replace(/\"/g,'\\\"');
+          
           try {
             if (!cs) cs = new CSInterface();
             const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
@@ -400,6 +485,7 @@
       async function insertJob(jobId) {
         if (insertingGuard) return; insertingGuard = true;
         const job = jobs.find(j => String(j.id) === String(jobId)) || { id: jobId, status: 'completed' };
+        const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
         const saveLocation = (document.querySelector('input[name="saveLocation"]:checked')||{}).value || 'project';
         let location = saveLocation === 'documents' ? 'documents' : 'project';
         let targetDir = '';
@@ -409,22 +495,24 @@
               const r = await window.nle.getProjectDir();
               if (r && r.ok && r.outputDir) targetDir = r.outputDir;
             } else {
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
+              const getProjFunc = isAE ? 'AEFT_getProjectDir' : 'PPRO_getProjectDir';
               await new Promise((resolve) => {
-                cs.evalScript('PPRO_getProjectDir()', function(resp){
+                cs.evalScript(`${getProjFunc}()`, function(resp){
                   try { const r = JSON.parse(resp||'{}'); if (r && r.ok && r.outputDir) targetDir = r.outputDir; } catch(_){ }
                   resolve();
                 });
               });
             }
           } catch(_){ }
-          // If project selected but host didn’t resolve, fallback to Documents in AE
+          // If project selected but host didn't resolve, fallback to Documents in AE
           try {
             if (!targetDir && window.HOST_CONFIG && window.HOST_CONFIG.isAE) {
               location = 'documents';
             }
-          } catch(_){ }
+            } catch(_){ }
         }
-        const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+        const apiKey = settings.syncApiKey || settings.apiKey || '';
         let savedPath = '';
         const reset = markWorking('insert-'+jobId, 'inserting…');
         const mainInsertBtn = document.getElementById('insertBtn');
@@ -442,6 +530,7 @@
         reset();
         if (!savedPath) { markError('insert-'+jobId, 'not ready'); if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; } insertingGuard = false; return; }
         const fp = savedPath.replace(/\"/g,'\\\"');
+        
         try {
           if (!cs) cs = new CSInterface();
           const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
@@ -512,13 +601,21 @@
                 }
                 
                 try {
-                  const statusEl = document.getElementById('statusMessage');
                   if (out && out.ok === true) { 
                     logToFile('[AE Insert] SUCCESS - marking inserted');
-                    if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); 
+                    // Update button
+                    const btn = document.getElementById('insert-'+jobId);
+                    if (btn) {
+                      const span = btn.querySelector('span');
+                      if (span) span.textContent = 'inserted';
+                      btn.disabled = false;
+                      setTimeout(() => { if (span) span.textContent = 'insert'; }, 2000);
+                    }
+                    // Show toast
+                    if (window.showToast) showToast('inserted at playhead');
                   } else { 
                     logToFile('[AE Insert] FAILED - marking error: ' + (out && out.error ? out.error : 'unknown'));
-                    if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); 
+                    markError('insert-'+jobId, 'error');
                   }
                 } catch(_){ }
                 if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
@@ -526,8 +623,7 @@
               });
             } catch(e) {
               logToFile('[AE Insert] Error: ' + String(e));
-              const statusEl = document.getElementById('statusMessage');
-              if (statusEl) statusEl.textContent = 'insert failed (Error)';
+              markError('insert-'+jobId, 'error');
               if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
               insertingGuard = false;
             }
@@ -537,10 +633,23 @@
             cs.evalScript(`PPRO_insertFileAtPlayhead(\"${payload}\")`, function(r){
                try {
                  const out = (typeof r === 'string') ? JSON.parse(r) : r;
-                 const statusEl = document.getElementById('statusMessage');
-                 if (out && out.ok === true) { if (statusEl) statusEl.textContent = 'inserted' + (out.diag? ' ['+out.diag+']':''); }
-                 else { if (statusEl) statusEl.textContent = 'insert failed' + (out && out.error ? ' ('+out.error+')' : ''); }
-               } catch(_){ }
+                 if (out && out.ok === true) { 
+                   // Update button
+                   const btn = document.getElementById('insert-'+jobId);
+                   if (btn) {
+                     const span = btn.querySelector('span');
+                     if (span) span.textContent = 'inserted';
+                     btn.disabled = false;
+                     setTimeout(() => { if (span) span.textContent = 'insert'; }, 2000);
+                   }
+                   // Show toast
+                   if (window.showToast) showToast('inserted at playhead');
+                 } else { 
+                   markError('insert-'+jobId, 'error');
+                 }
+               } catch(_){ 
+                 markError('insert-'+jobId, 'error');
+               }
                if (mainInsertBtn){ mainInsertBtn.textContent='insert'; mainInsertBtn.disabled = mainInsertWasDisabled; }
                insertingGuard = false;
              });
@@ -552,71 +661,104 @@
         }
       }
 
-      async function loadJobsFromServer() {
-        const historyList = document.getElementById('historyList');
-        if (!historyList) return;
-        
-        // Detect if UI already has items to prevent flashing loading state
-        let hasRenderedItems = false;
-        try { hasRenderedItems = /history-item/.test(historyList.innerHTML); } catch(_){ hasRenderedItems = false; }
+      // Timeout wrapper for fetch requests to prevent hanging
+      async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         
         try {
-          const apiKey = (JSON.parse(localStorage.getItem('syncSettings')||'{}').apiKey)||'';
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          return response;
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+          }
+          throw error;
+        }
+      }
+
+      window.loadJobsFromServer = async function loadJobsFromServer() {
+        try {
+          const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
+          // Check both old and new property names for backwards compatibility
+          const apiKey = settings.syncApiKey || settings.apiKey || '';
+          
+          // Return early if no API key
           if (!apiKey) {
-            historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no api key found</div>';
             return;
           }
           
           // Check server health first
           let healthy = false;
           try { 
-            const r = await fetch('http://127.0.0.1:3000/health', { cache:'no-store' }); 
+            const r = await fetchWithTimeout('http://127.0.0.1:3000/health', { cache:'no-store' }, 5000); 
             healthy = !!(r && r.ok); 
-          } catch(_){ 
+          } catch(e){ 
             healthy = false; 
           }
           
+          // Return early if server is not healthy
           if (!healthy) {
-            if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
             return;
           }
           
-          // Show loading state only when empty
-          if (!hasRenderedItems) historyList.innerHTML = '<div style="color:#666; text-align:center; padding:20px;">loading generations...</div>';
-          
           await ensureAuthToken();
-          const gen = await fetch(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }).then(function(r){ return r.json(); }).catch(function(){ return null; });
-          
-          if (Array.isArray(gen)) {
-            jobs = gen.map(function(g){
+          const gen = await fetchWithTimeout(`http://127.0.0.1:${getServerPort()}/generations?`+new URLSearchParams({ apiKey }), { headers: authHeaders() }, 15000).then(function(r){ return r.json(); }).catch(function(){ return null; });
+
+          // Normalize possible API response shapes
+          function asArray(x){
+            if (!x) return null;
+            if (Array.isArray(x)) return x;
+            if (Array.isArray(x.generations)) return x.generations;
+            if (Array.isArray(x.data)) return x.data;
+            if (Array.isArray(x.items)) return x.items;
+            if (Array.isArray(x.results)) return x.results;
+            return null;
+          }
+
+          const genArr = asArray(gen);
+
+          if (Array.isArray(genArr)) {
+            jobs = genArr.map(function(g){
               var arr = (g && g.input && g.input.slice) ? g.input.slice() : [];
               var vid = null, aud = null;
               for (var i=0;i<arr.length;i++){ var it = arr[i]; if (it && it.type==='video' && !vid) vid = it; if (it && it.type==='audio' && !aud) aud = it; }
               return {
                 id: g && g.id,
-                status: (String(g && g.status || '').toLowerCase()==='completed' ? 'completed' : String(g && g.status || 'processing').toLowerCase()),
+                status: String(g && g.status || 'processing').toLowerCase(),
                 model: g && g.model,
                 createdAt: g && g.createdAt,
+                completedAt: g && g.completedAt,
                 videoPath: (vid && vid.url) || '',
                 audioPath: (aud && aud.url) || '',
                 syncJobId: g && g.id,
-                outputPath: (g && g.outputUrl) || ''
+                outputPath: (g && g.outputUrl) || '',
+                options: g && g.options || {}
               };
             });
+            // Expose jobs globally for history.js
+            window.jobs = jobs;
             saveJobsLocal();
-            updateHistory();
-            
-            if (gen.length === 0) {
-              historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
-            }
+            // Refresh history immediately
+            try { if (typeof window.updateHistory === 'function') window.updateHistory(); } catch(_){ }
+            return;
+          }
+          
+          // Handle error responses (object instead of array)
+          if (gen && typeof gen === 'object' && gen.error) {
+            console.warn('Server returned error:', gen.error);
             return;
           }
           
           // If we get here, the request failed or returned invalid data
-          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">no generations yet</div>';
+          console.warn('Failed to load jobs from server - invalid response:', gen);
         } catch (e) {
-          console.warn('Failed to load cloud history');
-          historyList.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">server offline</div>';
+          console.warn('Failed to load cloud history:', e);
         }
       }
 

@@ -283,42 +283,36 @@
                       return;
                     }
                     
-                    updateDebugStatus('Spawning: ' + nodePath + ' ' + serverPath);
-                    
-                    // Use exec with full command - Windows compatible
-                    var exec = require('child_process').exec;
-                    var cmd;
-                    if (isWindows) {
-                      // Fix Windows path separators and quoting
-                      var serverDir = extPath.replace(/\//g, '\\') + '\\server';
-                      cmd = 'cd /d "' + serverDir + '" && "' + nodePath + '" "' + serverPath + '"';
-                    } else {
-                      cmd = 'cd "' + extPath + '/server" && "' + nodePath + '" "' + serverPath + '"';
-                    }
-                    updateDebugStatus('Exec command: ' + cmd);
-                    
-                    var child = exec(cmd, {
+                    updateDebugStatus('Spawning (detached, stdio piped): ' + nodePath + ' ' + serverPath);
+
+                    // Detached spawn with stdout/stderr pipes so we can consume output
+                    var spawn = require('child_process').spawn;
+                    var child = spawn(nodePath, [serverPath], {
+                      cwd: extPath + '/server',
                       detached: true,
                       stdio: ['ignore', 'pipe', 'pipe']
                     });
-                    
-                    // Log any errors from the child process
-                    child.stderr.on('data', function(data) {
-                      updateDebugStatus('Server stderr: ' + data.toString());
-                    });
-                    
-                    child.stdout.on('data', function(data) {
-                      updateDebugStatus('Server stdout: ' + data.toString());
-                    });
-                    
+
+                    // Read server output safely into panel debug log
+                    if (child.stdout) {
+                      child.stdout.on('data', function(data) {
+                        try { updateDebugStatus('Server stdout: ' + data.toString()); } catch(_){ }
+                      });
+                    }
+                    if (child.stderr) {
+                      child.stderr.on('data', function(data) {
+                        try { updateDebugStatus('Server stderr: ' + data.toString()); } catch(_){ }
+                      });
+                    }
+
                     child.on('error', function(err) {
                       updateDebugStatus('Server spawn error: ' + err.message);
                     });
-                    
+
                     child.on('exit', function(code, signal) {
                       updateDebugStatus('Server exited with code: ' + code + ', signal: ' + signal);
                     });
-                    
+
                     child.unref();
                     serverStarted = true;
                     updateDebugStatus('Server spawned successfully');
@@ -338,7 +332,7 @@
                         .catch(function() {
                           updateDebugStatus('Server spawned but not responding');
                         });
-                    }, 2000);
+                    }, 4000);
                     
                   } catch(spawnError) {
                     updateDebugStatus('Spawn error: ' + spawnError.message);

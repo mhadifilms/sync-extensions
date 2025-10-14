@@ -206,8 +206,9 @@
         
         // Video
         if (selectedVideo) {
+          if (videoSection) videoSection.classList.add('has-media');
           videoDropzone.style.display = 'none';
-          videoPreview.style.display = 'block';
+          videoPreview.style.display = 'flex';
           videoPreview.innerHTML = `
             <div class="custom-video-player">
               <video id="mainVideo" class="video-element" src="file://${selectedVideo.replace(/ /g, '%20')}">
@@ -260,14 +261,16 @@
             </div>`;
           initCustomVideoPlayer();
         } else {
+          if (videoSection) videoSection.classList.remove('has-media');
           videoDropzone.style.display = 'flex';
           videoPreview.style.display = 'none';
         }
         
         // Audio
         if (selectedAudio) {
+          if (audioSection) audioSection.classList.add('has-media');
           audioDropzone.style.display = 'none';
-          audioPreview.style.display = 'block';
+          audioPreview.style.display = 'flex';
           const audioSrc = "file://" + selectedAudio.replace(/ /g, '%20');
           
           // Debug logging
@@ -287,27 +290,29 @@
           audioPreview.innerHTML = `
             <div class="custom-audio-player">
               <audio id="audioPlayer" src="${audioSrc}" preload="auto"></audio>
+              <button class="audio-play-btn" id="audioPlayBtn">
+                <i data-lucide="play" style="width: 18px; height: 18px;"></i>
+              </button>
               <div class="audio-waveform-container">
                 <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
-                <div class="audio-controls-bottom">
-                  <button class="audio-play-btn" id="audioPlayBtn">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                      <polygon points="5,3 19,12 5,21"/>
-                    </svg>
-                  </button>
-                  <div class="audio-time" id="audioTime">00:00 / 00:00</div>
-                  <button class="audio-delete-btn" onclick="clearAudioSelection()">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3,6 5,6 21,6"></polyline>
-                      <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-                    </svg>
-                  </button>
-                </div>
+                <div class="audio-time" id="audioTime">0:00 / 0:00</div>
               </div>
+              <button class="audio-dubbing-btn">
+                <i data-lucide="globe" style="width: 16px; height: 16px;"></i>
+                <span>dubbing</span>
+              </button>
+              <button class="audio-delete-btn" onclick="clearAudioSelection()">
+                <i data-lucide="trash-2" style="width: 18px; height: 18px;"></i>
+              </button>
             </div>`;
           
           initCustomAudioPlayer();
+          // Initialize Lucide icons for audio player
+          if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+          }
         } else {
+          if (audioSection) audioSection.classList.remove('has-media');
           audioDropzone.style.display = 'flex';
           audioPreview.style.display = 'none';
         }
@@ -534,27 +539,65 @@
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
               await ensureAuthToken();
-              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
-              const j = await r.json().catch(()=>null);
-              if (r.ok && j && j.ok && j.url){ 
-                uploadedVideoUrl = j.url;
-                window.uploadedVideoUrl = j.url;
-                // Debug logging
+              
+              // Add timeout and retry logic for uploads
+              let uploadSuccess = false;
+              let lastError = null;
+              
+              for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
-                  fetch('http://127.0.0.1:3000/debug', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      type: 'upload_complete',
-                      fileType: 'video',
-                      url: j.url,
-                      uploadedVideoUrl: uploadedVideoUrl,
-                      hostConfig: window.HOST_CONFIG
-                    })
-                  }).catch(() => {});
-                } catch(_){ }
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                  
+                  const r = await fetch('http://127.0.0.1:3000/upload', { 
+                    method:'POST', 
+                    headers: authHeaders({'Content-Type':'application/json'}), 
+                    body: JSON.stringify(body),
+                    signal: controller.signal
+                  });
+                  
+                  clearTimeout(timeoutId);
+                  const j = await r.json().catch(()=>null);
+                  
+                  if (r.ok && j && j.ok && j.url){ 
+                    uploadedVideoUrl = j.url;
+                    window.uploadedVideoUrl = j.url;
+                    uploadSuccess = true;
+                    
+                    // Debug logging
+                    try {
+                      fetch('http://127.0.0.1:3000/debug', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          type: 'upload_complete',
+                          fileType: 'video',
+                          url: j.url,
+                          uploadedVideoUrl: uploadedVideoUrl,
+                          attempt: attempt,
+                          hostConfig: window.HOST_CONFIG
+                        })
+                      }).catch(() => {});
+                    } catch(_){ }
+                    break;
+                  } else {
+                    lastError = j?.error || `HTTP ${r.status}`;
+                  }
+                } catch (error) {
+                  lastError = error.message;
+                  if (attempt < 3) {
+                    try { statusEl.textContent = `uploading video… (retry ${attempt}/3)`; } catch(_){ }
+                    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+                  }
+                }
               }
-            }catch(_){ }
+              
+              if (!uploadSuccess) {
+                try { statusEl.textContent = `upload failed: ${lastError}`; } catch(_){ }
+              }
+            }catch(e){ 
+              try { statusEl.textContent = `upload error: ${e.message}`; } catch(_){ }
+            }
             try { statusEl.textContent = ''; } catch(_){ }
             
             // Schedule cost estimation after upload completes
@@ -588,7 +631,7 @@
           } else {
             let diag = null;
             try {
-              const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.HOST_CONFIG && window.HOST_CONFIG.isAE);
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
               if (isAE) {
                 if (!cs) cs = new CSInterface();
                 try { const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const hostFile = window.HOST_CONFIG && window.HOST_CONFIG.isAE ? 'ae.jsx' : 'ppro.jsx'; await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve())); } catch(_){ }
@@ -706,27 +749,65 @@
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
               await ensureAuthToken();
-              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
-              const j = await r.json().catch(()=>null);
-              if (r.ok && j && j.ok && j.url){ 
-                uploadedAudioUrl = j.url;
-                window.uploadedAudioUrl = j.url;
-                // Debug logging
+              
+              // Add timeout and retry logic for uploads
+              let uploadSuccess = false;
+              let lastError = null;
+              
+              for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
-                  fetch('http://127.0.0.1:3000/debug', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      type: 'upload_complete',
-                      fileType: 'audio',
-                      url: j.url,
-                      uploadedAudioUrl: uploadedAudioUrl,
-                      hostConfig: window.HOST_CONFIG
-                    })
-                  }).catch(() => {});
-                } catch(_){ }
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                  
+                  const r = await fetch('http://127.0.0.1:3000/upload', { 
+                    method:'POST', 
+                    headers: authHeaders({'Content-Type':'application/json'}), 
+                    body: JSON.stringify(body),
+                    signal: controller.signal
+                  });
+                  
+                  clearTimeout(timeoutId);
+                  const j = await r.json().catch(()=>null);
+                  
+                  if (r.ok && j && j.ok && j.url){ 
+                    uploadedAudioUrl = j.url;
+                    window.uploadedAudioUrl = j.url;
+                    uploadSuccess = true;
+                    
+                    // Debug logging
+                    try {
+                      fetch('http://127.0.0.1:3000/debug', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          type: 'upload_complete',
+                          fileType: 'audio',
+                          url: j.url,
+                          uploadedAudioUrl: uploadedAudioUrl,
+                          attempt: attempt,
+                          hostConfig: window.HOST_CONFIG
+                        })
+                      }).catch(() => {});
+                    } catch(_){ }
+                    break;
+                  } else {
+                    lastError = j?.error || `HTTP ${r.status}`;
+                  }
+                } catch (error) {
+                  lastError = error.message;
+                  if (attempt < 3) {
+                    try { statusEl.textContent = `uploading audio… (retry ${attempt}/3)`; } catch(_){ }
+                    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+                  }
+                }
               }
-            }catch(_){ }
+              
+              if (!uploadSuccess) {
+                try { statusEl.textContent = `upload failed: ${lastError}`; } catch(_){ }
+              }
+            }catch(e){ 
+              try { statusEl.textContent = `upload error: ${e.message}`; } catch(_){ }
+            }
             try { statusEl.textContent = ''; } catch(_){ }
             
             // Schedule cost estimation after upload completes
@@ -760,7 +841,7 @@
           } else {
             let diag = null;
             try {
-              const isAE = (window.nle && typeof window.nle.getHostId === 'function' && window.HOST_CONFIG && window.HOST_CONFIG.isAE);
+              const isAE = window.HOST_CONFIG ? window.HOST_CONFIG.isAE : false;
               if (isAE) {
                 if (!cs) cs = new CSInterface();
                 try { const extPath = cs.getSystemPath(CSInterface.SystemPath.EXTENSION).replace(/\\/g,'\\\\').replace(/\"/g,'\\\"'); const hostFile = window.HOST_CONFIG && window.HOST_CONFIG.isAE ? 'ae.jsx' : 'ppro.jsx'; await new Promise(resolve => cs.evalScript(`$.evalFile(\"${extPath}/host/${hostFile}\")`, ()=>resolve())); } catch(_){ }
@@ -842,10 +923,10 @@
       }
 
       function initCustomVideoPlayer() {
-        // Reset initialization flag to allow re-initialization for new files
-        window.__videoPlayerInitialized = false;
-        if (window.__videoPlayerInitialized) return;
-        window.__videoPlayerInitialized = true;
+        // Allow re-initialization for new videos
+        if (window.__videoPlayerInitialized) {
+          window.__videoPlayerInitialized = false;
+        }
         
         const video = document.getElementById('mainVideo');
         const centerPlayBtn = document.getElementById('centerPlayBtn');
@@ -931,7 +1012,14 @@
           if (playOverlay) playOverlay.classList.remove('hidden');
         });
 
-        // REMOVED DUPLICATE: Progress bar scrubbing (handled later)
+        // Progress bar scrubbing
+        if (progressBar) {
+          progressBar.addEventListener('click', (e) => {
+            const rect = progressBar.getBoundingClientRect();
+            const pos = (e.clientX - rect.left) / rect.width;
+            video.currentTime = pos * video.duration;
+          });
+        }
 
         // Play/pause functionality - only center button
         const togglePlay = () => {
@@ -945,7 +1033,6 @@
         // Only center play button
         if (centerPlayBtn) centerPlayBtn.addEventListener('click', togglePlay);
         video.addEventListener('click', togglePlay);
-        // Click anywhere on video toggles play/pause - REMOVED DUPLICATE
 
         // Volume control
         if (volumeSlider) {
@@ -954,16 +1041,35 @@
           });
         }
 
-        // REMOVED DUPLICATE: Volume button (handled later)
+        // Volume button
+        if (volumeBtn) {
+          volumeBtn.addEventListener('click', () => {
+            video.muted = !video.muted;
+            if (video.muted) {
+              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2"/><line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2"/></svg>';
+            } else {
+              volumeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+            }
+          });
+        }
 
-        // REMOVED DUPLICATE: Fullscreen (handled later)
+        // Fullscreen
+        if (fullscreenBtn) {
+          fullscreenBtn.addEventListener('click', () => {
+            if (video.requestFullscreen) {
+              video.requestFullscreen();
+            } else if (video.webkitRequestFullscreen) {
+              video.webkitRequestFullscreen();
+            }
+          });
+        }
       }
 
       function initCustomAudioPlayer() {
-        // Reset initialization flag to allow re-initialization for new files
-        window.__audioPlayerInitialized = false;
-        if (window.__audioPlayerInitialized) return;
-        window.__audioPlayerInitialized = true;
+        // Allow re-initialization for new audio files
+        if (window.__audioPlayerInitialized) {
+          window.__audioPlayerInitialized = false;
+        }
         
         const audio = document.getElementById('audioPlayer');
         const playBtn = document.getElementById('audioPlayBtn');
@@ -1055,7 +1161,7 @@
         // Initialize time display when metadata loads
         audio.addEventListener('loadedmetadata', () => {
           const duration = formatTime(audio.duration || 0);
-          if (timeDisplay) timeDisplay.textContent = `00:00 / ${duration}`;
+          if (timeDisplay) timeDisplay.innerHTML = `0:00 <span class="time-total">/ ${duration}</span>`;
           
           // Debug logging
           try {
@@ -1095,7 +1201,7 @@
         audio.addEventListener('timeupdate', () => {
           const current = formatTime(audio.currentTime);
           const duration = formatTime(audio.duration || 0);
-          if (timeDisplay) timeDisplay.textContent = `${current} / ${duration}`;
+          if (timeDisplay) timeDisplay.innerHTML = `${current} <span class="time-total">/ ${duration}</span>`;
           const w = canvas.clientWidth || canvas.offsetWidth || 600;
           const h = canvas.clientHeight || canvas.offsetHeight || 80;
           if (waveformBars && waveformBars.length) {
@@ -1190,27 +1296,28 @@
       function renderWaveform(canvas, bars, progress, displayWidthOverride, displayHeightOverride) {
         const ctx = canvas.getContext('2d');
         const displayWidth = displayWidthOverride || canvas.clientWidth || canvas.offsetWidth || 600;
-        const displayHeight = displayHeightOverride || canvas.clientHeight || canvas.offsetHeight || 80;
+        const displayHeight = displayHeightOverride || canvas.clientHeight || canvas.offsetHeight || 40;
         
         // Clear canvas
-        ctx.fillStyle = getComputedStyle(canvas).backgroundColor || '#1a1a1a';
-        ctx.fillRect(0, 0, displayWidth, displayHeight);
+        ctx.clearRect(0, 0, displayWidth, displayHeight);
         
         const progressX = progress * displayWidth;
         
         bars.forEach(bar => {
           // Color based on progress: white for played, grey for unplayed
-          ctx.fillStyle = bar.x <= progressX ? '#ffffff' : '#7a7a7a';
-          ctx.fillRect(bar.x, bar.centerY - bar.height/2, 1, bar.height);
+          ctx.fillStyle = bar.x <= progressX ? '#ffffff' : '#a1a1aa';
+          
+          // Draw rounded rect for each bar
+          const barWidth = 1;
+          const barHeight = bar.height;
+          const x = bar.x;
+          const y = bar.centerY - barHeight/2;
+          const radius = 2;
+          
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, barHeight, radius);
+          ctx.fill();
         });
-        
-        // Add subtle center line
-        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, displayHeight / 2);
-        ctx.lineTo(displayWidth, displayHeight / 2);
-        ctx.stroke();
       }
 
       function updateWaveformProgress(canvas, bars, progress, w, h) {
@@ -1237,9 +1344,13 @@
         if (!job || !job.outputPath) return;
         
         const videoSection = document.getElementById('videoSection');
+        const videoDropzone = document.getElementById('videoDropzone');
         const videoPreview = document.getElementById('videoPreview');
         
         if (videoSection && videoPreview) {
+          // Ensure video preview is visible for output display
+          videoDropzone.style.display = 'none';
+          videoPreview.style.display = 'block';
           videoPreview.innerHTML = `
             <div class="custom-video-player">
               <video id="outputVideo" class="video-element" src="file://${job.outputPath.replace(/ /g, '%20')}">
