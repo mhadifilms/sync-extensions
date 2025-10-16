@@ -27,6 +27,10 @@
             <Parameter>--allow-insecure-localhost</Parameter>
             <Parameter>--disable-features=BlockInsecurePrivateNetworkRequests,OutOfBlinkCors</Parameter>
             <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--enable-media-stream</Parameter>
+            <Parameter>--use-fake-ui-for-media-stream</Parameter>
+            <Parameter>--autoplay-policy=no-user-gesture-required</Parameter>
+            <Parameter>--disable-web-security</Parameter>
           </CEFCommandLine>
         </Resources>
         <Lifecycle>

@@ -6,6 +6,21 @@
 const CACHE_DIR = 'sync. extensions/sync-thumbnails';
 
 /**
+ * Logs to file using the debug system
+ */
+function logToFile(message) {
+  try {
+    if (typeof window.logToFile === 'function') {
+      window.logToFile(message);
+    } else {
+      console.log(message);
+    }
+  } catch(e) {
+    console.log(message);
+  }
+}
+
+/**
  * Gets the cache directory path from CEP
  */
 async function getCacheDir() {
@@ -17,7 +32,7 @@ async function getCacheDir() {
     // On Windows: %APPDATA%
     return `${userDataPath}/${CACHE_DIR}`;
   } catch(e) {
-    console.error('Failed to get cache dir:', e);
+    logToFile(`Failed to get cache dir: ${e.message}`);
     return null;
   }
 }
@@ -46,7 +61,7 @@ async function ensureCacheDir() {
       });
     });
   } catch(e) {
-    console.error('Failed to ensure cache dir:', e);
+    logToFile(`Failed to ensure cache dir: ${e.message}`);
     return false;
   }
 }
@@ -65,7 +80,7 @@ async function getThumbnailPath(jobId) {
  */
 async function generateThumbnail(videoUrl, jobId) {
   try {
-    console.log('[Thumbnails] Generating thumbnail for:', jobId, 'from URL:', videoUrl);
+    logToFile(`[Thumbnails] Generating thumbnail for: ${jobId} from URL: ${videoUrl}`);
     
     // Show loader while generating
     const card = document.querySelector(`.history-card[data-job-id="${jobId}"]`);
@@ -109,17 +124,17 @@ async function generateThumbnail(videoUrl, jobId) {
       
       // Timeout after 10 seconds
       const timeout = setTimeout(() => {
-        console.warn('[Thumbnails] Thumbnail generation timeout for:', jobId);
+        logToFile(`[Thumbnails] Thumbnail generation timeout for: ${jobId}`);
         resolveOnce(null);
       }, 10000);
       
       video.onloadedmetadata = () => {
-        console.log('[Thumbnails] Video metadata loaded, seeking...');
+        logToFile(`[Thumbnails] Video metadata loaded, seeking for: ${jobId}`);
         try {
           // Seek to 0.5 seconds to avoid black frames
           video.currentTime = Math.min(0.5, video.duration || 0);
         } catch(e) {
-          console.error('[Thumbnails] Seek error:', e);
+          logToFile(`[Thumbnails] Seek error for ${jobId}: ${e.message}`);
           clearTimeout(timeout);
           resolveOnce(null);
         }
@@ -127,14 +142,14 @@ async function generateThumbnail(videoUrl, jobId) {
       
       video.onseeked = async () => {
         try {
-          console.log('[Thumbnails] Seeked successfully, capturing frame...');
+          logToFile(`[Thumbnails] Seeked successfully, capturing frame for: ${jobId}`);
           
           // Create canvas to capture frame
           const canvas = document.createElement('canvas');
           const maxWidth = 200; // Low-res thumbnail
           
           if (!video.videoWidth || !video.videoHeight) {
-            console.error('[Thumbnails] Invalid video dimensions');
+            logToFile(`[Thumbnails] Invalid video dimensions for: ${jobId}`);
             clearTimeout(timeout);
             resolveOnce(null);
             return;
@@ -149,19 +164,19 @@ async function generateThumbnail(videoUrl, jobId) {
           
           // Convert to JPEG data URL
           const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          console.log('[Thumbnails] Thumbnail generated successfully');
+          logToFile(`[Thumbnails] Thumbnail generated successfully for: ${jobId}`);
           
           clearTimeout(timeout);
           resolveOnce(dataUrl);
         } catch(e) {
-          console.error('[Thumbnails] Frame capture error:', e);
+          logToFile(`[Thumbnails] Frame capture error for ${jobId}: ${e.message}`);
           clearTimeout(timeout);
           resolveOnce(null);
         }
       };
       
       video.onerror = (e) => {
-        console.warn('[Thumbnails] Video load error for job:', jobId, 'Error:', e.type || 'unknown');
+        logToFile(`[Thumbnails] Video load error for job: ${jobId} - Error: ${e.type || 'unknown'}`);
         clearTimeout(timeout);
         resolveOnce(null);
       };
@@ -171,13 +186,13 @@ async function generateThumbnail(videoUrl, jobId) {
         video.src = videoUrl;
         video.load();
       } catch(e) {
-        console.error('[Thumbnails] Failed to set video source:', e);
+        logToFile(`[Thumbnails] Failed to set video source for ${jobId}: ${e.message}`);
         clearTimeout(timeout);
         resolveOnce(null);
       }
     });
   } catch(e) {
-    console.error('[Thumbnails] Generate error:', e);
+    logToFile(`[Thumbnails] Generate error for ${jobId}: ${e.message}`);
     // Hide loader on error
     const card = document.querySelector(`.history-card[data-job-id="${jobId}"]`);
     if (card) {
@@ -194,7 +209,12 @@ async function generateThumbnail(videoUrl, jobId) {
  */
 async function loadThumbnail(jobId) {
   const thumbnailPath = await getThumbnailPath(jobId);
-  if (!thumbnailPath) return null;
+  if (!thumbnailPath) {
+    logToFile(`[Thumbnails] No thumbnail path for job: ${jobId}`);
+    return null;
+  }
+  
+  logToFile(`[Thumbnails] Checking if thumbnail exists at: ${thumbnailPath}`);
   
   try {
     // Check if thumbnail file exists and read it
@@ -207,33 +227,36 @@ async function loadThumbnail(jobId) {
         try {
           const r = JSON.parse(result);
           if (r && r.ok && r.exists) {
+            logToFile(`[Thumbnails] Thumbnail file exists, reading: ${jobId}`);
             // File exists, read it and convert to data URL
             const readFn = isAE ? 'AEFT_readThumbnail' : 'PPRO_readThumbnail';
             cs.evalScript(`${readFn}(${JSON.stringify(thumbnailPath)})`, (readResult) => {
               try {
                 const readR = JSON.parse(readResult);
                 if (readR && readR.ok && readR.dataUrl) {
+                  logToFile(`[Thumbnails] Successfully loaded cached thumbnail: ${jobId}`);
                   resolve(readR.dataUrl);
                 } else {
-                  console.warn('[Thumbnails] Failed to read cached thumbnail');
+                  logToFile(`[Thumbnails] Failed to read cached thumbnail for: ${jobId}`);
                   resolve(null);
                 }
               } catch(e) {
-                console.error('[Thumbnails] Read parse error:', e);
+                logToFile(`[Thumbnails] Read parse error for: ${jobId} - ${e.message}`);
                 resolve(null);
               }
             });
           } else {
+            logToFile(`[Thumbnails] Thumbnail file does not exist: ${jobId}`);
             resolve(null);
           }
         } catch(e) {
-          console.error('[Thumbnails] Exists parse error:', e);
+          logToFile(`[Thumbnails] Exists parse error: ${e.message}`);
           resolve(null);
         }
       });
     });
   } catch(e) {
-    console.error('[Thumbnails] Load error:', e);
+    logToFile(`[Thumbnails] Load error: ${e.message}`);
     return null;
   }
 }
@@ -243,36 +266,35 @@ async function loadThumbnail(jobId) {
  */
 async function generateThumbnailsForJobs(jobs) {
   if (!Array.isArray(jobs) || jobs.length === 0) {
-    console.log('[Thumbnails] No jobs to generate thumbnails for');
+    logToFile('[Thumbnails] No jobs to generate thumbnails for');
     return;
   }
   
-  console.log('[Thumbnails] Starting generation for batch:', jobs.length, 'jobs');
+  logToFile(`[Thumbnails] Starting generation for batch: ${jobs.length} jobs`);
   
   // Only process completed jobs
   const completedJobs = jobs.filter(j => j && j.status === 'completed' && j.id && (j.outputPath || j.videoPath));
-  console.log('[Thumbnails] Completed jobs with video:', completedJobs.length);
+  logToFile(`[Thumbnails] Completed jobs with video: ${completedJobs.length}`);
   
   for (const job of completedJobs) {
     try {
-      console.log('[Thumbnails] Processing job:', job.id, {
-        outputPath: job.outputPath,
-        videoPath: job.videoPath,
-        status: job.status
-      });
+      logToFile(`[Thumbnails] Processing job: ${job.id} - outputPath: ${job.outputPath || 'none'}, videoPath: ${job.videoPath || 'none'}, status: ${job.status}`);
       
       // Check for cached thumbnail first
+      logToFile(`[Thumbnails] Checking cache for job: ${job.id}`);
       const existing = await loadThumbnail(job.id);
       if (existing) {
-        console.log('[Thumbnails] Using cached thumbnail:', job.id);
+        logToFile(`[Thumbnails] Using cached thumbnail: ${job.id}`);
         updateCardThumbnail(job.id, existing);
         continue;
+      } else {
+        logToFile(`[Thumbnails] No cached thumbnail found, generating new one for: ${job.id}`);
       }
       
       // Try to generate from outputPath or videoPath
       const videoUrl = job.outputPath || job.videoPath;
       if (!videoUrl) {
-        console.warn('[Thumbnails] No video URL for job:', job.id);
+        logToFile(`[Thumbnails] No video URL for job: ${job.id}`);
         // Hide loader if no video
         const card = document.querySelector(`.history-card[data-job-id="${job.id}"]`);
         if (card) {
@@ -285,7 +307,7 @@ async function generateThumbnailsForJobs(jobs) {
       // For HTTP URLs, try to generate through backend proxy
       let finalVideoUrl = videoUrl;
       if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
-        console.log('[Thumbnails] HTTP URL detected, will try with CORS:', videoUrl);
+        logToFile(`[Thumbnails] HTTP URL detected, will try with CORS: ${videoUrl}`);
         // We'll try to load it directly - many CDNs support CORS
         // If it fails, the onerror handler will hide the loader
       } else if (videoUrl.startsWith('file://')) {
@@ -295,20 +317,20 @@ async function generateThumbnailsForJobs(jobs) {
         finalVideoUrl = 'file://' + videoUrl;
       }
       
-      console.log('[Thumbnails] Generating thumbnail from:', finalVideoUrl);
+      logToFile(`[Thumbnails] Generating thumbnail from: ${finalVideoUrl}`);
       const thumbnailDataUrl = await generateThumbnail(finalVideoUrl, job.id);
       if (thumbnailDataUrl) {
-        console.log('[Thumbnails] Generated thumbnail successfully');
+        logToFile(`[Thumbnails] Generated thumbnail successfully for: ${job.id}`);
         updateCardThumbnail(job.id, thumbnailDataUrl);
         
         // Cache the generated thumbnail
         try {
           await cacheThumbnail(job.id, thumbnailDataUrl);
         } catch(e) {
-          console.warn('[Thumbnails] Failed to cache thumbnail:', e);
+          logToFile(`[Thumbnails] Failed to cache thumbnail: ${e.message}`);
         }
       } else {
-        console.warn('[Thumbnails] Failed to generate thumbnail, showing placeholder for:', job.id);
+        logToFile(`[Thumbnails] Failed to generate thumbnail, showing placeholder for: ${job.id}`);
         // Show placeholder on failure
         const card = document.querySelector(`.history-card[data-job-id="${job.id}"]`);
         if (card) {
@@ -332,11 +354,11 @@ async function generateThumbnailsForJobs(jobs) {
         }
       }
     } catch(e) {
-      console.error('[Thumbnails] Error processing job:', job.id, e);
+      logToFile(`[Thumbnails] Error processing job: ${job.id} - ${e.message}`);
     }
   }
   
-  console.log('[Thumbnails] Batch generation complete');
+  logToFile('[Thumbnails] Batch generation complete');
 }
 
 /**
@@ -346,7 +368,7 @@ async function cacheThumbnail(jobId, thumbnailDataUrl) {
   try {
     const thumbnailPath = await getThumbnailPath(jobId);
     if (!thumbnailPath) {
-      console.warn('[Thumbnails] No cache path available for:', jobId);
+      logToFile(`[Thumbnails] No cache path available for: ${jobId}`);
       return false;
     }
     
@@ -371,20 +393,20 @@ async function cacheThumbnail(jobId, thumbnailDataUrl) {
         try {
           const r = JSON.parse(result);
           if (r && r.ok) {
-            console.log('[Thumbnails] Cached thumbnail successfully:', jobId);
+            logToFile(`[Thumbnails] Cached thumbnail successfully: ${jobId}`);
             resolve(true);
           } else {
-            console.warn('[Thumbnails] Failed to cache thumbnail:', r?.error || 'unknown error');
+            logToFile(`[Thumbnails] Failed to cache thumbnail: ${r?.error || 'unknown error'}`);
             resolve(false);
           }
         } catch(e) {
-          console.error('[Thumbnails] Cache parse error:', e);
+          logToFile(`[Thumbnails] Cache parse error: ${e.message}`);
           resolve(false);
         }
       });
     });
   } catch(e) {
-    console.error('[Thumbnails] Cache error:', e);
+    logToFile(`[Thumbnails] Cache error: ${e.message}`);
     return false;
   }
 }
@@ -398,7 +420,7 @@ function updateCardThumbnail(jobId, thumbnailUrl) {
   // Find the card element
   const card = document.querySelector(`.history-card[data-job-id="${jobId}"]`);
   if (!card) {
-    console.log('[Thumbnails] Card not found for job:', jobId);
+    logToFile(`[Thumbnails] Card not found for job: ${jobId}`);
     return;
   }
   
@@ -411,17 +433,17 @@ function updateCardThumbnail(jobId, thumbnailUrl) {
   // Update the thumbnail image
   const img = card.querySelector(`.history-thumbnail[data-job-id="${jobId}"]`);
   if (img) {
-    console.log('[Thumbnails] Updating card thumbnail:', jobId, thumbnailUrl);
+    logToFile(`[Thumbnails] Updating card thumbnail: ${jobId} - ${thumbnailUrl}`);
     img.onload = () => {
       img.style.opacity = '1';
     };
     img.onerror = () => {
-      console.error('[Thumbnails] Failed to load image:', thumbnailUrl);
+      logToFile(`[Thumbnails] Failed to load image: ${thumbnailUrl}`);
       img.style.opacity = '0';
     };
     img.src = thumbnailUrl;
   } else {
-    console.warn('[Thumbnails] Image element not found for job:', jobId);
+    logToFile(`[Thumbnails] Image element not found for job: ${jobId}`);
   }
 }
 

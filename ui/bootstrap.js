@@ -3,6 +3,7 @@
           try { if (typeof loadSettings === 'function') loadSettings(); } catch(_){ }
           try { if (typeof loadJobsLocal === 'function') loadJobsLocal(); } catch(_){ }
           try { if (typeof updateModelDisplay === 'function') updateModelDisplay(); } catch(_){ }
+          try { if (typeof updateFromVideoButton === 'function') updateFromVideoButton(); } catch(_){ }
           
           // Helper function to check health on a specific port
           async function checkHealth(port) {

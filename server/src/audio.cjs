@@ -257,7 +257,7 @@ async function convertAiffToMp3(srcPath, destPath){
   // Create MP3 encoder with error handling
   let mp3enc;
   try {
-    mp3enc = new lamejs.Mp3Encoder(meta.numChannels, Math.round(meta.sampleRate), 128);
+    mp3enc = new lamejs.Mp3Encoder(meta.numChannels, Math.round(meta.sampleRate), 192);
     tlog('MP3 encoder created successfully');
   } catch(e) {
     tlog('Failed to create MP3 encoder:', e.message);
@@ -329,13 +329,237 @@ async function convertAiffToMp3(srcPath, destPath){
   return finalPath;
 }
 
+async function convertWavToMp3(srcPath, destPath){
+  tlog('convertWavToMp3 start', srcPath, '->', destPath||'(auto)');
+  const finalPath = destPath || srcPath.replace(/\.[^.]+$/, '.mp3');
+  
+  // Load lamejs for MP3 encoding (using fixed version with dynamic import)
+  let lamejs;
+  try {
+    lamejs = await import('@breezystack/lamejs');
+    tlog('@breezystack/lamejs loaded successfully');
+  } catch(e) {
+    tlog('Failed to load @breezystack/lamejs:', e.message);
+    throw new Error('MP3 encoding requires @breezystack/lamejs dependency: ' + e.message);
+  }
+  
+  // Read WAV file
+  const fd = fs.openSync(srcPath, 'r');
+  try {
+    // Read WAV header
+    const header = Buffer.alloc(44);
+    fs.readSync(fd, header, 0, 44, 0);
+    
+    // Parse WAV header
+    const audioFormat = header.readUInt16LE(20);
+    const sampleRate = header.readUInt32LE(24);
+    const channels = header.readUInt16LE(22);
+    const bitsPerSample = header.readUInt16LE(34);
+    const dataSize = header.readUInt32LE(40);
+    
+    tlog('WAV info:', 'sampleRate=', sampleRate, 'channels=', channels, 'bitsPerSample=', bitsPerSample, 'dataSize=', dataSize);
+    
+    // Read audio data
+    const audioData = Buffer.alloc(dataSize);
+    fs.readSync(fd, audioData, 0, dataSize, 44);
+    
+    // Convert to 16-bit samples
+    let samples;
+    if (bitsPerSample === 16) {
+      samples = new Int16Array(audioData.buffer, audioData.byteOffset, audioData.length / 2);
+    } else if (bitsPerSample === 8) {
+      // Convert 8-bit to 16-bit
+      samples = new Int16Array(dataSize);
+      for (let i = 0; i < dataSize; i++) {
+        samples[i] = (audioData[i] - 128) * 256;
+      }
+    } else if (bitsPerSample === 24) {
+      // Convert 24-bit to 16-bit
+      const sampleCount = dataSize / 3;
+      samples = new Int16Array(sampleCount);
+      
+      for (let i = 0; i < sampleCount; i++) {
+        // Read 24-bit sample (3 bytes) and convert to 16-bit
+        // 24-bit samples are typically stored as signed integers
+        const byte1 = audioData[i * 3];
+        const byte2 = audioData[i * 3 + 1];
+        const byte3 = audioData[i * 3 + 2];
+        
+        // Convert 24-bit signed integer to 16-bit
+        // 24-bit range: -8,388,608 to 8,388,607
+        let sample24;
+        if (byte3 & 0x80) {
+          // Negative number - sign extend
+          sample24 = (byte3 << 16) | (byte2 << 8) | byte1;
+          sample24 |= 0xFF000000; // Sign extend to 32-bit
+        } else {
+          // Positive number
+          sample24 = (byte3 << 16) | (byte2 << 8) | byte1;
+        }
+        
+        // Convert to 16-bit range by dividing by 256 (24-bit to 16-bit scaling)
+        const sample16 = Math.max(-32768, Math.min(32767, Math.round(sample24 / 256)));
+        samples[i] = sample16;
+      }
+    } else if (bitsPerSample === 32) {
+      // Convert 32-bit to 16-bit
+      const sampleCount = dataSize / 4;
+      samples = new Int16Array(sampleCount);
+      
+      // Check if it's 32-bit float or integer by looking at audio format
+      const audioFormat = header.readUInt16LE(20);
+      const isFloat = audioFormat === 3; // IEEE 754 float
+      const isExtensible = audioFormat === 65534; // Extensible WAV format
+      
+      for (let i = 0; i < sampleCount; i++) {
+        let sample16;
+        if (isFloat) {
+          // 32-bit float: range -1.0 to 1.0
+          const sampleFloat = audioData.readFloatLE(i * 4);
+          sample16 = Math.max(-32768, Math.min(32767, Math.round(sampleFloat * 32767)));
+        } else if (isExtensible) {
+          // Extensible WAV format - try both float and integer interpretation
+          // First try as float
+          const sampleFloat = audioData.readFloatLE(i * 4);
+          if (Math.abs(sampleFloat) <= 1.0) {
+            // Looks like float data
+            sample16 = Math.max(-32768, Math.min(32767, Math.round(sampleFloat * 32767)));
+          } else {
+            // Looks like integer data
+            const sample32 = audioData.readInt32LE(i * 4);
+            sample16 = Math.max(-32768, Math.min(32767, Math.round(sample32 / 65536)));
+          }
+        } else {
+          // 32-bit: Check audio format to determine if it's float or integer
+          if (audioFormat === 3) {
+            // IEEE 754 float: values are between -1.0 and 1.0
+            const sampleFloat = audioData.readFloatLE(i * 4);
+            sample16 = Math.max(-32768, Math.min(32767, Math.round(sampleFloat * 32767)));
+          } else if (audioFormat === 65534) {
+            // Extensible WAV format: try to detect if it's float or integer
+            const sampleFloat = audioData.readFloatLE(i * 4);
+            if (Math.abs(sampleFloat) <= 1.0) {
+              // Looks like float data
+              sample16 = Math.max(-32768, Math.min(32767, Math.round(sampleFloat * 32767)));
+            } else {
+              // Looks like integer data
+              const sample32 = audioData.readInt32LE(i * 4);
+              sample16 = Math.max(-32768, Math.min(32767, Math.round(sample32 / 65536)));
+            }
+          } else {
+            // Standard PCM (audioFormat === 1) or other integer formats
+            const sample32 = audioData.readInt32LE(i * 4);
+            // For 32-bit integer PCM, divide by 65536 to get proper 16-bit range
+            sample16 = Math.max(-32768, Math.min(32767, Math.round(sample32 / 65536)));
+          }
+        }
+        samples[i] = sample16;
+      }
+    } else {
+      // Try to handle other bit depths by scaling appropriately
+      const sampleCount = dataSize / (bitsPerSample / 8);
+      samples = new Int16Array(sampleCount);
+      
+      if (bitsPerSample % 8 === 0) {
+        // Standard bit depths that are multiples of 8
+        const bytesPerSample = bitsPerSample / 8;
+        const maxValue = Math.pow(2, bitsPerSample - 1) - 1;
+        
+        for (let i = 0; i < sampleCount; i++) {
+          let sample = 0;
+          
+          // Read multi-byte sample (little-endian)
+          for (let j = 0; j < bytesPerSample; j++) {
+            sample |= audioData[i * bytesPerSample + j] << (j * 8);
+          }
+          
+          // Convert to signed if needed
+          if (sample > maxValue) {
+            sample -= Math.pow(2, bitsPerSample);
+          }
+          
+          // Scale to 16-bit range
+          const scaleFactor = maxValue / 32767;
+          samples[i] = Math.max(-32768, Math.min(32767, Math.round(sample / scaleFactor)));
+        }
+      } else {
+        throw new Error('Unsupported bits per sample: ' + bitsPerSample + ' (not a multiple of 8)');
+      }
+    }
+    
+    // Encode to MP3
+    const mp3enc = new lamejs.Mp3Encoder(channels, sampleRate, 192);
+    const mp3Data = [];
+    
+    const blockSize = 1152; // MP3 frame size
+    for (let i = 0; i < samples.length; i += blockSize * channels) {
+      if (channels === 1) {
+        // Mono: use the same data for both channels
+        const left = samples.slice(i, i + blockSize);
+        const mp3buf = mp3enc.encodeBuffer(left, left);
+        if (mp3buf.length > 0) {
+          mp3Data.push(Buffer.from(mp3buf));
+        }
+      } else {
+        // Stereo: deinterleave left and right channels
+        const left = new Int16Array(blockSize);
+        const right = new Int16Array(blockSize);
+        
+        for (let j = 0; j < blockSize && (i + j * 2 + 1) < samples.length; j++) {
+          left[j] = samples[i + j * 2];     // Even indices (0, 2, 4, ...)
+          right[j] = samples[i + j * 2 + 1]; // Odd indices (1, 3, 5, ...)
+        }
+        
+        const mp3buf = mp3enc.encodeBuffer(left, right);
+        if (mp3buf.length > 0) {
+          mp3Data.push(Buffer.from(mp3buf));
+        }
+      }
+    }
+    
+    // Flush encoder
+    const mp3buf = mp3enc.flush();
+    if (mp3buf.length > 0) {
+      mp3Data.push(Buffer.from(mp3buf));
+    }
+    
+    const mp3Buffer = Buffer.concat(mp3Data);
+    fs.writeFileSync(finalPath, mp3Buffer);
+    tlog('convertWavToMp3 done bytesWritten=', mp3Buffer.length, 'fileSize=', fs.statSync(finalPath).size);
+    
+    return finalPath;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 async function convertAudio(srcPath, format){
   const ext = String(format||'').toLowerCase();
-  if (ext === 'wav') return await convertAiffToWav(srcPath);
-  if (ext === 'mp3') return await convertAiffToMp3(srcPath, null);
+  const srcExt = path.extname(srcPath).toLowerCase();
+  
+  if (ext === 'wav') {
+    if (srcExt === '.aiff' || srcExt === '.aif') {
+      return await convertAiffToWav(srcPath);
+    } else if (srcExt === '.wav') {
+      return srcPath; // Already WAV
+    } else {
+      throw new Error('Cannot convert ' + srcExt + ' to WAV');
+    }
+  }
+  
+  if (ext === 'mp3') {
+    if (srcExt === '.aiff' || srcExt === '.aif') {
+      return await convertAiffToMp3(srcPath, null);
+    } else if (srcExt === '.wav') {
+      return await convertWavToMp3(srcPath, null);
+    } else {
+      throw new Error('Cannot convert ' + srcExt + ' to MP3');
+    }
+  }
+  
   throw new Error('Unsupported target format: ' + format);
 }
 
-module.exports = { convertAudio, convertAiffToWav, convertAiffToMp3 };
+module.exports = { convertAudio, convertAiffToWav, convertAiffToMp3, convertWavToMp3 };
 
 

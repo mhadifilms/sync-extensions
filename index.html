@@ -6,6 +6,144 @@
     <link rel="stylesheet" href="ui/styles.css" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <script type="text/javascript" src="lib/CSInterface.js"></script>
+    
+    <!-- PostHog Analytics -->
+    <script>
+      (function(){
+        var s=document.createElement('script');
+        s.src='https://cdn.posthog.com/posthog.js'; 
+        s.async=true;
+        s.onload=function(){
+          // Get distinctId from server to ensure consistency
+          fetch('http://127.0.0.1:3000/telemetry/test')
+            .then(response => response.json())
+            .then(data => {
+              const distinctId = data.distinctId || 'unknown';
+              
+              posthog.init('phc_82dxgIiZvuUFV41LErIq8UGCNYmisHq8Fn3a4LGtsYO', {
+                api_host: 'https://us.i.posthog.com',
+                autocapture: false,           // be explicit about what you send
+                capture_pageview: false,      // panels aren't real pages
+                disable_session_recording: true, // turn ON later if you need replay
+                distinct_id: distinctId       // Use same ID as server
+              });
+              
+              // Track panel initialization
+              posthog.capture('ui_panel_loaded', {
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                distinctId: distinctId
+              });
+              
+              // Set up event listeners after PostHog is initialized
+              setupPostHogEventListeners();
+            })
+            .catch(error => {
+              console.warn('Failed to get distinctId from server, using fallback:', error);
+              // Fallback initialization
+              posthog.init('phc_82dxgIiZvuUFV41LErIq8UGCNYmisHq8Fn3a4LGtsYO', {
+                api_host: 'https://us.i.posthog.com',
+                autocapture: false,
+                capture_pageview: false,
+                disable_session_recording: true
+              });
+              
+              posthog.capture('ui_panel_loaded', {
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                fallback: true
+              });
+              
+              // Set up event listeners after PostHog is initialized
+              setupPostHogEventListeners();
+            });
+          
+          // Function to set up all PostHog event listeners
+          function setupPostHogEventListeners() {
+            // Track tab switches
+            document.querySelectorAll('.tab-switch').forEach(btn => {
+              btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                posthog.capture('ui_tab_switched', {
+                  tab: tab,
+                  timestamp: new Date().toISOString()
+                });
+              });
+            });
+            
+            // Track button clicks
+            document.querySelectorAll('[data-action]').forEach(btn => {
+              btn.addEventListener('click', () => {
+                const action = btn.dataset.action;
+                posthog.capture('ui_button_clicked', {
+                  action: action,
+                  timestamp: new Date().toISOString()
+                });
+              });
+            });
+            
+            // Track model selection
+            document.querySelectorAll('input[name="model"]').forEach(radio => {
+              radio.addEventListener('change', () => {
+                if (radio.checked) {
+                  posthog.capture('ui_model_selected', {
+                    model: radio.value,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+              });
+            });
+            
+            // Track settings changes
+            document.querySelectorAll('.api-key-input').forEach(input => {
+              input.addEventListener('input', () => {
+                const hasValue = input.value.length > 0;
+                posthog.capture('ui_api_key_entered', {
+                  field: input.id,
+                  hasValue: hasValue,
+                  timestamp: new Date().toISOString()
+                });
+              });
+            });
+            
+            // Track save location changes
+            document.querySelectorAll('[data-save-location]').forEach(btn => {
+              btn.addEventListener('click', () => {
+                const location = btn.dataset.saveLocation;
+                posthog.capture('ui_save_location_changed', {
+                  location: location,
+                  timestamp: new Date().toISOString()
+                });
+              });
+            });
+            
+            // Track render format changes
+            document.querySelectorAll('[data-video-format], [data-audio-format]').forEach(btn => {
+              btn.addEventListener('click', () => {
+                const format = btn.dataset.videoFormat || btn.dataset.audioFormat;
+                const type = btn.dataset.videoFormat ? 'video' : 'audio';
+                posthog.capture('ui_render_format_changed', {
+                  type: type,
+                  format: format,
+                  timestamp: new Date().toISOString()
+                });
+              });
+            });
+            
+            // Track lipsync button clicks
+            const lipsyncBtn = document.getElementById('lipsyncBtn');
+            if (lipsyncBtn) {
+              lipsyncBtn.addEventListener('click', () => {
+                posthog.capture('ui_run_clicked', {
+                  timestamp: new Date().toISOString()
+                });
+              });
+            }
+          }
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
   </head>
   <body>
     <div class="app-container">
@@ -89,7 +227,7 @@
                     <div class="icon-bg"></div>
                     <i data-lucide="file-video-2" class="icon-main" style="width: 48px; height: 48px; color: #d4d4d4;"></i>
                   </div>
-                  <p class="upload-text">choose a video to edit</p>
+                  <p class="upload-text">drop video file here to upload</p>
                 </div>
                 <div class="upload-actions">
                   <div class="action-row">
@@ -110,6 +248,17 @@
                     <button class="action-btn" data-action="video-link">
                       <i data-lucide="link"></i>
                       <span>link url</span>
+                    </button>
+                  </div>
+                  <div class="url-input-container" id="videoUrlInput" style="display: none;">
+                    <div class="url-input-wrapper">
+                      <input type="url" class="url-input-field" id="videoUrlField" placeholder="paste video url here...">
+                      <button class="url-clear-btn" data-action="video-url-clear">
+                        <i data-lucide="x"></i>
+                      </button>
+                    </div>
+                    <button class="url-submit-btn" data-action="video-url-submit">
+                      <i data-lucide="cloud-download"></i>
                     </button>
                   </div>
                 </div>
@@ -154,19 +303,66 @@
                       <span>link url</span>
                     </button>
                   </div>
+                  <div class="url-input-container" id="audioUrlInput" style="display: none;">
+                    <div class="url-input-wrapper">
+                      <input type="url" class="url-input-field" id="audioUrlField" placeholder="paste audio url here...">
+                      <button class="url-clear-btn" data-action="audio-url-clear">
+                        <i data-lucide="x"></i>
+                      </button>
+                    </div>
+                    <button class="url-submit-btn" data-action="audio-url-submit">
+                      <i data-lucide="cloud-download"></i>
+                    </button>
+                  </div>
                   <div class="action-row">
                     <button class="action-btn" data-action="audio-from-video">
                       <i data-lucide="video"></i>
                       <span>from video</span>
                     </button>
-                    <button class="action-btn" data-action="audio-generate">
+                    <button class="action-btn" data-action="audio-tts">
                       <i data-lucide="sparkles"></i>
-                      <span>generate</span>
+                      <span>from text</span>
                     </button>
                   </div>
                 </div>
               </div>
               <div id="audioPreview" style="display: none;"></div>
+              
+              <!-- TTS Interface (hidden by default) -->
+              <div id="ttsInterface" class="tts-textarea" style="display: none;">
+                <button class="tts-close-x" id="ttsCloseX" title="Back to audio upload">
+                  <i data-lucide="x"></i>
+                </button>
+                <div class="tts-text-area">
+                  <textarea 
+                    id="ttsTextInput" 
+                    class="tts-text-input" 
+                    placeholder="add your text to speech here, choose voice below"
+                    maxlength="5000"
+                  ></textarea>
+                </div>
+                <div class="tts-controls">
+                  <div class="tts-controls-left">
+                    <button class="tts-btn" id="ttsUploadBtn">
+                      <i data-lucide="upload"></i>
+                    </button>
+                  </div>
+                  <div class="tts-controls-right">
+                    <div class="tts-duration">dur: <span id="ttsDuration">-</span></div>
+                    <button class="tts-voice-btn" id="ttsVoiceSelectBtn">
+                      <i data-lucide="user"></i>
+                      <span id="ttsSelectedVoice">rachel</span>
+                    </button>
+                    <button class="tts-btn" id="ttsSettingsBtn">
+                      <i data-lucide="sliders-horizontal"></i>
+                    </button>
+                    <button class="tts-preview-btn" id="ttsPreviewBtn">
+                      <i data-lucide="audio-lines"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
               <div class="custom-dropdown-menu" id="ttsMenu" style="display: none;">
                 <div class="custom-dropdown-option" data-value="placeholder">
                   <i data-lucide="type"></i>
@@ -328,6 +524,166 @@
         
         </div>
     
+      <!-- URL Input Modal -->
+      <div class="url-input-overlay" id="urlInputOverlay" style="display: none;">
+        <div class="url-input-modal">
+          <div class="url-input-content">
+            <button class="url-input-close" id="urlInputClose">
+              <i data-lucide="x"></i>
+            </button>
+            <div class="url-input-field-wrapper">
+              <input type="text" id="urlInput" class="url-input-field" placeholder="paste video url here..." autocomplete="off">
+              <button class="url-input-submit" id="urlInputSubmit">
+                <i data-lucide="arrow-right"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TTS Voice Selector Overlay -->
+      <div class="model-selector-overlay" id="ttsVoiceSelectorOverlay" style="display: none;">
+        <div class="model-selector-panel">
+          <div class="model-panel-handle"></div>
+          
+          <div class="model-selector-header">
+            <h3>choose voice</h3>
+            <button class="model-selector-close" id="ttsVoiceSelectorClose">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          
+          <!-- Search -->
+          <div class="tts-voice-search">
+            <i data-lucide="search" class="tts-voice-search-icon"></i>
+            <input type="text" id="ttsVoiceSearch" class="tts-voice-search-input" placeholder="find voice">
+          </div>
+          
+          <!-- Voice List with Clone Button -->
+          <div class="tts-voice-list-wrapper">
+            <div class="tts-voice-list" id="ttsVoiceList">
+              <div class="tts-voice-loading">
+                <div class="tts-progress-spinner"></div>
+                <span>loading voices...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- TTS Voice Settings Popup -->
+      <div class="tts-settings-popup" id="ttsSettingsPopup" style="display: none;">
+        <div class="tts-settings-content">
+          <h3 class="tts-settings-title">voice settings</h3>
+          
+          <div class="tts-setting-item">
+            <div class="tts-setting-header">
+              <span class="tts-setting-label">stability: <span id="ttsStabilityValue">0.5</span></span>
+              <button class="tts-setting-help">
+                <i data-lucide="help-circle"></i>
+              </button>
+            </div>
+            <div class="tts-slider-container">
+              <span class="tts-slider-min">0</span>
+              <input type="range" id="ttsStabilitySlider" class="tts-slider" min="0" max="1" step="0.01" value="0.5">
+              <span class="tts-slider-max">1</span>
+            </div>
+          </div>
+          
+          <div class="tts-setting-item">
+            <div class="tts-setting-header">
+              <span class="tts-setting-label">similarity boost: <span id="ttsSimilarityValue">0.8</span></span>
+              <button class="tts-setting-help">
+                <i data-lucide="help-circle"></i>
+              </button>
+            </div>
+            <div class="tts-slider-container">
+              <span class="tts-slider-min">0</span>
+              <input type="range" id="ttsSimilaritySlider" class="tts-slider" min="0" max="1" step="0.01" value="0.8">
+              <span class="tts-slider-max">1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Voice Clone Modal -->
+      <div class="model-selector-overlay" id="ttsVoiceCloneOverlay" style="display: none;">
+        <div class="model-selector-panel">
+          <div class="model-panel-handle"></div>
+          
+          <div class="model-selector-header">
+            <h3>create custom voice</h3>
+            <button class="model-selector-close" id="ttsVoiceCloneClose">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          
+          <div class="tts-clone-content">
+            <!-- Voice Name Input -->
+            <div class="tts-clone-field">
+              <label class="tts-clone-label">voice name</label>
+              <input type="text" id="ttsCloneVoiceName" class="tts-clone-input" placeholder="custom voice 1" value="custom voice 1" />
+            </div>
+            
+            <!-- Upload/Record Area -->
+            <div class="tts-clone-upload-area">
+              <p class="tts-clone-upload-text">Upload or record audio sample</p>
+              <p class="tts-clone-upload-hint">mp3, max 10MB</p>
+              <div class="tts-clone-upload-buttons">
+                <button class="tts-clone-upload-btn" id="ttsCloneBrowseBtn">
+                  <i data-lucide="upload"></i>
+                  <span>browse</span>
+                </button>
+                <button class="tts-clone-upload-btn" id="ttsCloneRecordBtn">
+                  <i data-lucide="mic"></i>
+                  <span>record</span>
+                </button>
+              </div>
+            </div>
+            
+            <p class="tts-clone-divider-text">or extract sample from existing</p>
+            
+            <!-- Video Button -->
+            <button class="tts-clone-video-btn" id="ttsCloneFromVideoBtn">
+              <i data-lucide="video"></i>
+              <span>video</span>
+            </button>
+            
+            <!-- Voice Samples List -->
+            <div class="tts-clone-samples-section">
+              <label class="tts-clone-label">voice samples</label>
+              <div id="ttsCloneSamplesList" class="tts-clone-samples">
+                <!-- Sample items will be added dynamically -->
+                <div class="tts-clone-sample-item">
+                  <button class="tts-clone-sample-btn">
+                    <i data-lucide="play"></i>
+                    <span>sample2-recorded.mp3</span>
+                  </button>
+                  <button class="tts-clone-sample-delete">
+                    <i data-lucide="x"></i>
+                  </button>
+                </div>
+                <div class="tts-clone-sample-item">
+                  <button class="tts-clone-sample-btn">
+                    <i data-lucide="play"></i>
+                    <span>sample1-uploaded.mp3</span>
+                  </button>
+                  <button class="tts-clone-sample-delete">
+                    <i data-lucide="x"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="tts-clone-actions">
+              <button class="tts-clone-cancel-btn" id="ttsCloneCancelBtn">cancel</button>
+              <button class="tts-clone-save-btn" id="ttsCloneSaveBtn">save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Model Selector Overlay -->
       <div class="model-selector-overlay" id="modelSelectorOverlay">
         <div class="model-selector-panel">
@@ -480,20 +836,32 @@
     
         <script src="ui/loader.js"></script>
         <script src="ui/nle.js"></script>
+        <script src="ui/dnd.js"></script>
         <script src="ui/core.js"></script>
         <script src="ui/media.js"></script>
-        <script src="ui/dnd.js"></script>
         <script src="ui/host-detection.js"></script>
         <script src="ui/thumbnails.js"></script>
     <script src="ui/history.js"></script>
         <script src="ui/jobs.js"></script>
         <script src="ui/settings.js"></script>
         <script src="ui/cost.js"></script>
+        <script src="ui/tts.js"></script>
+        <script src="ui/recording.js"></script>
         <script src="ui/bootstrap.js"></script>
         
         <script>
-          // Initialize Lucide icons
-          lucide.createIcons();
+          // Initialize Lucide icons when DOM is ready
+          function initLucideIcons() {
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+              lucide.createIcons();
+            }
+          }
+          
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initLucideIcons);
+          } else {
+            initLucideIcons();
+          }
         </script>
     
     <script>

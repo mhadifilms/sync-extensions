@@ -1,6 +1,20 @@
       function updateLipsyncButton() {
         const btn = document.getElementById('lipsyncBtn');
-        if (selectedVideo && selectedAudio) {
+        const hasVideo = !!(window.selectedVideo || window.selectedVideoUrl);
+        const hasAudio = !!(window.selectedAudio || window.selectedAudioUrl);
+        
+        // Debug logging
+        console.log('[Lipsync Button] Update:', {
+          selectedVideo: window.selectedVideo,
+          selectedVideoUrl: window.selectedVideoUrl,
+          selectedAudio: window.selectedAudio,
+          selectedAudioUrl: window.selectedAudioUrl,
+          hasVideo,
+          hasAudio,
+          willEnable: hasVideo && hasAudio
+        });
+        
+        if (hasVideo && hasAudio) {
           btn.disabled = false;
         } else {
           btn.disabled = true;
@@ -68,8 +82,9 @@
           video.addEventListener('timeupdate', () => {
             if (timeDisplay) {
               const current = formatTime(video.currentTime);
-              const duration = formatTime(video.duration);
-              timeDisplay.textContent = `${current} / ${duration}`;
+              const duration = video.duration || 0;
+              const durationStr = isFinite(duration) ? formatTime(duration) : '0:00';
+              timeDisplay.textContent = `${current} / ${durationStr}`;
             }
             if (seekBar) {
               seekBar.value = (video.currentTime / video.duration) * 100;
@@ -137,8 +152,9 @@
           audio.addEventListener('timeupdate', () => {
             if (timeDisplay) {
               const current = formatTime(audio.currentTime);
-              const duration = formatTime(audio.duration);
-              timeDisplay.textContent = `${current} / ${duration}`;
+              const duration = audio.duration || 0;
+              const durationStr = isFinite(duration) ? formatTime(duration) : '0:00';
+              timeDisplay.textContent = `${current} / ${durationStr}`;
             }
             if (seekBar) {
               seekBar.value = (audio.currentTime / audio.duration) * 100;
@@ -175,14 +191,23 @@
                 return p;
               } catch(_) { return String(p||''); }
             }
+            // Handle URL inputs differently
+            if (window.selectedAudioIsUrl) {
+              // For URL inputs, we'll use a placeholder waveform for now
+              // In a real implementation, you'd need to fetch and decode the audio
+              waveformBars = buildPlaceholderBars(displayWidth, displayHeight);
+              renderWaveform(canvas, waveformBars, 0, displayWidth, displayHeight);
+              return;
+            }
+            
             // Prefer explicit selection path, else derive from audio.src
-            let localPath = normalizePath(selectedAudio||'');
+            let localPath = normalizePath(window.selectedAudio||'');
             if (!localPath){
               try { const u = normalizePath(audio.getAttribute('src')||''); localPath = u; } catch(_){ }
             }
             if (!localPath) { renderWaveform(canvas, [], 0, displayWidth, displayHeight); return; }
-            await ensureAuthToken();
-            const resp = await fetch('http://127.0.0.1:3000/waveform/file?'+new URLSearchParams({ path: localPath }), { headers: authHeaders(), cache:'no-store' });
+            await window.ensureAuthToken();
+            const resp = await fetch('http://127.0.0.1:3000/waveform/file?'+new URLSearchParams({ path: localPath }), { headers: window.window.authHeaders(), cache:'no-store' });
             if (!resp.ok) { renderWaveform(canvas, [], 0); return; }
             const ab = await resp.arrayBuffer();
             const ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -195,7 +220,25 @@
         })();
       }
 
-      function renderInputPreview() {
+  window.renderInputPreview = function renderInputPreview(source) {
+    const payload = {
+      selectedVideo: window.selectedVideo,
+      selectedVideoUrl: window.selectedVideoUrl,
+      selectedVideoIsUrl: window.selectedVideoIsUrl,
+      selectedAudio: window.selectedAudio,
+      selectedAudioUrl: window.selectedAudioUrl,
+      selectedAudioIsUrl: window.selectedAudioIsUrl,
+      source: source || 'unknown'
+    };
+    console.log('renderInputPreview called with:', payload);
+    if (window.debugLog) window.debugLog('renderInputPreview_called', payload);
+    try {
+      const statusEl = document.getElementById('costStatus');
+      if (statusEl) {
+        statusEl.textContent = `preview update from ${payload.source}`;
+      }
+    } catch (_){ }
+        
         const videoSection = document.getElementById('videoSection');
         const videoDropzone = document.getElementById('videoDropzone');
         const videoPreview = document.getElementById('videoPreview');
@@ -205,14 +248,28 @@
         const audioPreview = document.getElementById('audioPreview');
         
         // Video
-        if (selectedVideo) {
+        if (window.selectedVideo || window.selectedVideoUrl) {
+          // Validate the path before using it (only for file paths)
+          if (window.selectedVideo && (!window.selectedVideo || window.selectedVideo.includes('.file/id=') || window.selectedVideo.length < 2 || (!window.selectedVideo.startsWith('/') && !window.selectedVideo.startsWith('file://')))) {
+            // Invalid path - show error and clear selection
+            if (typeof window.showToast === 'function') {
+              window.showToast('invalid file path - please select file again', 'error');
+            }
+            window.selectedVideo = null;
+            if (videoSection) videoSection.classList.remove('has-media');
+            videoDropzone.style.display = 'flex';
+            videoPreview.style.display = 'none';
+            return;
+          }
+          
           if (videoSection) videoSection.classList.add('has-media');
           videoDropzone.style.display = 'none';
           videoPreview.style.display = 'flex';
+          const videoSrc = window.selectedVideoIsUrl ? window.selectedVideoUrl : `file://${window.selectedVideo.replace(/ /g, '%20')}`;
           videoPreview.innerHTML = `
             <div class="custom-video-player">
-              <video id="mainVideo" class="video-element" src="file://${selectedVideo.replace(/ /g, '%20')}">
-                <source src="file://${selectedVideo.replace(/ /g, '%20')}" type="video/mp4">
+              <video id="mainVideo" class="video-element" src="${videoSrc}" preload="metadata">
+                <source src="${videoSrc}" type="video/mp4">
               </video>
               <!-- Center play button overlay -->
               <div class="video-play-overlay" id="videoPlayOverlay">
@@ -250,16 +307,18 @@
                       </svg>
                     </button>
                     <button class="video-control-btn video-delete-btn" onclick="clearVideoSelection()">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3,6 5,6 21,6"></polyline>
-                        <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-                      </svg>
+                      <i data-lucide="trash-2" style="width: 18px; height: 18px;"></i>
                     </button>
                   </div>
                 </div>
               </div>
             </div>`;
           initCustomVideoPlayer();
+          
+          // Initialize Lucide icons for video controls
+          if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+          }
         } else {
           if (videoSection) videoSection.classList.remove('has-media');
           videoDropzone.style.display = 'flex';
@@ -267,11 +326,24 @@
         }
         
         // Audio
-        if (selectedAudio) {
+        if (window.selectedAudio || window.selectedAudioUrl) {
+          // Validate the path before using it (only for file paths)
+          if (window.selectedAudio && (!window.selectedAudio || window.selectedAudio.includes('.file/id=') || window.selectedAudio.length < 2 || (!window.selectedAudio.startsWith('/') && !window.selectedAudio.startsWith('file://')))) {
+            // Invalid path - show error and clear selection
+            if (typeof window.showToast === 'function') {
+              window.showToast('invalid file path - please select file again', 'error');
+            }
+            window.selectedAudio = null;
+            if (audioSection) audioSection.classList.remove('has-media');
+            audioDropzone.style.display = 'flex';
+            audioPreview.style.display = 'none';
+            return;
+          }
+          
           if (audioSection) audioSection.classList.add('has-media');
           audioDropzone.style.display = 'none';
           audioPreview.style.display = 'flex';
-          const audioSrc = "file://" + selectedAudio.replace(/ /g, '%20');
+          const audioSrc = window.selectedAudioIsUrl ? window.selectedAudioUrl : "file://" + window.selectedAudio.replace(/ /g, '%20');
           
           // Debug logging
           try {
@@ -280,7 +352,7 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
                 type: 'audio_src_set', 
-                selectedAudio: selectedAudio,
+                selectedAudio: window.selectedAudio,
                 audioSrc: audioSrc,
                 hostConfig: window.HOST_CONFIG
               })
@@ -297,10 +369,54 @@
                 <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
                 <div class="audio-time" id="audioTime">0:00 / 0:00</div>
               </div>
-              <button class="audio-dubbing-btn">
-                <i data-lucide="globe" style="width: 16px; height: 16px;"></i>
-                <span>dubbing</span>
-              </button>
+              <div class="dubbing-dropdown-wrapper">
+                <button class="audio-dubbing-btn" id="dubbingBtn">
+                  <i data-lucide="globe" style="width: 16px; height: 16px;"></i>
+                  <span id="dubbingBtnText">dubbing</span>
+                </button>
+               <button class="audio-dubbing-submit-btn" id="dubbingSubmitBtn" style="display: none;">
+                 <i data-lucide="arrow-right" style="width: 18px; height: 18px;"></i>
+               </button>
+                <div class="dubbing-dropdown" id="dubbingDropdown" style="display: none;">
+                  <div class="dubbing-dropdown-header">
+                    <i data-lucide="search" style="width: 16px; height: 16px;"></i>
+                    <input type="text" id="dubbingSearch" class="dubbing-search-input" placeholder="target language" autocomplete="off">
+                  </div>
+                  <div class="dubbing-dropdown-divider"></div>
+                  <div class="dubbing-dropdown-options" id="dubbingOptions">
+                    <div class="dubbing-option" data-lang="en">english</div>
+                    <div class="dubbing-option" data-lang="hi">hindi</div>
+                    <div class="dubbing-option" data-lang="pt">portuguese</div>
+                    <div class="dubbing-option" data-lang="zh">chinese</div>
+                    <div class="dubbing-option" data-lang="es">spanish</div>
+                    <div class="dubbing-option" data-lang="fr">french</div>
+                    <div class="dubbing-option" data-lang="de">german</div>
+                    <div class="dubbing-option" data-lang="ja">japanese</div>
+                    <div class="dubbing-option" data-lang="ar">arabic</div>
+                    <div class="dubbing-option" data-lang="ru">russian</div>
+                    <div class="dubbing-option" data-lang="ko">korean</div>
+                    <div class="dubbing-option" data-lang="id">indonesian</div>
+                    <div class="dubbing-option" data-lang="it">italian</div>
+                    <div class="dubbing-option" data-lang="nl">dutch</div>
+                    <div class="dubbing-option" data-lang="tr">turkish</div>
+                    <div class="dubbing-option" data-lang="pl">polish</div>
+                    <div class="dubbing-option" data-lang="sv">swedish</div>
+                    <div class="dubbing-option" data-lang="fil">filipino</div>
+                    <div class="dubbing-option" data-lang="ms">malay</div>
+                    <div class="dubbing-option" data-lang="ro">romanian</div>
+                    <div class="dubbing-option" data-lang="uk">ukrainian</div>
+                    <div class="dubbing-option" data-lang="el">greek</div>
+                    <div class="dubbing-option" data-lang="cs">czech</div>
+                    <div class="dubbing-option" data-lang="da">danish</div>
+                    <div class="dubbing-option" data-lang="fi">finnish</div>
+                    <div class="dubbing-option" data-lang="bg">bulgarian</div>
+                    <div class="dubbing-option" data-lang="hr">croatian</div>
+                    <div class="dubbing-option" data-lang="sk">slovak</div>
+                    <div class="dubbing-option" data-lang="ta">tamil</div>
+                  </div>
+                  <div class="dubbing-dropdown-scrollbar"></div>
+                </div>
+              </div>
               <button class="audio-delete-btn" onclick="clearAudioSelection()">
                 <i data-lucide="trash-2" style="width: 18px; height: 18px;"></i>
               </button>
@@ -319,6 +435,7 @@
         
         updateLipsyncButton();
         updateInputStatus();
+        updateFromVideoButton();
       }
 
       async function selectVideo() {
@@ -337,7 +454,9 @@
           
           if (typeof __pickerBusy !== 'undefined' && __pickerBusy) { return; }
           var statusEl = document.getElementById('statusMessage');
-          try { statusEl.textContent = 'opening video picker…'; } catch(_){ }
+          if (typeof window.showToast === 'function') {
+            window.showToast('opening video picker…', 'info');
+          }
           const raw = await openFileDialog('video');
           
           // Debug logging
@@ -356,10 +475,15 @@
           } catch(_) {}
           
           if (raw && raw.indexOf('/') !== -1) {
-            selectedVideoIsTemp = false;
+            window.selectedVideoIsTemp = false;
             const ext = raw.split('.').pop().toLowerCase();
-            const ok = {mov:1,mp4:1,mxf:1,mkv:1,avi:1,m4v:1,mpg:1,mpeg:1}[ext] === 1;
-            if (!ok) { try { statusEl.textContent = 'please select a video file'; } catch(_){ } return; }
+            const ok = {mov:1,mp4:1}[ext] === 1;
+            if (!ok) { 
+              if (typeof window.showToast === 'function') {
+                window.showToast('only mp4 and mov supported', 'error');
+              }
+              return; 
+            }
             const size = await new Promise(resolve=>{ 
               try {
                 const safe = String(raw||'').replace(/\\/g,'\\\\').replace(/\"/g,'\\\"').replace(/'/g,"\\'");
@@ -376,24 +500,49 @@
                 resolve(0);
               }
             });
-            if (size > 1024*1024*1024) { try { statusEl.textContent = 'video exceeds 1GB (not allowed)'; } catch(_){ } return; }
-            selectedVideo = raw;
+            if (size > 1024*1024*1024) { 
+              if (typeof window.showToast === 'function') {
+                window.showToast('video exceeds 1gb (not allowed)', 'error');
+              }
+              return; 
+            }
+            window.selectedVideo = raw;
+            console.log('[Video Selection] File selected:', window.selectedVideo);
             updateLipsyncButton();
             renderInputPreview();
-            try { statusEl.textContent = 'uploading video…'; } catch(_){ }
+            updateFromVideoButton();
+            // Clear any status messages
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
-              await ensureAuthToken();
-              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+              await window.ensureAuthToken();
+              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: window.authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
               const j = await r.json().catch(()=>null);
-              if (r.ok && j && j.ok && j.url){ uploadedVideoUrl = j.url; }
-            }catch(_){ }
-            try { statusEl.textContent = ''; } catch(_){ }
+              if (r.ok && j && j.ok && j.url){ 
+                uploadedVideoUrl = j.url;
+                window.uploadedVideoUrl = j.url; // Set window-scoped variable for cost estimation
+                if (window.showToast) {
+                  window.showToast('video uploaded successfully');
+                }
+              } else {
+                const errorMsg = j?.error || 'server error';
+                if (window.showToast) {
+                  window.showToast(`video upload failed: ${errorMsg.toLowerCase()}`, 'error');
+                }
+              }
+            }catch(e){ 
+              if (window.showToast) {
+                const errorMsg = e.name === 'AbortError' ? 'upload timeout' : 
+                                e.message?.includes('Failed to fetch') ? 'server connection failed' : 
+                                e.message?.toLowerCase() || 'unknown error';
+                window.showToast(`video upload failed: ${errorMsg}`, 'error');
+              }
+            }
+            // Clear any status messages
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
           } else {
-            try { statusEl.textContent = 'no video selected'; } catch(_){ }
+            // Remove unnecessary status message
           }
         } catch (_) { }
       }
@@ -402,7 +551,9 @@
         try {
           if (typeof __pickerBusy !== 'undefined' && __pickerBusy) { return; }
           var statusEl = document.getElementById('statusMessage');
-          try { statusEl.textContent = 'opening audio picker…'; } catch(_){ }
+          if (typeof window.showToast === 'function') {
+            window.showToast('opening audio picker…', 'info');
+          }
           const raw = await openFileDialog('audio');
           
           // Debug logging
@@ -421,10 +572,15 @@
           } catch(_) {}
           
           if (raw && raw.indexOf('/') !== -1) {
-            selectedAudioIsTemp = false;
+            window.selectedAudioIsTemp = false;
             const ext = raw.split('.').pop().toLowerCase();
-            const ok = {wav:1,mp3:1,aac:1,aif:1,aiff:1,m4a:1}[ext] === 1;
-            if (!ok) { try { statusEl.textContent = 'please select an audio file'; } catch(_){ } return; }
+            const ok = {wav:1,mp3:1}[ext] === 1;
+            if (!ok) { 
+              if (typeof window.showToast === 'function') {
+                window.showToast('only mp3 and wav supported', 'error');
+              }
+              return; 
+            }
             const size = await new Promise(resolve=>{ 
               try {
                 const safe = String(raw||'').replace(/\\/g,'\\\\').replace(/\"/g,'\\\"').replace(/'/g,"\\'");
@@ -441,20 +597,46 @@
                 resolve(0);
               }
             });
-            if (size > 1024*1024*1024) { try { statusEl.textContent = 'audio exceeds 1GB (not allowed)'; } catch(_){ } return; }
-            selectedAudio = raw;
+            if (size > 1024*1024*1024) { 
+              if (typeof window.showToast === 'function') {
+                window.showToast('audio exceeds 1gb (not allowed)', 'error');
+              }
+              return; 
+            }
+            window.selectedAudio = raw;
+            window.selectedAudioUrl = ''; // Clear URL selection
+            window.selectedAudioIsUrl = false;
+            window.selectedAudioUrl = ''; // Clear global variable
             updateLipsyncButton();
             renderInputPreview();
             updateInputStatus();
-            try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
+            // Clear any status messages
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
-              await ensureAuthToken();
-              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+              await window.ensureAuthToken();
+              const r = await fetch('http://127.0.0.1:3000/upload', { method:'POST', headers: window.authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
               const j = await r.json().catch(()=>null);
-              if (r.ok && j && j.ok && j.url){ uploadedAudioUrl = j.url; }
-            }catch(_){ }
+              if (r.ok && j && j.ok && j.url){ 
+                uploadedAudioUrl = j.url;
+                window.uploadedAudioUrl = j.url; // Set window-scoped variable for cost estimation
+                if (window.showToast) {
+                  window.showToast('audio uploaded successfully');
+                }
+              } else {
+                const errorMsg = j?.error || 'server error';
+                if (window.showToast) {
+                  window.showToast(`audio upload failed: ${errorMsg.toLowerCase()}`, 'error');
+                }
+              }
+            }catch(e){ 
+              if (window.showToast) {
+                const errorMsg = e.name === 'AbortError' ? 'upload timeout' : 
+                                e.message?.includes('Failed to fetch') ? 'server connection failed' : 
+                                e.message?.toLowerCase() || 'unknown error';
+                window.showToast(`audio upload failed: ${errorMsg}`, 'error');
+              }
+            }
             try { updateInputStatus(); } catch(_){ }
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             scheduleEstimate();
@@ -469,7 +651,11 @@
           if (window.__videoInOutBusy) { return; }
           window.__videoInOutBusy = true;
           const statusEl = document.getElementById('statusMessage');
-          if (statusEl) statusEl.textContent = 'rendering video in/out…';
+          // Show toast notification instead of status bar
+          if (window.showToast) {
+            window.showToast('loading...', 'info');
+          }
+          if (statusEl) statusEl.textContent = '';
           // Only set loading state on the video in/out button
           let __videoInOutBtn = null; let __videoInOutBtnOrig = '';
           try {
@@ -528,30 +714,37 @@
           } catch(_) {}
           
           if (res && res.ok && res.path){
-            selectedVideo = res.path; selectedVideoIsTemp = true;
+            window.selectedVideo = res.path; window.selectedVideoIsTemp = true;
+            window.selectedVideoUrl = ''; // Clear URL selection
+            window.selectedVideoIsUrl = false;
+            window.selectedVideoUrl = ''; // Clear global variable
+            console.log('[Video Selection] In/out selected:', window.selectedVideo);
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
             updateInputStatus();
+            updateFromVideoButton();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             
             // Upload for cost estimation
-            try { statusEl.textContent = 'uploading video…'; } catch(_){ }
+            // Clear any status messages
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedVideo, apiKey: settings.apiKey||'' };
-              await ensureAuthToken();
+              await window.ensureAuthToken();
               
               // Add timeout and retry logic for uploads
               let uploadSuccess = false;
               let lastError = null;
               
+              console.log('[Video Upload] Starting upload for:', selectedVideo);
+              
               for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
                   const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                  const timeoutId = setTimeout(() => controller.abort(), 360000); // 6 minute timeout
                   
                   const r = await fetch('http://127.0.0.1:3000/upload', { 
                     method:'POST', 
-                    headers: authHeaders({'Content-Type':'application/json'}), 
+                    headers: window.authHeaders({'Content-Type':'application/json'}), 
                     body: JSON.stringify(body),
                     signal: controller.signal
                   });
@@ -584,21 +777,36 @@
                     lastError = j?.error || `HTTP ${r.status}`;
                   }
                 } catch (error) {
-                  lastError = error.message;
+                  if (error.name === 'AbortError') {
+                    lastError = 'upload timeout';
+                  } else if (error.message?.includes('Failed to fetch')) {
+                    lastError = 'server connection failed';
+                  } else {
+                    lastError = error.message?.toLowerCase() || 'unknown error';
+                  }
                   if (attempt < 3) {
-                    try { statusEl.textContent = `uploading video… (retry ${attempt}/3)`; } catch(_){ }
+                    if (typeof window.showToast === 'function') {
+                      window.showToast(`uploading video… (retry ${attempt}/3)`, 'info');
+                    }
                     await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
                   }
                 }
               }
               
               if (!uploadSuccess) {
-                try { statusEl.textContent = `upload failed: ${lastError}`; } catch(_){ }
+                if (typeof window.showToast === 'function') {
+                  window.showToast(`upload failed: ${lastError}`, 'error');
+                }
               }
             }catch(e){ 
-              try { statusEl.textContent = `upload error: ${e.message}`; } catch(_){ }
+              if (typeof window.showToast === 'function') {
+                const errorMsg = e.name === 'AbortError' ? 'upload timeout' : 
+                                e.message?.includes('Failed to fetch') ? 'server connection failed' : 
+                                e.message?.toLowerCase() || 'unknown error';
+                window.showToast(`upload error: ${errorMsg}`, 'error');
+              }
             }
-            try { statusEl.textContent = ''; } catch(_){ }
+            // Clear any status messages
             
             // Schedule cost estimation after upload completes
             try {
@@ -661,12 +869,14 @@
               if (res && res.error) {
                 errorMsg += String(res.error);
               } else {
-                errorMsg += 'EvalScript error';
+                errorMsg += 'evalscript error';
               }
               if (res && res.eprRoot) errorMsg += ' root=' + res.eprRoot;
               if (res && res.preset) errorMsg += ' preset=' + res.preset;
               errorMsg += extra;
-              statusEl.textContent = errorMsg;
+              if (typeof window.showToast === 'function') {
+                window.showToast(errorMsg, 'error');
+              }
             }
             try { if (__videoInOutBtn) __videoInOutBtn.textContent = __videoInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
@@ -679,7 +889,11 @@
           if (window.__audioInOutBusy) { return; }
           window.__audioInOutBusy = true;
           const statusEl = document.getElementById('statusMessage');
-          if (statusEl) statusEl.textContent = 'rendering audio in/out…';
+          // Show toast notification instead of status bar
+          if (window.showToast) {
+            window.showToast('loading...', 'info');
+          }
+          if (statusEl) statusEl.textContent = '';
           // Only set loading state on the audio in/out button
           let __audioInOutBtn = null; let __audioInOutBtnOrig = '';
           try {
@@ -738,17 +952,17 @@
           } catch(_) {}
           
           if (res && res.ok && res.path){
-            selectedAudio = res.path; selectedAudioIsTemp = true;
+            window.selectedAudio = res.path; window.selectedAudioIsTemp = true;
             updateLipsyncButton(); renderInputPreview(); if (statusEl) statusEl.textContent = '';
             updateInputStatus();
             try { document.getElementById('clearBtn').style.display = 'inline-block'; } catch(_){ }
             
             // Upload for cost estimation
-            try { statusEl.textContent = 'uploading audio…'; } catch(_){ }
+            // Clear any status messages
             try{
               const settings = JSON.parse(localStorage.getItem('syncSettings')||'{}');
               const body = { path: selectedAudio, apiKey: settings.apiKey||'' };
-              await ensureAuthToken();
+              await window.ensureAuthToken();
               
               // Add timeout and retry logic for uploads
               let uploadSuccess = false;
@@ -757,11 +971,11 @@
               for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
                   const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                  const timeoutId = setTimeout(() => controller.abort(), 360000); // 6 minute timeout
                   
                   const r = await fetch('http://127.0.0.1:3000/upload', { 
                     method:'POST', 
-                    headers: authHeaders({'Content-Type':'application/json'}), 
+                    headers: window.authHeaders({'Content-Type':'application/json'}), 
                     body: JSON.stringify(body),
                     signal: controller.signal
                   });
@@ -794,21 +1008,34 @@
                     lastError = j?.error || `HTTP ${r.status}`;
                   }
                 } catch (error) {
-                  lastError = error.message;
+                  if (error.name === 'AbortError') {
+                    lastError = 'upload timeout';
+                  } else if (error.message?.includes('Failed to fetch')) {
+                    lastError = 'server connection failed';
+                  } else {
+                    lastError = error.message?.toLowerCase() || 'unknown error';
+                  }
                   if (attempt < 3) {
-                    try { statusEl.textContent = `uploading audio… (retry ${attempt}/3)`; } catch(_){ }
+                    // Remove retry message - just keep loading state
                     await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
                   }
                 }
               }
               
               if (!uploadSuccess) {
-                try { statusEl.textContent = `upload failed: ${lastError}`; } catch(_){ }
+                if (typeof window.showToast === 'function') {
+                  window.showToast(`upload failed: ${lastError}`, 'error');
+                }
               }
             }catch(e){ 
-              try { statusEl.textContent = `upload error: ${e.message}`; } catch(_){ }
+              if (typeof window.showToast === 'function') {
+                const errorMsg = e.name === 'AbortError' ? 'upload timeout' : 
+                                e.message?.includes('Failed to fetch') ? 'server connection failed' : 
+                                e.message?.toLowerCase() || 'unknown error';
+                window.showToast(`upload error: ${errorMsg}`, 'error');
+              }
             }
-            try { statusEl.textContent = ''; } catch(_){ }
+            // Clear any status messages
             
             // Schedule cost estimation after upload completes
             try {
@@ -871,10 +1098,12 @@
               if (res && res.error) {
                 errorMsg += String(res.error);
               } else {
-                errorMsg += 'EvalScript error';
+                errorMsg += 'evalscript error';
               }
               errorMsg += extra;
-              statusEl.textContent = errorMsg;
+              if (typeof window.showToast === 'function') {
+                window.showToast(errorMsg, 'error');
+              }
             }
             try { if (__audioInOutBtn) __audioInOutBtn.textContent = __audioInOutBtnOrig || 'in/out points'; } catch(_){ }
           }
@@ -883,17 +1112,34 @@
       }
 
       function updateInputStatus() {
+        // Remove old status messages - use toast notifications instead
         const status = document.getElementById('statusMessage');
-        if (!status) return;
+        if (status) {
+          status.textContent = '';
+        }
         
-        if (!selectedVideo && !selectedAudio) {
-          status.textContent = 'no video/audio selected';
-        } else if (!selectedVideo) {
-          status.textContent = 'no video selected';
-        } else if (!selectedAudio) {
-          status.textContent = 'no audio selected';
+        // Only show "ready for lipsync" when both video and audio are selected
+        if ((selectedVideo || selectedVideoUrl) && (selectedAudio || selectedAudioUrl)) {
+          if (typeof window.showToast === 'function') {
+            window.showToast('ready for lipsync', 'success');
+          }
+        }
+      }
+
+      function updateFromVideoButton() {
+        const fromVideoBtn = document.querySelector('.audio-upload .action-btn[data-action="audio-from-video"]');
+        if (!fromVideoBtn) return;
+        
+        const hasVideo = !!(selectedVideo || selectedVideoUrl);
+        
+        if (hasVideo) {
+          fromVideoBtn.disabled = false;
+          fromVideoBtn.style.opacity = '1';
+          fromVideoBtn.style.cursor = 'pointer';
         } else {
-          status.textContent = 'ready to lipsync';
+          fromVideoBtn.disabled = true;
+          fromVideoBtn.style.opacity = '0.5';
+          fromVideoBtn.style.cursor = 'not-allowed';
         }
       }
 
@@ -943,13 +1189,22 @@
         if (!video) return;
 
         // Initialize display when metadata loads
-        video.addEventListener('loadedmetadata', () => {
-          const duration = formatTime(video.duration || 0);
-          if (timeDisplay) timeDisplay.textContent = `00:00 / ${duration}`;
+        const updateVideoDuration = () => {
+          const duration = video.duration || 0;
+          const durationStr = isFinite(duration) && duration > 0 ? formatTime(duration) : '--';
+          if (timeDisplay) timeDisplay.textContent = `00:00 / ${durationStr}`;
           if (frameInfo) {
-            const totalFrames = Math.floor(video.duration * 30);
-            frameInfo.textContent = `0 / ${totalFrames}`;
+            const totalFrames = isFinite(duration) && duration > 0 ? Math.floor(duration * 30) : 0;
+            frameInfo.textContent = `0 / ${totalFrames || '--'}`;
           }
+          
+          console.log('Video duration update:', {
+            duration: video.duration,
+            durationStr: durationStr,
+            src: video.src,
+            readyState: video.readyState,
+            selectedVideo: window.selectedVideo
+          });
           
           // Debug logging
           try {
@@ -957,16 +1212,106 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
-                type: 'video_loadedmetadata', 
+                type: 'video_duration_update', 
                 duration: video.duration,
+                durationStr: durationStr,
                 src: video.src,
                 readyState: video.readyState,
-                selectedVideo: selectedVideo,
+                selectedVideo: window.selectedVideo,
                 hostConfig: window.HOST_CONFIG
               })
             }).catch(() => {});
           } catch(_){ }
+        };
+
+        // Check if metadata is already loaded, also try after a short delay
+        if (video.readyState >= 1) {
+          updateVideoDuration();
+        } else {
+          video.addEventListener('loadedmetadata', updateVideoDuration);
+        }
+        
+        // Also listen for duration changes (useful for streaming and WebM files)
+        video.addEventListener('durationchange', () => {
+          console.log('Video durationchange event fired, duration:', video.duration);
+          updateVideoDuration();
         });
+        
+        // Additional retry mechanism for WebM files that may load metadata slowly
+        let retryCount = 0;
+        const maxRetries = 10;
+        const retryInterval = setInterval(() => {
+          if (video.duration && video.duration > 0) {
+            console.log('Duration loaded on retry:', video.duration);
+            updateVideoDuration();
+            clearInterval(retryInterval);
+          } else if (retryCount >= maxRetries) {
+            console.log('Max retries reached for duration loading');
+            clearInterval(retryInterval);
+          } else {
+            retryCount++;
+            console.log(`Retrying duration load (${retryCount}/${maxRetries}), readyState:`, video.readyState);
+            updateVideoDuration();
+          }
+        }, 200);
+        
+        // Force metadata loading for WebM files by triggering a play/pause cycle
+        video.addEventListener('canplay', () => {
+          console.log('Video canplay event fired, duration:', video.duration);
+          if (!video.duration || video.duration === 0) {
+            console.log('Duration still null after canplay, triggering play/pause');
+            video.play().then(() => {
+              setTimeout(() => {
+                video.pause();
+                video.currentTime = 0;
+                console.log('After play/pause cycle, duration:', video.duration);
+                updateVideoDuration();
+              }, 100);
+            }).catch(() => {
+              console.log('Play failed, trying seek method');
+              video.currentTime = 0.01;
+              setTimeout(() => {
+                video.currentTime = 0;
+                console.log('After seek method, duration:', video.duration);
+                updateVideoDuration();
+              }, 100);
+            });
+          } else {
+            updateVideoDuration();
+          }
+        });
+        
+        // Fallback: try updating duration after delays in case metadata loads asynchronously
+        setTimeout(() => {
+          if (video.readyState >= 1 && video.duration > 0) {
+            console.log('Video duration fallback update:', video.duration);
+            updateVideoDuration();
+          } else {
+            console.log('Video duration fallback failed:', {
+              readyState: video.readyState,
+              duration: video.duration,
+              src: video.src
+            });
+          }
+        }, 100);
+        
+        // Additional fallback for streaming URLs that may need more time
+        setTimeout(() => {
+          if (video.readyState >= 1 && video.duration > 0) {
+            console.log('Video duration second fallback update:', video.duration);
+            updateVideoDuration();
+          } else if (video.readyState >= 1 && !video.duration) {
+            console.log('Video duration is null but readyState is', video.readyState, '- trying to load duration');
+            // Force duration calculation by seeking to end
+            video.currentTime = 0.1;
+            setTimeout(() => {
+              if (video.duration > 0) {
+                console.log('Video duration after seek:', video.duration);
+                updateVideoDuration();
+              }
+            }, 50);
+          }
+        }, 500);
         
         // Debug video loading errors
         video.addEventListener('error', (e) => {
@@ -988,17 +1333,18 @@
         // Update time and progress during playback
         video.addEventListener('timeupdate', () => {
           const current = formatTime(video.currentTime);
-          const duration = formatTime(video.duration || 0);
-          const progress = (video.currentTime / (video.duration || 1)) * 100;
+          const duration = video.duration || 0;
+          const durationStr = isFinite(duration) ? formatTime(duration) : '0:00';
+          const progress = (video.currentTime / (duration || 1)) * 100;
           
-          if (timeDisplay) timeDisplay.textContent = `${current} / ${duration}`;
+          if (timeDisplay) timeDisplay.textContent = `${current} / ${durationStr}`;
           if (progressFill) progressFill.style.width = `${progress}%`;
           if (progressThumb) progressThumb.style.left = `${progress}%`;
           
           // Frame info (approximate)
-          if (frameInfo && video.duration) {
+          if (frameInfo && isFinite(duration)) {
             const currentFrame = Math.floor(video.currentTime * 30); // Assume 30fps
-            const totalFrames = Math.floor(video.duration * 30);
+            const totalFrames = Math.floor(duration * 30);
             frameInfo.textContent = `${currentFrame} / ${totalFrames}`;
           }
         });
@@ -1009,6 +1355,11 @@
         });
 
         video.addEventListener('pause', () => {
+          if (playOverlay) playOverlay.classList.remove('hidden');
+        });
+
+        // Reset to play icon when video ends
+        video.addEventListener('ended', () => {
           if (playOverlay) playOverlay.classList.remove('hidden');
         });
 
@@ -1099,11 +1450,7 @@
             canvas.height = Math.max(1, Math.floor(displayHeight * dpr));
             const ctx2 = canvas.getContext('2d');
             if (dpr !== 1) ctx2.scale(dpr, dpr);
-            // Draw a quick placeholder immediately to avoid a blank state
-            if (!waveformBars || waveformBars.length === 0) {
-              waveformBars = buildPlaceholderBars(displayWidth, displayHeight);
-              renderWaveform(canvas, waveformBars, 0, displayWidth, displayHeight);
-            }
+            
             function normalizePath(p){
               try {
                 if (!p) return '';
@@ -1113,24 +1460,34 @@
                 return p;
               } catch(_) { return String(p||''); }
             }
-            let localPath = normalizePath(selectedAudio||'');
+            let localPath = normalizePath(window.selectedAudio||'');
             if (!localPath){
               try { const u = normalizePath(audio.getAttribute('src')||''); localPath = u; } catch(_){ }
             }
-            try { uiLog('waveform path '+localPath); } catch(_){ }
-            if (!localPath) { renderWaveform(canvas, [], 0, displayWidth, displayHeight); return; }
+            console.log('[Waveform] selectedAudio:', window.selectedAudio);
+            console.log('[Waveform] audio.src:', audio.getAttribute('src'));
+            console.log('[Waveform] Normalized path:', localPath);
+            if (!localPath) { 
+              console.warn('[Waveform] No path found, using placeholder');
+              waveformBars = buildPlaceholderBars(displayWidth, displayHeight);
+              renderWaveform(canvas, waveformBars, 0, displayWidth, displayHeight); 
+              return; 
+            }
             // This endpoint is now public to avoid blank waveform when token fails
-            await ensureAuthToken();
-            const resp = await fetch('http://127.0.0.1:3000/waveform/file?'+new URLSearchParams({ path: localPath }), { headers: authHeaders(), cache:'no-store' }).catch((e)=>{ try{ uiLog('waveform fetch exception '+String(e)); }catch(_){} return null; });
+            await window.ensureAuthToken();
+            const waveformUrl = 'http://127.0.0.1:3000/waveform/file?'+new URLSearchParams({ path: localPath });
+            console.log('[Waveform] Fetching from:', waveformUrl);
+            const resp = await fetch(waveformUrl, { headers: window.authHeaders(), cache:'no-store' }).catch((e)=>{ console.error('[Waveform] Fetch exception:', e); return null; });
             if (!resp || !resp.ok) {
               // Fallback: draw placeholder waveform so UI isn't blank
-              try { uiLog('waveform fetch failed'); } catch(_){ }
+              console.error('[Waveform] Fetch failed:', resp ? resp.status : 'no response');
               waveformBars = buildPlaceholderBars(displayWidth, displayHeight);
               renderWaveform(canvas, waveformBars, 0, displayWidth, displayHeight);
               return;
             }
+            console.log('[Waveform] Fetch successful, decoding...');
             const ab = await resp.arrayBuffer();
-            try { uiLog('waveform bytes '+(ab && ab.byteLength)); } catch(_){ }
+            console.log('[Waveform] ArrayBuffer size:', ab ? ab.byteLength : 0);
             const ac = new (window.AudioContext || window.webkitAudioContext)();
             let buf = null; try { buf = await ac.decodeAudioData(ab); } catch(_){
               try {
@@ -1141,17 +1498,19 @@
               } catch(e){ buf=null; }
             }
             if (!buf) {
-              try { uiLog('waveform decode failed'); } catch(_){ }
+              console.error('[Waveform] Decode failed');
               waveformBars = buildPlaceholderBars(displayWidth, displayHeight);
               renderWaveform(canvas, waveformBars, 0, displayWidth, displayHeight);
               try { ac.close(); } catch(_){ }
               return;
             }
-            try { uiLog('waveform decoded sr='+buf.sampleRate+' len='+buf.length); } catch(_){ }
+            console.log('[Waveform] Decoded successfully - sampleRate:', buf.sampleRate, 'length:', buf.length);
             waveformBars = buildBarsFromBuffer(buf, canvas, displayWidth, displayHeight);
+            console.log('[Waveform] Generated', waveformBars.length, 'bars');
             renderWaveform(canvas, waveformBars, 0, displayWidth, displayHeight);
             try { ac.close(); } catch(_){ }
-          }catch(_){
+          }catch(err){
+            console.error('[Waveform] Exception:', err);
             const w = canvas.clientWidth||600; const h = canvas.clientHeight||80;
             waveformBars = buildPlaceholderBars(w, h);
             renderWaveform(canvas, waveformBars, 0, w, h);
@@ -1159,9 +1518,18 @@
         })();
 
         // Initialize time display when metadata loads
-        audio.addEventListener('loadedmetadata', () => {
-          const duration = formatTime(audio.duration || 0);
-          if (timeDisplay) timeDisplay.innerHTML = `0:00 <span class="time-total">/ ${duration}</span>`;
+        const updateAudioDuration = () => {
+          const duration = audio.duration || 0;
+          const durationStr = isFinite(duration) && duration > 0 ? formatTime(duration) : '--';
+          if (timeDisplay) timeDisplay.innerHTML = `<span class="time-current">0:00</span> <span class="time-total">/ ${durationStr}</span>`;
+          
+          console.log('Audio duration update:', {
+            duration: audio.duration,
+            durationStr: durationStr,
+            src: audio.src,
+            readyState: audio.readyState,
+            selectedAudio: window.selectedAudio
+          });
           
           // Debug logging
           try {
@@ -1169,16 +1537,106 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
-                type: 'audio_loadedmetadata', 
+                type: 'audio_duration_update', 
                 duration: audio.duration,
+                durationStr: durationStr,
                 src: audio.src,
                 readyState: audio.readyState,
-                selectedAudio: selectedAudio,
+                selectedAudio: window.selectedAudio,
                 hostConfig: window.HOST_CONFIG
               })
             }).catch(() => {});
           } catch(_){ }
+        };
+
+        // Check if metadata is already loaded, also try after a short delay
+        if (audio.readyState >= 1) {
+          updateAudioDuration();
+        } else {
+          audio.addEventListener('loadedmetadata', updateAudioDuration);
+        }
+        
+        // Also listen for duration changes (useful for streaming and WebM files)
+        audio.addEventListener('durationchange', () => {
+          console.log('Audio durationchange event fired, duration:', audio.duration);
+          updateAudioDuration();
         });
+        
+        // Additional retry mechanism for WebM files that may load metadata slowly
+        let audioRetryCount = 0;
+        const audioMaxRetries = 10;
+        const audioRetryInterval = setInterval(() => {
+          if (audio.duration && audio.duration > 0) {
+            console.log('Audio duration loaded on retry:', audio.duration);
+            updateAudioDuration();
+            clearInterval(audioRetryInterval);
+          } else if (audioRetryCount >= audioMaxRetries) {
+            console.log('Max retries reached for audio duration loading');
+            clearInterval(audioRetryInterval);
+          } else {
+            audioRetryCount++;
+            console.log(`Retrying audio duration load (${audioRetryCount}/${audioMaxRetries}), readyState:`, audio.readyState);
+            updateAudioDuration();
+          }
+        }, 200);
+        
+        // Force metadata loading for WebM files by triggering a play/pause cycle
+        audio.addEventListener('canplay', () => {
+          console.log('Audio canplay event fired, duration:', audio.duration);
+          if (!audio.duration || audio.duration === 0) {
+            console.log('Duration still null after canplay, triggering play/pause');
+            audio.play().then(() => {
+              setTimeout(() => {
+                audio.pause();
+                audio.currentTime = 0;
+                console.log('After play/pause cycle, duration:', audio.duration);
+                updateAudioDuration();
+              }, 100);
+            }).catch(() => {
+              console.log('Play failed, trying seek method');
+              audio.currentTime = 0.01;
+              setTimeout(() => {
+                audio.currentTime = 0;
+                console.log('After seek method, duration:', audio.duration);
+                updateAudioDuration();
+              }, 100);
+            });
+          } else {
+            updateAudioDuration();
+          }
+        });
+        
+        // Fallback: try updating duration after delays in case metadata loads asynchronously
+        setTimeout(() => {
+          if (audio.readyState >= 1 && audio.duration > 0) {
+            console.log('Audio duration fallback update:', audio.duration);
+            updateAudioDuration();
+          } else {
+            console.log('Audio duration fallback failed:', {
+              readyState: audio.readyState,
+              duration: audio.duration,
+              src: audio.src
+            });
+          }
+        }, 100);
+        
+        // Additional fallback for streaming URLs that may need more time
+        setTimeout(() => {
+          if (audio.readyState >= 1 && audio.duration > 0) {
+            console.log('Audio duration second fallback update:', audio.duration);
+            updateAudioDuration();
+          } else if (audio.readyState >= 1 && !audio.duration) {
+            console.log('Audio duration is null but readyState is', audio.readyState, '- trying to load duration');
+            // Force duration calculation by seeking to end
+            audio.currentTime = 0.1;
+            setTimeout(() => {
+              if (audio.duration > 0) {
+                console.log('Audio duration after seek:', audio.duration);
+                updateAudioDuration();
+              }
+            }, 50);
+          }
+        }, 500);
         
         // Debug audio loading errors
         audio.addEventListener('error', (e) => {
@@ -1200,8 +1658,9 @@
         // Update time and progress highlight
         audio.addEventListener('timeupdate', () => {
           const current = formatTime(audio.currentTime);
-          const duration = formatTime(audio.duration || 0);
-          if (timeDisplay) timeDisplay.innerHTML = `${current} <span class="time-total">/ ${duration}</span>`;
+          const duration = audio.duration || 0;
+          const durationStr = isFinite(duration) ? formatTime(duration) : '0:00';
+          if (timeDisplay) timeDisplay.innerHTML = `<span class="time-current">${current}</span> <span class="time-total">/ ${durationStr}</span>`;
           const w = canvas.clientWidth || canvas.offsetWidth || 600;
           const h = canvas.clientHeight || canvas.offsetHeight || 80;
           if (waveformBars && waveformBars.length) {
@@ -1213,16 +1672,294 @@
         const toggleAudioPlay = () => {
           if (audio.paused) {
             audio.play();
-            if (playBtn) playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+            if (playBtn) {
+              playBtn.innerHTML = '<i data-lucide="pause" style="width: 18px; height: 18px;"></i>';
+              if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+              }
+            }
           } else {
             audio.pause();
-            if (playBtn) playBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
+            if (playBtn) {
+              playBtn.innerHTML = '<i data-lucide="play" style="width: 18px; height: 18px;"></i>';
+              if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+              }
+            }
           }
         };
 
         // Play/pause button
         if (playBtn) {
           playBtn.addEventListener('click', toggleAudioPlay);
+        }
+        
+        // Dubbing dropdown functionality
+        const dubbingBtn = document.getElementById('dubbingBtn');
+        const dubbingDropdown = document.getElementById('dubbingDropdown');
+        const dubbingSearch = document.getElementById('dubbingSearch');
+        
+        if (dubbingBtn && dubbingDropdown) {
+          dubbingBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isVisible = dubbingDropdown.style.display === 'block';
+            dubbingDropdown.style.display = isVisible ? 'none' : 'block';
+            
+            // Focus search input when opening
+            if (dubbingDropdown.style.display === 'block' && dubbingSearch) {
+              setTimeout(() => dubbingSearch.focus(), 50);
+            }
+          });
+          
+          // Close dropdown when clicking outside
+          document.addEventListener('click', (e) => {
+            if (!dubbingBtn.contains(e.target) && !dubbingDropdown.contains(e.target)) {
+              dubbingDropdown.style.display = 'none';
+              // Clear search on close
+              if (dubbingSearch) {
+                dubbingSearch.value = '';
+                filterLanguages('');
+              }
+            }
+          });
+          
+          // Search functionality
+          if (dubbingSearch) {
+            dubbingSearch.addEventListener('input', (e) => {
+              const searchTerm = e.target.value.toLowerCase();
+              filterLanguages(searchTerm);
+            });
+            
+            // Prevent dropdown from closing when clicking search input
+            dubbingSearch.addEventListener('click', (e) => {
+              e.stopPropagation();
+            });
+          }
+          
+          // Filter languages based on search term
+          function filterLanguages(searchTerm) {
+            const options = dubbingDropdown.querySelectorAll('.dubbing-option');
+            options.forEach(option => {
+              const langName = option.textContent.toLowerCase();
+              if (langName.includes(searchTerm)) {
+                option.style.display = 'flex';
+              } else {
+                option.style.display = 'none';
+              }
+            });
+          }
+          
+          // Handle language selection
+          const options = dubbingDropdown.querySelectorAll('.dubbing-option');
+          options.forEach(option => {
+            option.addEventListener('click', (e) => {
+              const lang = option.dataset.lang;
+              const langName = option.textContent;
+              
+              // Remove active class from all options
+              options.forEach(opt => opt.classList.remove('active'));
+              // Add active class to selected option
+              option.classList.add('active');
+              
+              // Close dropdown
+              dubbingDropdown.style.display = 'none';
+              
+              // Clear search
+              if (dubbingSearch) {
+                dubbingSearch.value = '';
+                filterLanguages('');
+              }
+              
+              // Update button text and show submit button
+              const dubbingBtnText = document.getElementById('dubbingBtnText');
+              const dubbingSubmitBtn = document.getElementById('dubbingSubmitBtn');
+              
+              if (dubbingBtnText) {
+                dubbingBtnText.textContent = langName.toLowerCase();
+              }
+              
+              if (dubbingSubmitBtn) {
+                dubbingSubmitBtn.style.display = 'flex';
+                dubbingSubmitBtn.dataset.targetLang = lang;
+                dubbingSubmitBtn.dataset.langName = langName;
+              }
+              
+              // Show toast notification
+              if (window.showToast) {
+              }
+              
+              console.log('Selected language:', lang, langName);
+            });
+          });
+          
+          // Custom scrollbar functionality
+          const optionsContainer = dubbingDropdown.querySelector('.dubbing-dropdown-options');
+          const scrollbar = dubbingDropdown.querySelector('.dubbing-dropdown-scrollbar');
+          
+          if (optionsContainer && scrollbar) {
+            const updateScrollbar = () => {
+              const scrollTop = optionsContainer.scrollTop;
+              const scrollHeight = optionsContainer.scrollHeight;
+              const clientHeight = optionsContainer.clientHeight;
+              const maxScroll = scrollHeight - clientHeight;
+              
+              if (maxScroll > 0) {
+                const scrollbarHeight = Math.max(18, (clientHeight / scrollHeight) * clientHeight);
+                const scrollbarTop = (scrollTop / maxScroll) * (clientHeight - scrollbarHeight);
+                
+                scrollbar.style.height = `${scrollbarHeight}px`;
+                scrollbar.style.top = `${36 + scrollbarTop}px`;
+                scrollbar.style.display = 'block';
+              } else {
+                scrollbar.style.display = 'none';
+              }
+            };
+            
+            optionsContainer.addEventListener('scroll', updateScrollbar);
+            updateScrollbar(); // Initial update
+          }
+          
+          // Handle submit button click
+          const dubbingSubmitBtn = document.getElementById('dubbingSubmitBtn');
+          if (dubbingSubmitBtn) {
+            dubbingSubmitBtn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              
+              const targetLang = dubbingSubmitBtn.dataset.targetLang;
+              const langName = dubbingSubmitBtn.dataset.langName;
+              
+              if (!targetLang) {
+                if (window.showToast) {
+                  window.showToast('please select a target language first', 'error');
+                }
+                return;
+              }
+              
+              // Get ElevenLabs API key from settings
+              const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+              const elevenLabsApiKey = settings.elevenLabsApiKey || 'sk_b37b42ebd75320c2e45e5f1b9312fda02b7264e2f1edc81b'; // Testing key
+              
+              if (!elevenLabsApiKey) {
+                if (window.showToast) {
+                  window.showToast('elevenlabs api key required', 'error');
+                }
+                return;
+              }
+              
+             // Show loading state
+             dubbingSubmitBtn.disabled = true;
+             dubbingSubmitBtn.innerHTML = window.loaderHTML({ size: 'sm', color: 'white' });
+              
+              // Show loading state in audio preview
+              const audioPreview = document.getElementById('audioPreview');
+              if (audioPreview) {
+                audioPreview.classList.add('loading-audio');
+               const loadingOverlay = document.createElement('div');
+               loadingOverlay.className = 'audio-loading-overlay';
+               loadingOverlay.innerHTML = `
+                 <div class="audio-loading-spinner">
+                   ${window.loaderHTML({ size: 'sm', color: 'white' })}
+                 </div>
+                 <div class="audio-loading-text">dubbing to ${langName.toLowerCase()}...</div>
+               `;
+                audioPreview.appendChild(loadingOverlay);
+              }
+              
+              if (window.showToast) {
+                window.showToast(`dubbing to ${langName.toLowerCase()}...`, 'info');
+              }
+              
+              try {
+                await window.ensureAuthToken();
+                
+                const body = {
+                  audioPath: selectedAudio,
+                  audioUrl: selectedAudioUrl,
+                  targetLang: targetLang,
+                  apiKey: elevenLabsApiKey
+                };
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+                
+                const response = await fetch('http://127.0.0.1:3000/dubbing', {
+                  method: 'POST',
+                  headers: window.authHeaders({'Content-Type': 'application/json'}),
+                  body: JSON.stringify(body),
+                  signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                const result = await response.json().catch(() => null);
+                
+                if (!response.ok || !result || !result.ok) {
+                  throw new Error(result?.error || 'Dubbing failed');
+                }
+                
+                // Update the audio source to the dubbed version
+                if (result.audioPath) {
+                  window.selectedAudio = result.audioPath;
+                  window.selectedAudioIsTemp = true;
+                  window.selectedAudioUrl = '';
+                  window.selectedAudioIsUrl = false;
+                  window.selectedAudioUrl = '';
+                  
+                  // Upload dubbed audio to R2 for lipsync
+                  try {
+                    const uploadBody = { path: window.selectedAudio, apiKey: settings.apiKey || '' };
+                    const uploadResponse = await fetch('http://127.0.0.1:3000/upload', {
+                      method: 'POST',
+                      headers: window.authHeaders({'Content-Type': 'application/json'}),
+                      body: JSON.stringify(uploadBody)
+                    });
+                    
+                    const uploadResult = await uploadResponse.json().catch(() => null);
+                    
+                    if (uploadResponse.ok && uploadResult && uploadResult.ok && uploadResult.url) {
+                      uploadedAudioUrl = uploadResult.url;
+                      window.uploadedAudioUrl = uploadResult.url;
+                      console.log('[Dubbing] Uploaded dubbed audio to R2:', uploadResult.url);
+                    }
+                  } catch (uploadError) {
+                    console.warn('Upload of dubbed audio failed:', uploadError);
+                  }
+                  
+                  // Re-render the audio preview with the new dubbed audio
+                  renderInputPreview();
+                  
+                  if (window.showToast) {
+                    window.showToast(`dubbing to ${langName.toLowerCase()} completed`);
+                  }
+                }
+                
+              } catch (error) {
+                console.error('Dubbing error:', error);
+                if (window.showToast) {
+                  window.showToast(`dubbing failed: ${error.message}`, 'error');
+                }
+              } finally {
+                // Remove loading state from audio preview
+                const audioPreview = document.getElementById('audioPreview');
+                if (audioPreview) {
+                  audioPreview.classList.remove('loading-audio');
+                  const loadingOverlay = audioPreview.querySelector('.audio-loading-overlay');
+                  if (loadingOverlay) {
+                    loadingOverlay.remove();
+                  }
+                }
+                
+               // Reset submit button
+               dubbingSubmitBtn.disabled = false;
+               dubbingSubmitBtn.innerHTML = '<i data-lucide="arrow-right" style="width: 18px; height: 18px;"></i>';
+                
+                // Re-initialize Lucide icons
+                if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                  lucide.createIcons();
+                }
+              }
+            });
+          }
         }
 
         // Click to seek on waveform
@@ -1304,8 +2041,8 @@
         const progressX = progress * displayWidth;
         
         bars.forEach(bar => {
-          // Color based on progress: white for played, grey for unplayed
-          ctx.fillStyle = bar.x <= progressX ? '#ffffff' : '#a1a1aa';
+          // Color based on progress: orange for played, grey for unplayed
+          ctx.fillStyle = bar.x <= progressX ? '#ff7700' : '#a1a1aa';
           
           // Draw rounded rect for each bar
           const barWidth = 1;
@@ -1326,18 +2063,503 @@
 
       function clearVideoSelection() {
         try { const v = document.getElementById('mainVideo'); if (v) { v.pause(); v.currentTime = 0; v.removeAttribute('src'); v.load(); } } catch(_){ }
-        selectedVideo = null;
-        selectedVideoIsTemp = false;
+        console.log('[Video Selection] Clearing video selection');
+        window.selectedVideo = null;
+        window.selectedVideoIsTemp = false;
+        window.selectedVideoUrl = '';
+        window.selectedVideoIsUrl = false;
+        window.selectedVideoUrl = ''; // Clear global variable
         renderInputPreview();
         updateInputStatus();
+        updateFromVideoButton();
       }
 
       function clearAudioSelection() {
         try { const a = document.getElementById('audioPlayer'); if (a) { try { if (typeof a.__waveformCleanup === 'function') a.__waveformCleanup(); } catch(_){} a.pause(); a.currentTime = 0; a.removeAttribute('src'); a.load(); } } catch(_){ }
-        selectedAudio = null;
-        selectedAudioIsTemp = false;
+        window.selectedAudio = null;
+        window.selectedAudioIsTemp = false;
+        window.selectedAudioUrl = '';
+        window.selectedAudioIsUrl = false;
+        window.selectedAudioUrl = ''; // Clear global variable
         renderInputPreview();
         updateInputStatus();
+      }
+
+      function showUrlInputModal(type) {
+        const overlay = document.getElementById('urlInputOverlay');
+        const input = document.getElementById('urlInput');
+        const submitBtn = document.getElementById('urlInputSubmit');
+        
+        if (!overlay || !input || !submitBtn) return;
+        
+        // Set placeholder based on type
+        if (type === 'video') {
+          input.placeholder = 'paste video url here...';
+        } else {
+          input.placeholder = 'paste audio url here...';
+        }
+        
+        // Clear input
+        input.value = '';
+        
+        // Show modal
+        overlay.style.display = 'flex';
+        setTimeout(() => overlay.classList.add('show'), 10);
+        
+        // Focus input
+        setTimeout(() => input.focus(), 100);
+        
+        // Set up event handlers
+        const handleSubmit = async () => {
+          const url = input.value.trim();
+          if (!url) return;
+          
+          if (typeof window.showToast === 'function') {
+            window.showToast('loading...', 'info');
+          }
+          
+          // Validate URL
+          const isValid = type === 'video' ? isValidVideoUrl(url) : isValidAudioUrl(url);
+          if (!isValid) {
+            if (typeof window.showToast === 'function') {
+              window.showToast(`invalid ${type} url format`, 'error');
+            }
+            return;
+          }
+          
+          // Check file size
+          const sizeCheck = await checkUrlSize(url);
+          if (!sizeCheck.valid) {
+            if (typeof window.showToast === 'function') {
+              window.showToast(`${type} exceeds 1gb (not allowed)`, 'error');
+            }
+            return;
+          }
+          
+          // Set URL selection
+          if (type === 'video') {
+            selectedVideoUrl = url;
+            selectedVideoIsUrl = true;
+            selectedVideo = null; // Clear file selection
+            window.selectedVideoIsTemp = false;
+            updateFromVideoButton();
+          } else {
+            selectedAudioUrl = url;
+            selectedAudioIsUrl = true;
+            selectedAudio = null; // Clear file selection
+            window.selectedAudioIsTemp = false;
+          }
+          
+          updateLipsyncButton();
+          renderInputPreview();
+          
+          if (typeof window.showToast === 'function') {
+            window.showToast(`${type} url loaded successfully`);
+          }
+          
+          scheduleEstimate();
+          
+          // Close modal
+          closeUrlInputModal();
+        };
+        
+        const handleKeyPress = (e) => {
+          if (e.key === 'Enter') {
+            handleSubmit();
+          } else if (e.key === 'Escape') {
+            closeUrlInputModal();
+          }
+        };
+        
+        const closeUrlInputModal = () => {
+          overlay.classList.remove('show');
+          setTimeout(() => overlay.style.display = 'none', 300);
+          
+          // Remove event listeners
+          submitBtn.removeEventListener('click', handleSubmit);
+          input.removeEventListener('keydown', handleKeyPress);
+          document.getElementById('urlInputClose').removeEventListener('click', closeUrlInputModal);
+          overlay.removeEventListener('click', handleOverlayClick);
+        };
+        
+        const handleOverlayClick = (e) => {
+          if (e.target === overlay) {
+            closeUrlInputModal();
+          }
+        };
+        
+        // Add event listeners
+        submitBtn.addEventListener('click', handleSubmit);
+        input.addEventListener('keydown', handleKeyPress);
+        document.getElementById('urlInputClose').addEventListener('click', closeUrlInputModal);
+        overlay.addEventListener('click', handleOverlayClick);
+      }
+
+      async function selectVideoUrl() {
+        const urlInput = document.getElementById('videoUrlInput');
+        const urlField = document.getElementById('videoUrlField');
+        if (urlInput && urlField) {
+          urlInput.style.display = 'flex';
+          setTimeout(() => urlField.focus(), 100);
+          
+          // Add Enter key handler
+          const handleKeyPress = (e) => {
+            if (e.key === 'Enter') {
+              submitVideoUrl();
+            } else if (e.key === 'Escape') {
+              cancelVideoUrl();
+            }
+          };
+          urlField.addEventListener('keydown', handleKeyPress);
+          
+          // Store handler for cleanup
+          urlField._keyHandler = handleKeyPress;
+        }
+      }
+
+      async function selectAudioUrl() {
+        const urlInput = document.getElementById('audioUrlInput');
+        const urlField = document.getElementById('audioUrlField');
+        if (urlInput && urlField) {
+          urlInput.style.display = 'flex';
+          setTimeout(() => urlField.focus(), 100);
+          
+          // Add Enter key handler
+          const handleKeyPress = (e) => {
+            if (e.key === 'Enter') {
+              submitAudioUrl();
+            } else if (e.key === 'Escape') {
+              cancelAudioUrl();
+            }
+          };
+          urlField.addEventListener('keydown', handleKeyPress);
+          
+          // Store handler for cleanup
+          urlField._keyHandler = handleKeyPress;
+        }
+      }
+
+      async function submitVideoUrl() {
+        const urlField = document.getElementById('videoUrlField');
+        const urlInput = document.getElementById('videoUrlInput');
+        if (!urlField || !urlInput) return;
+        
+        const url = urlField.value.trim();
+        if (!url) return;
+        
+        if (typeof window.showToast === 'function') {
+          window.showToast('loading...', 'info');
+        }
+        
+        // Validate URL
+        if (!isValidVideoUrl(url)) {
+          if (typeof window.showToast === 'function') {
+            window.showToast('invalid video url format', 'error');
+          }
+          return;
+        }
+        
+        // Check file size
+        const sizeCheck = await checkUrlSize(url);
+        if (!sizeCheck.valid) {
+          if (typeof window.showToast === 'function') {
+            window.showToast('video exceeds 1gb (not allowed)', 'error');
+          }
+          return;
+        }
+        
+        // Set URL selection
+            window.selectedVideoUrl = url;
+            window.selectedVideoIsUrl = true;
+            window.selectedVideo = null; // Clear file selection
+            window.selectedVideoIsTemp = false;
+        window.selectedVideoUrl = url; // Update global variable
+        console.log('[Video Selection] URL selected:', window.selectedVideoUrl);
+        updateFromVideoButton();
+        
+        updateLipsyncButton();
+        renderInputPreview();
+        
+        if (typeof window.showToast === 'function') {
+          window.showToast('video url loaded successfully');
+        }
+        
+        scheduleEstimate();
+        
+        // Hide URL input
+        urlInput.style.display = 'none';
+        urlField.value = '';
+        
+        // Remove event listener
+        if (urlField._keyHandler) {
+          urlField.removeEventListener('keydown', urlField._keyHandler);
+          urlField._keyHandler = null;
+        }
+      }
+
+      async function submitAudioUrl() {
+        const urlField = document.getElementById('audioUrlField');
+        const urlInput = document.getElementById('audioUrlInput');
+        if (!urlField || !urlInput) return;
+        
+        const url = urlField.value.trim();
+        if (!url) return;
+        
+        if (typeof window.showToast === 'function') {
+          window.showToast('loading...', 'info');
+        }
+        
+        // Validate URL
+        if (!isValidAudioUrl(url)) {
+          if (typeof window.showToast === 'function') {
+            window.showToast('invalid audio url format', 'error');
+          }
+          return;
+        }
+        
+        // Check file size
+        const sizeCheck = await checkUrlSize(url);
+        if (!sizeCheck.valid) {
+          if (typeof window.showToast === 'function') {
+            window.showToast('audio exceeds 1gb (not allowed)', 'error');
+          }
+          return;
+        }
+        
+        // Set URL selection
+            window.selectedAudioUrl = url;
+            window.selectedAudioIsUrl = true;
+            window.selectedAudio = null; // Clear file selection
+            window.selectedAudioIsTemp = false;
+        window.selectedAudioUrl = url; // Update global variable
+        
+        updateLipsyncButton();
+        renderInputPreview();
+        
+        if (typeof window.showToast === 'function') {
+          window.showToast('audio url loaded successfully');
+        }
+        
+        scheduleEstimate();
+        
+        // Hide URL input
+        urlInput.style.display = 'none';
+        urlField.value = '';
+        
+        // Remove event listener
+        if (urlField._keyHandler) {
+          urlField.removeEventListener('keydown', urlField._keyHandler);
+          urlField._keyHandler = null;
+        }
+      }
+
+      function clearVideoUrl() {
+        const urlField = document.getElementById('videoUrlField');
+        if (urlField) {
+          urlField.value = '';
+        }
+      }
+
+      function clearAudioUrl() {
+        const urlField = document.getElementById('audioUrlField');
+        if (urlField) {
+          urlField.value = '';
+        }
+      }
+
+      function cancelVideoUrl() {
+        const urlInput = document.getElementById('videoUrlInput');
+        const urlField = document.getElementById('videoUrlField');
+        if (urlInput && urlField) {
+          urlInput.style.display = 'none';
+          urlField.value = '';
+          
+          // Remove event listener
+          if (urlField._keyHandler) {
+            urlField.removeEventListener('keydown', urlField._keyHandler);
+            urlField._keyHandler = null;
+          }
+        }
+      }
+
+      function cancelAudioUrl() {
+        const urlInput = document.getElementById('audioUrlInput');
+        const urlField = document.getElementById('audioUrlField');
+        if (urlInput && urlField) {
+          urlInput.style.display = 'none';
+          urlField.value = '';
+          
+          // Remove event listener
+          if (urlField._keyHandler) {
+            urlField.removeEventListener('keydown', urlField._keyHandler);
+            urlField._keyHandler = null;
+          }
+        }
+      }
+
+      async function selectAudioFromVideo() {
+        // Log to debug file for CEP debugging
+        try {
+          const debugMsg = `[${new Date().toISOString()}] selectAudioFromVideo called - selectedVideo: ${selectedVideo || 'null'}, selectedVideoUrl: ${selectedVideoUrl || 'null'}\n`;
+          const fs = require('fs');
+          const path = require('path');
+          const debugFile = path.join(process.env.HOME || '', 'Library/Application Support/sync. extensions/logs/sync_ppro_debug.log');
+          fs.appendFileSync(debugFile, debugMsg);
+        } catch(e) {}
+        
+        try {
+          // Check if video is selected
+          if (!selectedVideo && !selectedVideoUrl) {
+            console.log('No video selected');
+            if (typeof window.showToast === 'function') {
+              window.showToast('please select a video first', 'error');
+            }
+            return;
+          }
+          
+          console.log('Video selected:', selectedVideo || selectedVideoUrl);
+
+          if (typeof window.showToast === 'function') {
+            window.showToast('loading...', 'info');
+          }
+
+          // Get audio format from settings
+          const renderAudioEl = document.getElementById('renderAudio');
+          const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+          
+          // Debug logging for DOM elements
+          try {
+            const debugMsg = `[${new Date().toISOString()}] DOM elements check - renderAudio: ${renderAudioEl ? 'found' : 'null'}, settings.apiKey: ${settings.apiKey ? 'found' : 'null'}\n`;
+            const fs = require('fs');
+            const path = require('path');
+            const debugFile = path.join(process.env.HOME || '', 'Library/Application Support/sync. extensions/logs/sync_ppro_debug.log');
+            fs.appendFileSync(debugFile, debugMsg);
+          } catch(e) {}
+          
+          const audioFormat = renderAudioEl ? renderAudioEl.value : 'wav';
+          
+          // Prepare request body
+          const body = {
+            videoPath: selectedVideo || '',
+            videoUrl: selectedVideoUrl || '',
+            format: audioFormat,
+            apiKey: settings.apiKey || ''
+          };
+
+          // Debug logging
+          console.log('Audio extraction request:', body);
+
+          try {
+            console.log('ensureAuthToken function exists:', typeof ensureAuthToken);
+            console.log('window.ensureAuthToken function exists:', typeof window.ensureAuthToken);
+            await window.ensureAuthToken();
+            console.log('Auth token ensured');
+          } catch (error) {
+            console.error('Auth token error:', error);
+            if (typeof window.showToast === 'function') {
+              window.showToast('auth error: ' + error.message, 'error');
+            }
+            return;
+          }
+          
+          // Call audio extraction endpoint
+          console.log('Making request to extract-audio endpoint...');
+          let response;
+          try {
+            response = await fetch('http://127.0.0.1:3000/extract-audio', {
+              method: 'POST',
+              headers: window.window.authHeaders({'Content-Type': 'application/json'}),
+              body: JSON.stringify(body)
+            });
+            console.log('Response received:', response.status, response.statusText);
+          } catch (error) {
+            console.error('Fetch error:', error);
+            if (typeof window.showToast === 'function') {
+              window.showToast('network error: ' + error.message, 'error');
+            }
+            return;
+          }
+
+          const result = await response.json().catch(() => null);
+
+          // Debug logging
+          console.log('Audio extraction response:', { 
+            status: response.status, 
+            ok: response.ok, 
+            result: result 
+          });
+
+          if (!response.ok || !result || !result.ok) {
+            console.error('Audio extraction failed:', { 
+              status: response.status, 
+              result: result 
+            });
+            if (typeof window.showToast === 'function') {
+              window.showToast('audio extraction failed', 'error');
+            }
+            return;
+          }
+
+          if (!result.path) {
+            if (typeof window.showToast === 'function') {
+              window.showToast('no audio path returned', 'error');
+            }
+            return;
+          }
+
+          // Set the extracted audio
+          window.selectedAudio = result.path;
+          window.selectedAudioIsTemp = true;
+          window.selectedAudioUrl = ''; // Clear URL selection
+          window.selectedAudioIsUrl = false;
+          window.selectedAudioUrl = ''; // Clear global variable
+
+          updateLipsyncButton();
+          renderInputPreview();
+          updateInputStatus();
+
+          if (typeof window.showToast === 'function') {
+            window.showToast('audio extracted successfully');
+          }
+
+          // Upload for cost estimation
+          try {
+            const settings = JSON.parse(localStorage.getItem('syncSettings') || '{}');
+            const uploadBody = { path: selectedAudio, apiKey: settings.apiKey || '' };
+            
+            const uploadResponse = await fetch('http://127.0.0.1:3000/upload', {
+              method: 'POST',
+              headers: window.authHeaders({'Content-Type': 'application/json'}),
+              body: JSON.stringify(uploadBody)
+            });
+            
+            const uploadResult = await uploadResponse.json().catch(() => null);
+            
+            if (uploadResponse.ok && uploadResult && uploadResult.ok && uploadResult.url) {
+              uploadedAudioUrl = uploadResult.url;
+              window.uploadedAudioUrl = uploadResult.url;
+            }
+          } catch (uploadError) {
+            console.warn('Upload for cost estimation failed:', uploadError);
+          }
+
+          scheduleEstimate();
+
+        } catch (error) {
+          // Log error to debug file for CEP debugging
+          try {
+            const errorMsg = `[${new Date().toISOString()}] Audio extraction error: ${error.message}\n`;
+            const fs = require('fs');
+            const path = require('path');
+            const debugFile = path.join(process.env.HOME || '', 'Library/Application Support/sync. extensions/logs/sync_ppro_debug.log');
+            fs.appendFileSync(debugFile, errorMsg);
+          } catch(e) {}
+          
+          if (typeof window.showToast === 'function') {
+            window.showToast('audio extraction failed', 'error');
+          }
+          console.error('Audio extraction error:', error);
+        }
       }
 
       function renderOutputVideo(job) {
@@ -1472,6 +2694,11 @@
           if (playOverlay) playOverlay.classList.remove('hidden');
         });
 
+        // Reset to play icon when video ends
+        video.addEventListener('ended', () => {
+          if (playOverlay) playOverlay.classList.remove('hidden');
+        });
+
         // Progress bar scrubbing
         if (progressBar) {
           progressBar.addEventListener('click', (e) => {
@@ -1521,4 +2748,59 @@
         }
       }
 
+      // Function to load audio from file path (for TTS integration)
+      async function loadAudioFile(audioPath, isTemp = false) {
+        try {
+          window.selectedAudio = audioPath;
+          window.selectedAudioIsTemp = isTemp;
+          window.selectedAudioUrl = '';
+          window.selectedAudioIsUrl = false;
+          window.selectedAudioUrl = '';
+          
+          // Upload to cloud if API key is available
+          const settings = window.getSettings?.() || {};
+          if (settings.apiKey) {
+            try {
+              const uploadBody = { path: selectedAudio, apiKey: settings.apiKey };
+              const uploadResp = await fetch('http://127.0.0.1:3000/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(uploadBody)
+              });
+              if (uploadResp.ok) {
+                const uploadData = await uploadResp.json();
+                window.selectedAudioUrl = uploadData.url;
+                window.selectedAudioIsUrl = true;
+                window.selectedAudioUrl = uploadData.url;
+              }
+            } catch (err) {
+              console.warn('Cloud upload failed, using local file:', err);
+            }
+          }
+          
+          updateUIState();
+          
+          if (window.showToast) {
+            window.showToast('audio generated successfully', 'success');
+          }
+          
+          return true;
+        } catch (error) {
+          console.error('Error loading audio file:', error);
+          if (window.showToast) {
+            window.showToast('failed to load audio: ' + error.message, 'error');
+          }
+          return false;
+        }
+      }
+
+      // Expose functions globally for event handlers
+      window.selectAudioFromVideo = selectAudioFromVideo;
+      window.selectVideoUrl = selectVideoUrl;
+      window.selectAudioUrl = selectAudioUrl;
+      window.showUrlInputModal = showUrlInputModal;
+      window.updateFromVideoButton = updateFromVideoButton;
+      window.updateLipsyncButton = updateLipsyncButton;
+      window.updateInputStatus = updateInputStatus;
+      window.loadAudioFile = loadAudioFile;
 

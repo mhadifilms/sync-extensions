@@ -11,6 +11,11 @@ import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createServer } from 'net';
 import { createRequire } from 'module';
+import FormData from 'form-data';
+import multer from 'multer';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { track, identify, setUserProperties, distinctId } from './telemetry.js';
 const require = createRequire(import.meta.url);
 const { convertAudio } = require('./audio.cjs');
 
@@ -45,6 +50,9 @@ const DEFAULT_PORT = 3000;
 const PORT_RANGE = [3000]; // Hardcode to 3000 for panel
 
 const exec = promisify(_exec);
+
+// Set FFmpeg path
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Better Windows PowerShell execution with spawn
 function execPowerShell(command, options = {}) {
@@ -176,6 +184,26 @@ const UPDATES_REPO = process.env.UPDATES_REPO || process.env.GITHUB_REPO || 'mha
 const UPDATES_CHANNEL = process.env.UPDATES_CHANNEL || 'releases'; // 'releases' or 'tags'
 const GH_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 const GH_UA = process.env.GITHUB_USER_AGENT || 'sync-extension-updater/1.0';
+
+// Initialize PostHog user identification
+(async () => {
+  try {
+    const version = await getCurrentVersion();
+    identify({
+      extensionLocation: EXTENSION_LOCATION,
+      appId: APP_ID,
+      version: version,
+      updatesRepo: UPDATES_REPO
+    });
+    await track('server_started', {
+      extensionLocation: EXTENSION_LOCATION,
+      appId: APP_ID,
+      version: version
+    });
+  } catch (e) {
+    // Silent fail for telemetry
+  }
+})();
 
 // Central app-data directory resolver and subfolders
 function platformAppData(appName){
@@ -438,7 +466,7 @@ app.use((req, res, next) => {
       try { tlog('request:timeout', req.method, req.path); } catch(_){}
       res.status(408).json({ error: 'Request timeout' });
     }
-  }, 30000); // 30 second timeout
+  }, 300000); // 5 minute timeout (aligned with dubbing timeout)
   
   res.on('finish', () => clearTimeout(timeout));
   res.on('close', () => clearTimeout(timeout));
@@ -545,6 +573,30 @@ function requireCEPHeader(req, res, next){
 app.get('/health', (req,res)=> res.json({ status:'ok', ts: Date.now() }));
 // Friendly root
 app.get('/', (_req,res)=> res.json({ ok:true, service:'sync-extension-server' }));
+
+// PostHog connectivity test endpoint
+app.get('/telemetry/test', async (req, res) => {
+  try {
+    // Test PostHog connectivity
+    track('telemetry_test', {
+      testType: 'connectivity',
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json({ 
+      ok: true, 
+      message: 'PostHog test event sent',
+      distinctId: distinctId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      ok: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 app.get('/auth/token', requireCEPHeader, (req,res)=>{
   // Only serve to localhost clients with rate limiting
   try{
@@ -636,6 +688,422 @@ app.get('/audio/convert', async (req, res) => {
   }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
 });
 
+
+// ElevenLabs dubbing endpoint
+app.post('/dubbing', async (req, res) => {
+  try {
+    const { audioPath, audioUrl, targetLang, apiKey } = req.body || {};
+    tlog('POST /dubbing', 'targetLang='+targetLang, 'audioPath='+audioPath, 'audioUrl='+audioUrl);
+    
+    if (!targetLang) {
+      return res.status(400).json({ error: 'Target language required' });
+    }
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: 'ElevenLabs API key required' });
+    }
+    
+    let localAudioPath = audioPath;
+    
+    // If URL provided, download the audio first
+    if (audioUrl && !audioPath) {
+      try {
+        const response = await fetch(audioUrl);
+        if (!response.ok) {
+          return res.status(400).json({ error: 'Failed to download audio from URL' });
+        }
+        
+        // Create temporary file
+        const tempDir = os.tmpdir();
+        const tempFileName = `temp_audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp3`;
+        localAudioPath = path.join(tempDir, tempFileName);
+        
+        const buffer = await response.arrayBuffer();
+        fs.writeFileSync(localAudioPath, Buffer.from(buffer));
+        
+        tlog('Downloaded audio to temp file', localAudioPath);
+      } catch (error) {
+        tlog('Audio download error', error.message);
+        return res.status(400).json({ error: 'Failed to download audio: ' + error.message });
+      }
+    }
+    
+    if (!localAudioPath || typeof localAudioPath !== 'string' || !path.isAbsolute(localAudioPath)){
+      tlog('dubbing invalid path');
+      return res.status(400).json({ error: 'invalid audioPath' });
+    }
+    
+      if (!fs.existsSync(localAudioPath)) {
+        return res.status(404).json({ error: 'audio file not found' });
+      }
+
+      // Convert WAV to MP3 for ElevenLabs compatibility (ElevenLabs rejects WAV files)
+      const audioExt = path.extname(localAudioPath).toLowerCase();
+      if (audioExt === '.wav') {
+        try {
+          const { convertAudio } = require('./audio.cjs');
+          const mp3Path = localAudioPath.replace(/\.wav$/i, '.mp3');
+          await convertAudio(localAudioPath, 'mp3');
+          localAudioPath = mp3Path;
+          tlog('Converted WAV to MP3 for ElevenLabs:', localAudioPath);
+        } catch (convertError) {
+          tlog('WAV to MP3 conversion failed:', convertError.message);
+          return res.status(400).json({ error: 'Failed to convert WAV to MP3: ' + convertError.message });
+        }
+      }
+
+      try {
+      // Create ElevenLabs dubbing job
+      const formData = new FormData();
+      formData.append('file', fs.createReadStream(localAudioPath));
+      formData.append('target_lang', targetLang);
+      
+      const dubbingResponse = await fetch('https://api.elevenlabs.io/v1/dubbing', {
+        method: 'POST',
+        headers: {
+          'xi-api-key': apiKey,
+        },
+        body: formData,
+        signal: AbortSignal.timeout(300000) // 5 minute timeout
+      });
+      
+      if (!dubbingResponse.ok) {
+        const errorText = await dubbingResponse.text();
+        tlog('ElevenLabs dubbing error:', dubbingResponse.status, errorText);
+        return res.status(dubbingResponse.status).json({ error: `ElevenLabs API error: ${errorText}` });
+      }
+      
+      const dubbingData = await dubbingResponse.json();
+      const dubbingId = dubbingData.dubbing_id;
+      
+      if (!dubbingId) {
+        return res.status(500).json({ error: 'No dubbing ID returned from ElevenLabs' });
+      }
+      
+      tlog('ElevenLabs dubbing job created:', dubbingId);
+      
+      // Poll for completion
+      const pollInterval = 5000; // 5 seconds
+      const maxAttempts = 60; // 5 minutes max
+      let attempts = 0;
+      
+      const pollForCompletion = async () => {
+        attempts++;
+        
+        try {
+          // Check if client is still connected
+          if (res.headersSent) {
+            tlog('Client disconnected, stopping dubbing poll');
+            return;
+          }
+          
+          const statusResponse = await fetch(`https://api.elevenlabs.io/v1/dubbing/${dubbingId}`, {
+            headers: {
+              'xi-api-key': apiKey,
+            },
+            signal: AbortSignal.timeout(10000)
+          });
+          
+          if (!statusResponse.ok) {
+            throw new Error(`Status check failed: ${statusResponse.status}`);
+          }
+          
+          const statusData = await statusResponse.json();
+          const status = statusData.status;
+          
+          tlog('Dubbing status check:', status, 'attempt:', attempts);
+          
+          if (status === 'dubbed') {
+            // Get the dubbed audio
+            const audioResponse = await fetch(`https://api.elevenlabs.io/v1/dubbing/${dubbingId}/audio/${targetLang}`, {
+              headers: {
+                'xi-api-key': apiKey,
+              },
+              signal: AbortSignal.timeout(30000)
+            });
+            
+            if (!audioResponse.ok) {
+              throw new Error(`Failed to get dubbed audio: ${audioResponse.status}`);
+            }
+            
+            // Save the dubbed audio to a temporary file
+            const tempDir = os.tmpdir();
+            const outputFileName = `dubbed_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp3`;
+            const outputPath = path.join(tempDir, outputFileName);
+            
+            const audioBuffer = await audioResponse.arrayBuffer();
+            fs.writeFileSync(outputPath, Buffer.from(audioBuffer));
+            
+            try {
+              const sz = fs.statSync(outputPath).size;
+              tlog('dubbing completed', 'output='+outputPath, 'bytes='+sz);
+            } catch(e){}
+            
+            // Only send response if client is still connected
+            if (!res.headersSent) {
+              res.json({ ok: true, audioPath: outputPath, dubbingId: dubbingId });
+            }
+            return;
+          } else if (status === 'failed') {
+            throw new Error('Dubbing failed');
+          } else if (attempts >= maxAttempts) {
+            throw new Error('Dubbing timeout');
+          } else {
+            // Continue polling
+            setTimeout(pollForCompletion, pollInterval);
+          }
+        } catch (error) {
+          tlog('Dubbing poll error:', error.message);
+          // Only send error response if client is still connected
+          if (!res.headersSent) {
+            res.status(500).json({ error: String(error?.message || error) });
+          }
+        }
+      };
+      
+      // Start polling
+      setTimeout(pollForCompletion, pollInterval);
+      
+    } catch(e) {
+      tlog('dubbing error:', e.message);
+      return res.status(500).json({ error: String(e?.message||e) });
+    }
+  } catch(e){ 
+    if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); 
+  }
+});
+
+// ElevenLabs TTS endpoint
+app.post('/tts/generate', async (req, res) => {
+  try {
+    const { text, voiceId, apiKey, model = 'eleven_turbo_v2_5', voiceSettings } = req.body || {};
+    tlog('POST /tts/generate', 'voiceId='+voiceId, 'model='+model, 'text='+text?.substring(0, 50));
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Text required' });
+    }
+    
+    if (!voiceId) {
+      return res.status(400).json({ error: 'Voice ID required' });
+    }
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: 'ElevenLabs API key required' });
+    }
+    
+    // Use provided voice settings or defaults
+    const settings = voiceSettings || {
+      stability: 0.5,
+      similarity_boost: 0.75
+    };
+    
+    try {
+      // Call ElevenLabs TTS API
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: 'POST',
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: text,
+          model_id: model,
+          voice_settings: {
+            stability: settings.stability,
+            similarity_boost: settings.similarity_boost,
+            style: 0.0,
+            use_speaker_boost: true
+          }
+        }),
+        signal: AbortSignal.timeout(60000) // 60 second timeout
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        tlog('ElevenLabs TTS error:', response.status, errorText);
+        return res.status(response.status).json({ error: `ElevenLabs API error: ${errorText}` });
+      }
+      
+      // Save the audio to sync extensions directory
+      const ttsDir = path.join(BASE_DIR, 'tts');
+      try { fs.mkdirSync(ttsDir, { recursive: true }); } catch(_){}
+      const outputFileName = `tts_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp3`;
+      const outputPath = path.join(ttsDir, outputFileName);
+      
+      const audioBuffer = await response.arrayBuffer();
+      fs.writeFileSync(outputPath, Buffer.from(audioBuffer));
+      
+      try {
+        const sz = fs.statSync(outputPath).size;
+        tlog('TTS completed', 'output='+outputPath, 'bytes='+sz);
+      } catch(e){}
+      
+      res.json({ ok: true, audioPath: outputPath });
+    } catch(e) {
+      tlog('TTS error:', e.message);
+      return res.status(500).json({ error: String(e?.message||e) });
+    }
+  } catch(e){ 
+    if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); 
+  }
+});
+
+// ElevenLabs list voices endpoint
+app.get('/tts/voices', async (req, res) => {
+  try {
+    const { apiKey } = req.query;
+    tlog('GET /tts/voices');
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: 'ElevenLabs API key required' });
+    }
+    
+    try {
+      const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+        headers: {
+          'xi-api-key': apiKey,
+        },
+        signal: AbortSignal.timeout(10000)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        tlog('ElevenLabs voices error:', response.status, errorText);
+        return res.status(response.status).json({ error: `ElevenLabs API error: ${errorText}` });
+      }
+      
+      const data = await response.json();
+      tlog('TTS voices fetched', 'count='+data.voices?.length);
+      res.json(data);
+    } catch(e) {
+      tlog('TTS voices error:', e.message);
+      return res.status(500).json({ error: String(e?.message||e) });
+    }
+  } catch(e){ 
+    if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); 
+  }
+});
+
+// Video-to-audio extraction endpoint
+app.post('/extract-audio', async (req, res) => {
+  try{
+    const { videoPath, videoUrl, format } = req.body || {};
+    tlog('POST /extract-audio', 'format='+format, 'videoPath='+videoPath, 'videoUrl='+videoUrl, 'body='+JSON.stringify(req.body));
+    
+    if (!videoPath && !videoUrl) {
+      return res.status(400).json({ error: 'Video path or URL required' });
+    }
+    
+    let localVideoPath = videoPath;
+    
+    // If URL provided, download the video first
+    if (videoUrl && !videoPath) {
+      try {
+        const response = await fetch(videoUrl);
+        if (!response.ok) {
+          return res.status(400).json({ error: 'Failed to download video from URL' });
+        }
+        
+        // Create temporary file
+        const tempDir = os.tmpdir();
+        const tempFileName = `temp_video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.mp4`;
+        localVideoPath = path.join(tempDir, tempFileName);
+        
+        const buffer = await response.arrayBuffer();
+        fs.writeFileSync(localVideoPath, Buffer.from(buffer));
+        
+        tlog('Downloaded video to temp file', localVideoPath);
+      } catch (error) {
+        tlog('Video download error', error.message);
+        return res.status(400).json({ error: 'Failed to download video: ' + error.message });
+      }
+    }
+    
+    if (!localVideoPath || typeof localVideoPath !== 'string' || !path.isAbsolute(localVideoPath)){
+      tlog('extract invalid path');
+      return res.status(400).json({ error: 'invalid videoPath' });
+    }
+    
+    if (!fs.existsSync(localVideoPath)) {
+      return res.status(404).json({ error: 'video file not found' });
+    }
+    
+    const fmt = String(format||'wav').toLowerCase();
+    if (fmt !== 'wav' && fmt !== 'mp3') {
+      return res.status(400).json({ error: 'Unsupported format. Use wav or mp3.' });
+    }
+    
+    try {
+      const { extractAudioFromVideo } = require('./video-audio-extractor.cjs');
+      const audioPath = await extractAudioFromVideo(localVideoPath, fmt);
+      
+      if (!audioPath || !fs.existsSync(audioPath)) {
+        return res.status(500).json({ error: 'audio extraction failed' });
+      }
+      
+      try {
+        const sz = fs.statSync(audioPath).size;
+        tlog('extract audio ok', 'out='+audioPath, 'bytes='+sz);
+      } catch(e){}
+      
+      res.json({ ok: true, audioPath: audioPath });
+    } catch(e) {
+      tlog('extract audio error:', e.message);
+      return res.status(500).json({ error: String(e?.message||e) });
+    }
+  } catch(e){ 
+    if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); 
+  }
+});
+
+// Public WAV file reader for quality testing (before auth middleware)
+app.get('/wav/file', async (req, res) => {
+  try{
+    const p = String(req.query.path||'');
+    if (!p || !path.isAbsolute(p)) return res.status(400).json({ error:'invalid path' });
+    let real = '';
+    try { real = fs.realpathSync(p); } catch(_){ real = p; }
+    const wasTemp = real.indexOf('/TemporaryItems/') !== -1;
+    real = toReadableLocalPath(real);
+    if (!fs.existsSync(real)) return res.status(404).json({ error:'not found' });
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) return res.status(400).json({ error:'not a file' });
+    res.setHeader('Content-Type', 'audio/wav');
+    const s = fs.createReadStream(real);
+    s.pipe(res);
+    res.on('close', ()=>{
+      try {
+        // If we created a copy under COPY_DIR for TemporaryItems, delete it after serving
+        if (wasTemp && real.indexOf(COPY_DIR) === 0) { fs.unlink(real, ()=>{}); }
+      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+    });
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
+});
+
+// Public MP3 file reader for quality testing (before auth middleware)
+app.get('/mp3/file', async (req, res) => {
+  try{
+    const p = String(req.query.path||'');
+    if (!p || !path.isAbsolute(p)) return res.status(400).json({ error:'invalid path' });
+    let real = '';
+    try { real = fs.realpathSync(p); } catch(_){ real = p; }
+    const wasTemp = real.indexOf('/TemporaryItems/') !== -1;
+    real = toReadableLocalPath(real);
+    if (!fs.existsSync(real)) return res.status(404).json({ error:'not found' });
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) return res.status(400).json({ error:'not a file' });
+    res.setHeader('Content-Type', 'audio/mpeg');
+    const s = fs.createReadStream(real);
+    s.pipe(res);
+    res.on('close', ()=>{
+      try {
+        // If we created a copy under COPY_DIR for TemporaryItems, delete it after serving
+        if (wasTemp && real.indexOf(COPY_DIR) === 0) { fs.unlink(real, ()=>{}); }
+      } catch(e){ try { tlog("silent catch:", e.message); } catch(_){} }
+    });
+  }catch(e){ if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
+});
+
 // Public waveform file reader (before auth middleware)
 app.get('/waveform/file', async (req, res) => {
   try{
@@ -721,6 +1189,235 @@ app.post('/debug', async (req, res) => {
   }
 });
 
+// Recording save endpoint (PUBLIC - needed for recording)
+// Use raw body parser for multipart/form-data
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024 * 1024 } // 1GB limit
+});
+
+app.post('/recording/save', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    const { targetDir, type } = req.body || {};
+    const fileName = req.file.originalname || `recording_${Date.now()}.webm`;
+
+    // Determine save directory
+    let saveDir;
+    if (targetDir === 'documents') {
+      saveDir = DOCS_DEFAULT_DIR;
+    } else if (targetDir && typeof targetDir === 'string' && path.isAbsolute(targetDir)) {
+      saveDir = targetDir;
+    } else {
+      saveDir = DOCS_DEFAULT_DIR;
+    }
+
+    // Ensure directory exists
+    try {
+      await fs.promises.mkdir(saveDir, { recursive: true });
+    } catch(e) {
+      tlog('recording:save:mkdir:error', e.message);
+    }
+
+    // Save file and process with FFmpeg to ensure proper metadata
+    const inputPath = path.join(saveDir, `temp_${fileName}`);
+    const outputPath = path.join(saveDir, fileName);
+    
+    // Write temporary file
+    await fs.promises.writeFile(inputPath, req.file.buffer);
+    
+    try {
+      console.log('Processing recording with FFmpeg...');
+      console.log('Input file:', inputPath);
+      console.log('Output file:', outputPath);
+      
+      // Check if input file exists and has content
+      const inputStats = await fs.promises.stat(inputPath);
+      console.log('Input file size:', inputStats.size);
+      
+      if (inputStats.size === 0) {
+        throw new Error('Input file is empty');
+      }
+      
+      // Process with FFmpeg to ensure proper metadata
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .outputOptions([
+            '-c', 'copy',  // Copy streams without re-encoding
+            '-avoid_negative_ts', 'make_zero',  // Fix timestamp issues
+            '-fflags', '+genpts'  // Generate presentation timestamps
+          ])
+          .output(outputPath)
+          .on('start', (commandLine) => {
+            console.log('FFmpeg command:', commandLine);
+          })
+          .on('progress', (progress) => {
+            console.log('FFmpeg progress:', progress);
+          })
+          .on('end', () => {
+            console.log('FFmpeg processing completed');
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('FFmpeg processing error:', err);
+            reject(err);
+          })
+          .run();
+      });
+      
+      // Check output file
+      const outputStats = await fs.promises.stat(outputPath);
+      console.log('Output file size:', outputStats.size);
+      
+      if (outputStats.size === 0) {
+        throw new Error('Output file is empty after FFmpeg processing');
+      }
+      
+      // Cleanup temporary file
+      await fs.promises.unlink(inputPath).catch(() => {});
+      
+      console.log('Recording processed and saved:', {
+        path: outputPath,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+        originalName: req.file.originalname
+      });
+      
+      tlog('recording:save:ok', 'path=', outputPath, 'size=', req.file.size);
+      
+      // Return file path for CEP compatibility
+      res.json({ ok: true, path: outputPath });
+    } catch (ffmpegError) {
+      console.error('FFmpeg processing failed, saving original file:', ffmpegError);
+      
+      // Fallback: save original file if FFmpeg fails
+      await fs.promises.writeFile(outputPath, req.file.buffer);
+      await fs.promises.unlink(inputPath).catch(() => {});
+      
+      tlog('recording:save:fallback', 'path=', outputPath, 'size=', req.file.size);
+      
+      res.json({ ok: true, path: outputPath });
+    }
+  } catch(e) {
+    tlog('recording:save:error', e.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: String(e?.message || e) });
+    }
+  }
+});
+
+// Serve recorded files via HTTP for better metadata support
+app.get('/recording/file', async (req, res) => {
+  try {
+    const { path: filePath } = req.query;
+    
+    console.log('Serving recording file:', filePath);
+    
+    if (!filePath) {
+      return res.status(400).json({ error: 'File path required' });
+    }
+    
+    if (!fs.existsSync(filePath)) {
+      console.error('Recording file not found:', filePath);
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    const stats = await fs.promises.stat(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    
+    console.log('File stats:', {
+      path: filePath,
+      size: stats.size,
+      ext: ext
+    });
+    
+    let contentType = 'application/octet-stream';
+    if (ext === '.webm') {
+      contentType = filePath.includes('audio') ? 'audio/webm' : 'video/webm';
+    } else if (ext === '.mp4') {
+      contentType = filePath.includes('audio') ? 'audio/mp4' : 'video/mp4';
+    }
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', stats.size);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    console.log('Serving file with headers:', {
+      'Content-Type': contentType,
+      'Content-Length': stats.size
+    });
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    
+  } catch(e) {
+    console.error('Error serving recording file:', e);
+    if (!res.headersSent) {
+      res.status(500).json({ error: String(e?.message || e) });
+    }
+  }
+});
+
+// Extract audio from video using FFmpeg
+app.post('/extract-audio', async (req, res) => {
+  try {
+    const { videoPath, apiKey } = req.body || {};
+    
+    if (!videoPath) {
+      return res.status(400).json({ error: 'Video path required' });
+    }
+    
+    if (!fs.existsSync(videoPath)) {
+      return res.status(404).json({ error: 'Video file not found' });
+    }
+    
+    // Generate output path
+    const videoDir = path.dirname(videoPath);
+    const videoName = path.basename(videoPath, path.extname(videoPath));
+    const outputPath = path.join(videoDir, `${videoName}_audio.wav`);
+    
+    console.log('Extracting audio from video:', {
+      input: videoPath,
+      output: outputPath
+    });
+    
+    // Extract audio using FFmpeg
+    await new Promise((resolve, reject) => {
+      ffmpeg(videoPath)
+        .outputOptions([
+          '-vn',  // No video
+          '-acodec', 'pcm_s16le',  // 16-bit PCM
+          '-ar', '44100',  // 44.1kHz sample rate
+          '-ac', '1'  // Mono
+        ])
+        .output(outputPath)
+        .on('end', () => {
+          console.log('Audio extraction completed');
+          resolve();
+        })
+        .on('error', (err) => {
+          console.error('Audio extraction error:', err);
+          reject(err);
+        })
+        .run();
+    });
+    
+    console.log('Audio extracted successfully:', outputPath);
+    
+    res.json({ ok: true, path: outputPath });
+    
+  } catch(e) {
+    console.error('Audio extraction error:', e);
+    if (!res.headersSent) {
+      res.status(500).json({ error: String(e?.message || e) });
+    }
+  }
+});
+
 // Upload endpoint (PUBLIC - needed for file picker)
 app.post('/upload', async (req, res) => {
   try {
@@ -734,22 +1431,45 @@ app.post('/upload', async (req, res) => {
       return res.status(404).json({ error: 'File not found' });
     }
     
+    // Track upload start
+    const fileStat = await safeStat(filePath);
+    track('upload_started', {
+      fileSize: fileStat?.size || 0,
+      fileName: path.basename(filePath),
+      hostApp: APP_ID
+    });
+    
     // Set a timeout for the entire upload process
     const uploadTimeout = setTimeout(() => {
       if (!res.headersSent) {
         res.status(408).json({ error: 'Upload timeout' });
       }
-    }, 240000); // 4 minute timeout for the entire upload
+    }, 300000); // 5 minute timeout for the entire upload
     
     try {
       // Upload to R2 and return the cloud URL
       const fileUrl = await r2Upload(filePath);
+      
+      // Track upload success
+      track('upload_completed', {
+        fileSize: fileStat?.size || 0,
+        fileName: path.basename(filePath),
+        hostApp: APP_ID
+      });
       
       clearTimeout(uploadTimeout);
       if (!res.headersSent) {
         res.json({ ok: true, url: fileUrl });
       }
     } catch (uploadError) {
+      // Track upload failure
+      track('upload_failed', {
+        fileSize: fileStat?.size || 0,
+        fileName: path.basename(filePath),
+        error: String(uploadError?.message || uploadError),
+        hostApp: APP_ID
+      });
+      
       clearTimeout(uploadTimeout);
       if (!res.headersSent) {
         res.status(500).json({ error: String(uploadError?.message || uploadError) });
@@ -763,7 +1483,7 @@ app.post('/upload', async (req, res) => {
 });
 
 // Apply auth to all routes below this line
-// Public routes: /logs, /health, /auth/token, /update/check, /update/version, /upload
+// Public routes: /logs, /health, /auth/token, /update/check, /update/version, /upload, /dubbing, /tts
 app.use((req,res,next)=>{
   const publicPaths = [
     '/logs',
@@ -773,7 +1493,16 @@ app.use((req,res,next)=>{
     '/update/version',
     '/upload',
     '/debug',
-    '/costs'
+    '/costs',
+    '/dubbing',
+    '/tts/generate',
+    '/tts/voices',
+    '/recording/save',
+    '/recording/file',
+    '/extract-audio',
+    '/mp3/file',
+    '/wav/file',
+    '/waveform/file'
   ];
   if (publicPaths.includes(req.path)) {
     return next();
@@ -1077,7 +1806,7 @@ async function r2Upload(localPath){
   if (!(await safeExists(localPath))) throw new Error('file not found: ' + localPath);
   
   // Add timeout protection to prevent hanging on network issues
-  const timeoutMs = 180000; // 3 minute timeout for uploads (increased from 2 minutes)
+  const timeoutMs = 300000; // 5 minute timeout for uploads (aligned with dubbing timeout)
   const timeoutPromise = new Promise((_, reject) => 
     setTimeout(() => reject(new Error('R2 upload timeout')), timeoutMs)
   );
@@ -1128,6 +1857,10 @@ async function r2UploadInternal(localPath){
       expiresIn: 3600,
       signableHeaders: new Set(['host']),
       unsignableHeaders: new Set(['host'])
+    }).catch((signError) => {
+      slog('[r2] sign error', signError.message);
+      // If signing fails, return a direct URL (less secure but functional)
+      return `${R2_ENDPOINT_URL}/${R2_BUCKET}/${key}`;
     }); // 1 hour expiry
     
     slog('[r2] put ok', signedUrl);
@@ -1137,6 +1870,10 @@ async function r2UploadInternal(localPath){
     // Handle specific EPIPE errors gracefully
     if (error.message && error.message.includes('EPIPE')) {
       throw new Error('Upload connection lost. Please try again.');
+    }
+    // Handle HTML parsing errors from R2
+    if (error.message && error.message.includes('Expected closing tag')) {
+      throw new Error('R2 service error. Please check your R2 configuration and try again.');
     }
     throw error;
   }
@@ -1201,6 +1938,20 @@ app.post('/jobs', async (req, res) => {
     const vStat = await safeStat(videoPath); const aStat = await safeStat(audioPath);
     const overLimit = ((vStat && vStat.size > 20*1024*1024) || (aStat && aStat.size > 20*1024*1024));
     slog('[jobs:create]', 'model=', model||'lipsync-2-pro', 'overLimit=', overLimit, 'v=', vStat&&vStat.size, 'a=', aStat&&aStat.size, 'r2=', true, 'bucket=', R2_BUCKET);
+    
+    // Track job creation
+    track('sync_job_started', {
+      model: model || 'lipsync-2-pro',
+      temperature: temperature || 0.7,
+      activeSpeakerOnly: !!activeSpeakerOnly,
+      detectObstructions: !!detectObstructions,
+      hasVideoUrl: !!videoUrl,
+      hasAudioUrl: !!audioUrl,
+      videoSize: vStat?.size || 0,
+      audioSize: aStat?.size || 0,
+      overLimit: overLimit,
+      hostApp: APP_ID
+    });
     
     if (!apiKey) {
       return res.status(400).json({ error: 'API key required' });
@@ -1269,6 +2020,14 @@ app.post('/jobs', async (req, res) => {
         job.status = 'failed';
         job.error = String(e?.message||e);
         saveJobs();
+        
+        // Track job failure
+        track('sync_job_failed', {
+          jobId: job.id,
+          model: job.model,
+          error: String(e?.message||e),
+          hostApp: APP_ID
+        });
       }
     });
   }catch(e){ slog('[jobs:create] error', e && e.message ? e.message : String(e)); if (!res.headersSent) res.status(500).json({ error: String(e?.message||e) }); }
@@ -1524,6 +2283,17 @@ async function pollSyncJob(job){
       if (await downloadIfReady(job)){
         job.status = 'completed';
         saveJobs();
+        
+        // Track job success
+        const duration = Date.now() - new Date(job.createdAt).getTime();
+        track('sync_job_succeeded', {
+          jobId: job.id,
+          model: job.model,
+          duration: duration,
+          attempts: attempts,
+          hostApp: APP_ID
+        });
+        
         if (pollTimeout) clearTimeout(pollTimeout);
         return;
       }
@@ -1533,12 +2303,32 @@ async function pollSyncJob(job){
         job.status='failed'; 
         job.error='Timeout'; 
         saveJobs(); 
+        
+        // Track job timeout
+        track('sync_job_failed', {
+          jobId: job.id,
+          model: job.model,
+          error: 'Timeout',
+          attempts: attempts,
+          hostApp: APP_ID
+        });
+        
         if (pollTimeout) clearTimeout(pollTimeout);
       }
     }catch(e){ 
       job.status='failed'; 
       job.error=String(e?.message||e); 
       saveJobs(); 
+      
+      // Track job error
+      track('sync_job_failed', {
+        jobId: job.id,
+        model: job.model,
+        error: String(e?.message||e),
+        attempts: attempts,
+        hostApp: APP_ID
+      });
+      
       if (pollTimeout) clearTimeout(pollTimeout);
     }
   };

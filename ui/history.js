@@ -44,8 +44,12 @@ window.updateHistory = async function() {
   }
   
   // Determine if we already have visible items to avoid flashing UI
+  // Only count actual job cards, not loading or empty states
   let hasRenderedItems = false;
   try { hasRenderedItems = /history-card/.test(historyList.innerHTML); } catch(_){ hasRenderedItems = false; }
+  
+  const isShowingLoading = /history-loading-state/.test(historyList.innerHTML);
+  const isShowingEmpty = /history-empty-state/.test(historyList.innerHTML);
   
   // Check API key first
   const settingsStr = localStorage.getItem('syncSettings') || '{}';
@@ -85,7 +89,9 @@ window.updateHistory = async function() {
     `;
     // Initialize lucide icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
-      setTimeout(() => lucide.createIcons(), 10);
+      requestAnimationFrame(() => {
+  lucide.createIcons();
+});
     }
     return;
   }
@@ -115,7 +121,9 @@ window.updateHistory = async function() {
         `;
         // Initialize lucide icons
         if (typeof lucide !== 'undefined' && lucide.createIcons) {
-          setTimeout(() => lucide.createIcons(), 10);
+          requestAnimationFrame(() => {
+  lucide.createIcons();
+});
         }
       }
       try { if (window.nle && typeof window.nle.startBackend === 'function') { await window.nle.startBackend(); } } catch(_){ }
@@ -136,20 +144,26 @@ window.updateHistory = async function() {
       `;
       // Initialize lucide icons
       if (typeof lucide !== 'undefined' && lucide.createIcons) {
-        setTimeout(() => lucide.createIcons(), 10);
+        requestAnimationFrame(() => {
+  lucide.createIcons();
+});
       }
     }
     return;
   }
   
-  // Only show loading if list is empty to avoid visible refresh
-  if (!hasRenderedItems) {
-    historyList.innerHTML = '<div class="history-loading">loading generations...</div>';
-  }
-  
   // If we have an API key but no jobs loaded yet, load from server
   if (apiKey && (!window.jobs || window.jobs.length === 0) && !window.historyState.isLoadingFromServer) {
     console.log('[History] API key present but no jobs loaded, fetching from server...');
+    
+    // Always show loading state when fetching from server
+    historyList.innerHTML = `
+      <div class="history-loading-state">
+        ${loaderHTML({ size: 'lg', color: 'white' })}
+        <div class="history-loading-text">loading your generations...</div>
+      </div>
+    `;
+    
     window.historyState.isLoadingFromServer = true;
     try {
       if (typeof window.loadJobsFromServer === 'function') {
@@ -157,9 +171,8 @@ window.updateHistory = async function() {
       }
     } catch(e) {
       console.warn('[History] Failed to load jobs from server:', e);
-    } finally {
-      window.historyState.isLoadingFromServer = false;
     }
+    // Don't clear isLoadingFromServer here - let renderHistoryPage handle it
   }
   
   // Get jobs from global window.jobs array
@@ -189,6 +202,7 @@ window.updateHistory = async function() {
   
   window.historyState.allJobs = sorted;
   
+  // Only show empty state if we've actually loaded from server and still have no jobs
   if (sorted.length === 0) {
     console.log('[History] No jobs found, showing empty state');
     historyList.innerHTML = `
@@ -203,22 +217,27 @@ window.updateHistory = async function() {
     `;
     // Initialize lucide icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
-      setTimeout(() => lucide.createIcons(), 10);
+      requestAnimationFrame(() => {
+  lucide.createIcons();
+});
     }
     return;
   }
   
   // Only re-render if data actually changed or status changed
   if (!hasRenderedItems) {
-    // First time loading - clear and render
+    // First time loading - render directly (don't clear loading state yet)
+    console.log('[History] First time loading - rendering initial page');
     window.historyState.displayedCount = 0;
-    historyList.innerHTML = '';
-    renderHistoryPage();
+    await renderHistoryPage();
   } else if (dataChanged || statusChanged) {
     // Data changed - re-render
+    console.log('[History] Data changed - re-rendering from start');
     window.historyState.displayedCount = 0;
     historyList.innerHTML = '';
-    renderHistoryPage();
+    await renderHistoryPage();
+  } else {
+    console.log('[History] No changes detected - skipping render');
   }
   // Otherwise, do nothing - silent refresh (data hasn't changed)
 }
@@ -228,35 +247,50 @@ window.updateHistory = async function() {
  */
 window.renderHistoryPage = async function() {
   const historyList = document.getElementById('historyList');
-  if (!historyList || window.historyState.isLoading) return;
+  if (!historyList) {
+    console.warn('[History] historyList not found, cannot render');
+    return;
+  }
   
   const { allJobs, displayedCount, pageSize } = window.historyState;
   const endIndex = Math.min(displayedCount + pageSize, allJobs.length);
   const jobsToRender = allJobs.slice(displayedCount, endIndex);
   
-  // Render each job
+  console.log('[History] Rendering page:', {
+    startIndex: displayedCount,
+    endIndex: endIndex,
+    toRender: jobsToRender.length,
+    hasMore: endIndex < allJobs.length
+  });
+  
+  // Create cards in memory but DON'T add to DOM yet
+  const cardsFragment = document.createDocumentFragment();
+  const cardsToAdd = [];
+  
   jobsToRender.forEach(job => {
     const card = window.createHistoryCard(job);
-    historyList.appendChild(card);
+    card.style.opacity = '0';
+    card.style.transition = 'opacity 0.3s ease';
+    cardsToAdd.push(card);
+    cardsFragment.appendChild(card);
   });
   
   // Update state before thumbnail generation
   window.historyState.displayedCount = endIndex;
   window.historyState.hasMore = endIndex < allJobs.length;
   
-  console.log('[History] Rendered page:', {
-    startIndex: displayedCount,
-    endIndex: endIndex,
-    rendered: jobsToRender.length,
-    hasMore: window.historyState.hasMore
-  });
+  // Temporarily add cards to DOM for thumbnail generation (but keep them hidden)
+  // We need to add them for the thumbnail code to find the elements
+  const tempContainer = document.createElement('div');
+  tempContainer.style.position = 'absolute';
+  tempContainer.style.visibility = 'hidden';
+  tempContainer.style.pointerEvents = 'none';
+  tempContainer.style.height = '0';
+  tempContainer.style.overflow = 'hidden';
+  cardsToAdd.forEach(card => tempContainer.appendChild(card));
+  historyList.appendChild(tempContainer);
   
-  // Initialize lucide icons for new cards
-  if (typeof lucide !== 'undefined' && lucide.createIcons) {
-    setTimeout(() => lucide.createIcons(), 10);
-  }
-  
-  // Generate thumbnails for this batch with timeout
+  // Generate thumbnails while cards are in hidden container
   if (typeof window.generateThumbnailsForJobs === 'function') {
     const thumbnailPromise = window.generateThumbnailsForJobs(jobsToRender).catch(e => {
       console.error('[History] Thumbnail generation error:', e);
@@ -265,14 +299,84 @@ window.renderHistoryPage = async function() {
     // Wait for thumbnails with max 5 second timeout
     const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000));
     await Promise.race([thumbnailPromise, timeoutPromise]);
+    console.log('[History] Thumbnails ready, adding cards to DOM');
+  }
+  
+  // Handle loading state fade-out and history fade-in
+  const isShowingLoading = /history-loading-state/.test(historyList.innerHTML);
+  if (isShowingLoading) {
+    // Fade out loading state over 1 second
+    const loadingElement = historyList.querySelector('.history-loading-state');
+    if (loadingElement) {
+      loadingElement.style.transition = 'opacity 1s ease-out';
+      loadingElement.style.opacity = '0';
+      
+      // After fade-out completes, clear and add cards
+      setTimeout(() => {
+        historyList.innerHTML = '';
+        
+        // Move cards from temp container to actual DOM
+        cardsToAdd.forEach(card => {
+          historyList.appendChild(card);
+        });
+        
+        // Remove temp container
+        tempContainer.remove();
+        
+        // Fade in all the cards over 1 second
+        setTimeout(() => {
+          cardsToAdd.forEach(card => {
+            card.style.transition = 'opacity 1s ease-in';
+            card.style.opacity = '1';
+          });
+        }, 10);
+      }, 1000);
+    } else {
+      // Fallback if loading element not found
+      historyList.innerHTML = '';
+      cardsToAdd.forEach(card => {
+        historyList.appendChild(card);
+      });
+      tempContainer.remove();
+      setTimeout(() => {
+        cardsToAdd.forEach(card => {
+          card.style.opacity = '1';
+        });
+      }, 10);
+    }
+  } else {
+    // No loading state - add cards directly
+    cardsToAdd.forEach(card => {
+      historyList.appendChild(card);
+    });
+    tempContainer.remove();
+    setTimeout(() => {
+      cardsToAdd.forEach(card => {
+        card.style.opacity = '1';
+      });
+    }, 10);
+  }
+  
+  // Initialize lucide icons for new cards
+  if (typeof lucide !== 'undefined' && lucide.createIcons) {
+    // Use requestAnimationFrame for more reliable timing
+    requestAnimationFrame(() => {
+      lucide.createIcons();
+    });
   }
   
   // Add loader if more items available (after thumbnails are ready)
   if (window.historyState.hasMore) {
-    window.addInfiniteScrollLoader();
+    // Only add loader if we're showing the 10th item (or more)
+    if (window.historyState.displayedCount >= 10) {
+      window.addInfiniteScrollLoader();
+    }
   } else {
     window.removeInfiniteScrollLoader();
   }
+  
+  // Clear loading from server flag after rendering is complete
+  window.historyState.isLoadingFromServer = false;
 }
 
 /**
@@ -301,14 +405,11 @@ window.createHistoryCard = function(job) {
   card.innerHTML = `
     <div class="history-card-inner">
       <div class="history-thumbnail-wrapper">
-        ${isProcessing || isPending ? `
+        ${(isProcessing || isPending) && !window.historyState.isLoadingFromServer ? `
           <div class="history-thumbnail-loader">
             ${loaderHTML({ size: 'sm', color: 'white' })}
           </div>
         ` : (isCompleted && (job.outputPath || job.videoPath)) ? `
-          <div class="history-thumbnail-loader">
-            ${loaderHTML({ size: 'sm', color: 'white' })}
-          </div>
           <img src="" alt="Thumbnail" class="history-thumbnail" data-job-id="${job.id}" style="opacity: 0;" />
         ` : ''}
         ${isPending ? `
@@ -506,8 +607,12 @@ window.addInfiniteScrollLoader = function() {
   
   historyList.appendChild(loaderDiv);
   
-  // Set up intersection observer
-  setupInfiniteScroll();
+  console.log('[History] Added infinite scroll loader at bottom');
+  
+  // Set up intersection observer with a small delay to ensure DOM is ready
+  setTimeout(() => {
+    setupInfiniteScroll();
+  }, 50);
 }
 
 /**
@@ -529,16 +634,22 @@ window.removeInfiniteScrollLoader = function() {
  */
 function setupInfiniteScroll() {
   const loader = document.getElementById('historyInfiniteLoader');
-  if (!loader) return;
+  if (!loader) {
+    console.warn('[History] Cannot setup infinite scroll - loader not found');
+    return;
+  }
+  
+  console.log('[History] Setting up intersection observer for loader');
   
   // Clean up existing observer
   if (window.historyScrollObserver) {
     window.historyScrollObserver.disconnect();
+    console.log('[History] Disconnected previous observer');
   }
   
   // Create new observer
   window.historyScrollObserver = new IntersectionObserver((entries) => {
-    entries.forEach(async (entry) => {
+    for (const entry of entries) {
       if (entry.isIntersecting && !window.historyState.isLoading && window.historyState.hasMore) {
         console.log('[History] Loading more items...', {
           displayedCount: window.historyState.displayedCount,
@@ -548,17 +659,29 @@ function setupInfiniteScroll() {
         
         // Mark as loading to prevent concurrent loads
         window.historyState.isLoading = true;
+        console.log('[History] Loader intersected! Starting to load next batch');
         
         // Keep loader visible while loading - it will be replaced when renderHistoryPage completes
-        // Load next page - this will wait for thumbnails to complete (max 5s)
-        if (typeof window.renderHistoryPage === 'function') {
-          await window.renderHistoryPage();
-        }
+        // Load next page asynchronously - this will wait for thumbnails to complete (max 5s)
+        (async () => {
+          try {
+            if (typeof window.renderHistoryPage === 'function') {
+              await window.renderHistoryPage();
+              console.log('[History] Finished rendering next batch');
+            }
+          } catch (e) {
+            console.error('[History] Error rendering page:', e);
+          } finally {
+            // Mark loading as complete
+            window.historyState.isLoading = false;
+            console.log('[History] Loading complete, ready for next batch');
+          }
+        })();
         
-        // Mark loading as complete
-        window.historyState.isLoading = false;
+        // Break after first intersecting entry to avoid multiple triggers
+        break;
       }
-    });
+    }
   }, {
     root: null,
     rootMargin: '100px',
@@ -566,6 +689,7 @@ function setupInfiniteScroll() {
   });
   
   window.historyScrollObserver.observe(loader);
+  console.log('[History] Now observing loader element');
 }
 
 /**
@@ -640,7 +764,7 @@ window.copyOutputLink = function(jobId) {
 window.redoGeneration = async function(jobId) {
   const job = jobs.find(j => String(j.id) === String(jobId));
   if (!job) {
-    showToast('Job not found', 'error');
+    showToast('job not found', 'error');
     return;
   }
   
